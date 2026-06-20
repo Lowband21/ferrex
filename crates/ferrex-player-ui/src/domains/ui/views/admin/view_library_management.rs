@@ -12,15 +12,22 @@ use crate::{
     infra::theme::accent,
     state::State,
 };
+use chrono::{DateTime, Utc};
 use ferrex_core::player_prelude::{
-    ArchivedLibraryType, Library, LibraryId, ScanLifecycleStatus,
-    ScanPathReasonCategory, ScanPathReasonDetail, ScanRunMode, ScanSnapshotDto,
+    ArchivedLibraryType, Library, LibraryId, ScanFailureDto,
+    ScanLifecycleStatus, ScanRecoveryRequest, ScanRunDto, ScanRunEventDto,
+    ScanRunMode, ScannerHealthResponse,
+};
+use ferrex_player_library::scan_dashboard::{
+    ScanDashboardLoadState, scan_failure_display_text, scan_status_display_text,
 };
 #[cfg(feature = "demo")]
 use iced::widget::text_input;
 use iced::{
     Color, Element, Length,
-    widget::{Space, button, column, container, row, scrollable, text},
+    widget::{
+        Space, button, column, container, progress_bar, row, scrollable, text,
+    },
 };
 use lucide_icons::Icon;
 use rkyv::{deserialize, rancor::Error};
@@ -317,370 +324,101 @@ fn create_library_card<'a>(
     }
 }
 
-fn active_scan_panel_snapshots(state: &State) -> Vec<ScanSnapshotDto> {
-    let mut scans: Vec<ScanSnapshotDto> = state
-        .domains
-        .library
-        .state
-        .active_scans
-        .values()
-        .cloned()
-        .collect();
-    scans.sort_by_key(|snapshot| snapshot.started_at);
-    scans
-}
-
 fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
-    let scans = active_scan_panel_snapshots(state);
+    let dashboard = &state.domains.library.state.scan_dashboard;
+    let permissions = state.permission_checker();
+    let can_scan_libraries = permissions.can_scan_libraries();
 
-    if scans.is_empty() {
-        if !state.domains.library.state.latest_progress.is_empty() {
-            log::warn!(
-                "Active scans map empty but {:} progress frames buffered; scan UI may be out of sync",
-                state.domains.library.state.latest_progress.len()
-            );
-        }
-    } else {
-        log::trace!(
-            "Rendering active scans panel with {} entries",
-            scans.len()
-        );
-    }
+    let refresh_label = match dashboard.overview_state {
+        ScanDashboardLoadState::Loading => "Refreshing…",
+        _ => "Refresh diagnostics",
+    };
 
     let header = row![
         row![
             icon_text(Icon::Activity),
-            text("Scanner Status")
-                .size(20)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            column![
+                text("Scanner diagnostics")
+                    .size(20)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                text("Health, progress, history, and safe recovery controls")
+                    .size(13)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            ]
+            .spacing(2),
         ]
         .spacing(10)
         .align_y(iced::Alignment::Center),
         Space::new().width(Length::Fill),
-        text(scan_panel_count_label(&scans))
-            .size(14)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        button(refresh_label)
+            .on_press(SettingsUiMessage::RefreshScanDashboard.into())
+            .style(theme::Button::Secondary.style()),
     ]
     .align_y(iced::Alignment::Center);
 
-    let mut items = column![header].spacing(12);
-    // Metrics panel summary
-    if let Some(metrics) = &state.domains.library.state.scan_metrics {
-        let q = &metrics.queue_depths;
-        let summary = row![
-            text(format!(
-                "Queue depths — scan:{} analyze:{} metadata:{} index:{} images:{}",
-                q.folder_scan, q.analyze, q.metadata, q.index, q.image_fetch
-            ))
-            .size(12)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::new().width(Length::Fill),
-            button("Refresh Metrics")
-                .on_press(SettingsUiMessage::FetchScanMetrics.into())
-                .style(theme::Button::Secondary.style())
-        ]
-        .align_y(iced::Alignment::Center);
+    let mut items = column![header].spacing(14);
 
-        items = items.push(
-            container(summary)
-                .padding([8, 12])
-                .style(theme::Container::Default.style()),
-        );
-    } else {
-        items = items.push(
-            container(
-                row![
-                    text("Scanner metrics not loaded")
-                        .size(12)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    Space::new().width(Length::Fill),
-                    button("Load Metrics")
-                        .on_press(SettingsUiMessage::FetchScanMetrics.into())
-                        .style(theme::Button::Secondary.style()),
-                ]
-                .align_y(iced::Alignment::Center),
-            )
-            .padding([8, 12])
-            .style(theme::Container::Default.style()),
-        );
-    }
-    if scans.is_empty() {
-        items = items.push(
-            container(
-                row![
-                    text("No active scans at the moment")
-                        .size(14)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    Space::new().width(Length::Fill),
-                    button("Start Scan")
-                        .on_press(UiMessage::NoOp)
-                        .style(theme::Button::Secondary.style()),
-                ]
-                .align_y(iced::Alignment::Center),
-            )
-            .padding([12, 16])
-            .style(theme::Container::Card.style()),
-        );
-    } else {
-        for snapshot in scans {
-            let progress = state
-                .domains
-                .library
-                .state
-                .latest_progress
-                .get(&snapshot.scan_id)
-                .cloned();
-
-            let reason_details = progress
-                .as_ref()
-                .map(|event| event.reason_details.as_slice())
-                .filter(|details| !details.is_empty())
-                .unwrap_or(snapshot.reason_details.as_slice());
-
-            let (
-                completed_items,
-                total_items,
-                validated_items,
-                known_unchanged_items,
-                skipped_items,
-                needs_attention_items,
-                retrying_items,
-                current_path,
-            ) = if let Some(event) = &progress {
-                (
-                    event.completed_items,
-                    event.total_items,
-                    event.validated_items,
-                    event.known_unchanged_items,
-                    event.skipped_items,
-                    event.needs_attention_items,
-                    event.retrying_items,
-                    event
-                        .current_path
-                        .clone()
-                        .or(snapshot.current_path.clone()),
-                )
-            } else {
-                (
-                    snapshot.completed_items,
-                    snapshot.total_items,
-                    snapshot.validated_items,
-                    snapshot.known_unchanged_items,
-                    snapshot.skipped_items,
-                    snapshot.needs_attention_items,
-                    snapshot.retrying_items,
-                    snapshot.current_path.clone(),
-                )
-            };
-
-            let percent = if total_items > 0 {
-                (completed_items as f32 / total_items as f32 * 100.0).round()
-            } else {
-                0.0
-            };
-
-            let status_label = scan_status_label(
-                &snapshot,
-                reason_details,
-                skipped_items,
-                needs_attention_items,
-                retrying_items,
-            );
-
-            let library_name = state
-                .domains
-                .ui
-                .state
-                .repo_accessor
-                .get_archived_library_yoke(snapshot.library_id.as_uuid())
-                .ok()
-                .and_then(|opt| opt)
-                .map(|yoke| yoke.get().name.to_string())
-                .unwrap_or_else(|| snapshot.library_id.to_string());
-
-            let status_badge =
-                container(text(status_label.0).size(13).color(status_label.1))
-                    .padding([4, 8])
-                    .style(theme::Container::HeaderAccent.style());
-
-            let path_text = current_path
-                .as_deref()
-                .map(|path| format!("Current: {}", truncate_path(path)))
-                .unwrap_or_else(|| "Awaiting items".to_string());
-
-            let stats_row = row![
-                text(format!("{completed_items}/{total_items} items"))
-                    .size(13)
-                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                Space::new().width(20),
-                text(format!("Validated: {validated_items}"))
-                    .size(13)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::new().width(20),
-                text(format!("Unchanged: {known_unchanged_items}"))
-                    .size(13)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::new().width(20),
-                text(format!("Skipped: {skipped_items}"))
-                    .size(13)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::new().width(20),
-                text(format!("Retrying: {retrying_items}"))
-                    .size(13)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::new().width(20),
-                text(format!("Needs attention: {needs_attention_items}"))
-                    .size(13)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::new().width(20),
-                text(path_text)
-                    .size(13)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            ]
-            .align_y(iced::Alignment::Center);
-
-            let progress_bar = row![
-                container(
-                    container(Space::new().width(Length::Fixed(percent * 3.0)))
-                        .height(6)
-                        .style(theme::Container::ProgressBar.style()),
-                )
-                .width(Length::FillPortion(3))
-                .height(6)
-                .style(theme::Container::ProgressBarBackground.style()),
-                Space::new().width(10),
-                text(format!("{percent:.0}%"))
-                    .size(13)
-                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            ]
-            .align_y(iced::Alignment::Center);
-
-            let mut actions = row![].spacing(8);
-            match snapshot.status {
-                ScanLifecycleStatus::Running => {
-                    actions = actions.push(
-                        button("Pause")
-                            .on_press(
-                                SettingsUiMessage::PauseLibraryScan(
-                                    snapshot.library_id,
-                                    snapshot.scan_id,
-                                )
-                                .into(),
-                            )
-                            .style(theme::Button::Secondary.style()),
-                    );
-                    actions = actions.push(
-                        button("Cancel")
-                            .on_press(
-                                SettingsUiMessage::CancelLibraryScan(
-                                    snapshot.library_id,
-                                    snapshot.scan_id,
-                                )
-                                .into(),
-                            )
-                            .style(theme::Button::Destructive.style()),
-                    );
-                }
-                ScanLifecycleStatus::Paused => {
-                    actions = actions.push(
-                        button("Resume")
-                            .on_press(
-                                SettingsUiMessage::ResumeLibraryScan(
-                                    snapshot.library_id,
-                                    snapshot.scan_id,
-                                )
-                                .into(),
-                            )
-                            .style(theme::Button::Primary.style()),
-                    );
-                    actions = actions.push(
-                        button("Cancel")
-                            .on_press(
-                                SettingsUiMessage::CancelLibraryScan(
-                                    snapshot.library_id,
-                                    snapshot.scan_id,
-                                )
-                                .into(),
-                            )
-                            .style(theme::Button::Destructive.style()),
-                    );
-                }
-                ScanLifecycleStatus::Pending => {
-                    actions = actions.push(
-                        button("Cancel")
-                            .on_press(
-                                SettingsUiMessage::CancelLibraryScan(
-                                    snapshot.library_id,
-                                    snapshot.scan_id,
-                                )
-                                .into(),
-                            )
-                            .style(theme::Button::Destructive.style()),
-                    );
-                }
-                ScanLifecycleStatus::Completed
-                | ScanLifecycleStatus::Failed
-                | ScanLifecycleStatus::Canceled => {}
-            }
-
-            if scan_has_rescan_recovery(
-                &snapshot,
-                reason_details,
-                skipped_items,
-                needs_attention_items,
-            ) {
-                actions = actions.push(
-                    button("Rescan library")
-                        .on_press(
-                            SettingsUiMessage::ScanLibrary(snapshot.library_id)
-                                .into(),
-                        )
-                        .style(theme::Button::Primary.style()),
-                );
-            }
-
-            let mut scan_details = column![
-                row![
-                    text(library_name)
-                        .size(16)
-                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                    Space::new().width(Length::Fixed(12.0)),
-                    status_badge,
-                ]
-                .align_y(iced::Alignment::Center)
-                .spacing(8),
-                Space::new().height(8),
-                progress_bar,
-                Space::new().height(6),
-                stats_row,
-            ]
-            .spacing(6)
-            .width(Length::Fill);
-
-            if let Some(copy) = scan_recovery_copy(
-                &snapshot,
-                reason_details,
-                skipped_items,
-                needs_attention_items,
-            ) {
-                scan_details = scan_details.push(
-                    text(copy).size(12).color(theme::MediaServerTheme::WARNING),
-                );
-            }
-
-            if let Some(reason_details) = reason_details_panel(reason_details) {
-                scan_details = scan_details.push(reason_details);
-            }
-
-            items = items.push(
-                container(
-                    row![scan_details, actions]
-                        .align_y(iced::Alignment::Center),
-                )
-                .padding(16)
-                .style(theme::Container::Card.style()),
-            );
+    match &dashboard.overview_state {
+        ScanDashboardLoadState::Idle => {
+            items = items.push(diagnostics_notice_card(
+                Icon::CircleGauge,
+                "Diagnostics have not loaded yet",
+                "Load scanner diagnostics to see queue depth, watcher health, recent scans, and recovery options.",
+                Some((
+                    "Load diagnostics",
+                    SettingsUiMessage::RefreshScanDashboard,
+                )),
+            ));
         }
+        ScanDashboardLoadState::Loading if dashboard.health.is_none() => {
+            items = items.push(diagnostics_notice_card(
+                Icon::RefreshCw,
+                "Loading scanner diagnostics…",
+                "Fetching scanner health, active scans, and recent scan history.",
+                None,
+            ));
+        }
+        ScanDashboardLoadState::Failed { error }
+            if dashboard.health.is_none() =>
+        {
+            items = items.push(diagnostics_error_card(
+                "Scanner diagnostics could not be loaded",
+                error,
+            ));
+        }
+        ScanDashboardLoadState::Failed { error } => {
+            items = items
+                .push(diagnostics_error_card("Latest refresh failed", error));
+        }
+        ScanDashboardLoadState::Loading | ScanDashboardLoadState::Loaded => {}
+    }
+
+    if let Some(health) = &dashboard.health {
+        items = items.push(scanner_health_card(health));
+    }
+
+    items = items.push(active_and_latest_runs_panel(
+        &dashboard.active_runs,
+        dashboard.recent_runs.first(),
+        can_scan_libraries,
+    ));
+
+    items = items.push(recent_run_history_panel(
+        &dashboard.recent_runs,
+        dashboard.runs_page.as_ref(),
+        dashboard.selected_run_id,
+    ));
+
+    if dashboard.selected_run_id.is_some() {
+        items =
+            items.push(selected_run_detail_panel(state, can_scan_libraries));
+    } else if !dashboard.recent_runs.is_empty() {
+        items = items.push(diagnostics_notice_card(
+            Icon::ListTree,
+            "Select a run for timeline details",
+            "Use Details on any scan run to view ordered events, terminal summary, failure summaries, and copyable IDs.",
+            None,
+        ));
     }
 
     container(items)
@@ -689,252 +427,1315 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
         .into()
 }
 
-fn scan_panel_count_label(scans: &[ScanSnapshotDto]) -> String {
-    let running = scans
-        .iter()
-        .filter(|scan| {
-            matches!(
-                scan.status,
-                ScanLifecycleStatus::Pending
-                    | ScanLifecycleStatus::Running
-                    | ScanLifecycleStatus::Paused
-            )
-        })
-        .count();
-    let needs_attention = scans
-        .iter()
-        .filter(|scan| {
-            matches!(
-                scan.status,
-                ScanLifecycleStatus::Completed | ScanLifecycleStatus::Failed
-            ) && scan.needs_attention_items.saturating_add(scan.failed_items)
-                > 0
-        })
-        .count();
-    let skipped = scans
-        .iter()
-        .filter(|scan| {
-            matches!(
-                scan.status,
-                ScanLifecycleStatus::Completed | ScanLifecycleStatus::Failed
-            ) && scan.needs_attention_items == 0
-                && scan.failed_items == 0
-                && scan.skipped_items > 0
-        })
-        .count();
-
-    if needs_attention > 0 {
-        format!("{running} running • {needs_attention} needs attention")
-    } else if skipped > 0 {
-        format!("{running} running • {skipped} skipped")
-    } else {
-        format!("{running} running")
-    }
-}
-
-fn scan_status_label(
-    snapshot: &ScanSnapshotDto,
-    reason_details: &[ScanPathReasonDetail],
-    skipped_items: u64,
-    needs_attention_items: u64,
-    retrying_items: u64,
-) -> (&'static str, Color) {
-    if matches!(snapshot.status, ScanLifecycleStatus::Failed)
-        && needs_attention_items > 0
-    {
-        return ("Needs attention", theme::MediaServerTheme::ERROR);
-    }
-    if scan_has_no_media_found(reason_details) {
-        return ("No media found", theme::MediaServerTheme::WARNING);
-    }
-    if matches!(snapshot.status, ScanLifecycleStatus::Failed)
-        && skipped_items > 0
-    {
-        return ("Skipped", theme::MediaServerTheme::WARNING);
-    }
-    if retrying_items > 0
-        && matches!(snapshot.status, ScanLifecycleStatus::Running)
-    {
-        return ("Retrying", accent());
-    }
-
-    match snapshot.status {
-        ScanLifecycleStatus::Pending => {
-            ("Pending", theme::MediaServerTheme::TEXT_SECONDARY)
-        }
-        ScanLifecycleStatus::Running => ("Running", accent()),
-        ScanLifecycleStatus::Paused => {
-            ("Paused", theme::MediaServerTheme::WARNING)
-        }
-        ScanLifecycleStatus::Completed => {
-            ("Completed", theme::MediaServerTheme::SUCCESS)
-        }
-        ScanLifecycleStatus::Failed => {
-            ("Failed", theme::MediaServerTheme::ERROR)
-        }
-        ScanLifecycleStatus::Canceled => {
-            ("Canceled", theme::MediaServerTheme::TEXT_SECONDARY)
-        }
-    }
-}
-
-fn scan_has_rescan_recovery(
-    snapshot: &ScanSnapshotDto,
-    reason_details: &[ScanPathReasonDetail],
-    skipped_items: u64,
-    needs_attention_items: u64,
-) -> bool {
-    matches!(
-        snapshot.status,
-        ScanLifecycleStatus::Completed | ScanLifecycleStatus::Failed
-    ) && (needs_attention_items > 0
-        || reason_details.iter().any(reason_detail_needs_rescan)
-        || (matches!(snapshot.status, ScanLifecycleStatus::Failed)
-            && skipped_items > 0)
-        || (skipped_items > 0 && scan_has_no_media_found(reason_details)))
-}
-
-fn scan_recovery_copy(
-    snapshot: &ScanSnapshotDto,
-    reason_details: &[ScanPathReasonDetail],
-    skipped_items: u64,
-    needs_attention_items: u64,
-) -> Option<&'static str> {
-    if !scan_has_rescan_recovery(
-        snapshot,
-        reason_details,
-        skipped_items,
-        needs_attention_items,
-    ) {
-        return None;
-    }
-
-    if needs_attention_items > 0 {
-        Some(
-            "Review the paths below, then rescan this library. Per-path retry is not available yet.",
-        )
-    } else if scan_has_no_media_found(reason_details) {
-        Some(
-            "Add supported media or update the folder, then rescan this library.",
-        )
-    } else {
-        Some("Skipped paths can be checked again with a library rescan.")
-    }
-}
-
-fn reason_details_panel(
-    reason_details: &[ScanPathReasonDetail],
-) -> Option<Element<'static, UiMessage>> {
-    if reason_details.is_empty() {
-        return None;
-    }
-
-    let mut details = column![].spacing(4);
-    for detail in reason_details.iter().take(3) {
-        details = details.push(
-            text(reason_detail_copy(detail))
-                .size(12)
+fn diagnostics_notice_card(
+    icon: Icon,
+    title: &'static str,
+    message: &'static str,
+    action: Option<(&'static str, SettingsUiMessage)>,
+) -> Element<'static, UiMessage> {
+    let mut content = row![
+        icon_text(icon),
+        column![
+            text(title)
+                .size(15)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            text(message)
+                .size(13)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        ]
+        .spacing(4)
+        .width(Length::Fill),
+    ]
+    .spacing(12)
+    .align_y(iced::Alignment::Center);
+
+    if let Some((label, message)) = action {
+        content = content.push(
+            button(label)
+                .on_press(message.into())
+                .style(theme::Button::Secondary.style()),
         );
     }
 
-    if reason_details.len() > 3 {
-        details = details.push(
-            text(format!("+{} more path notes", reason_details.len() - 3))
+    container(content)
+        .padding([12, 16])
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+        .into()
+}
+
+fn diagnostics_error_card(
+    title: &'static str,
+    error: &str,
+) -> Element<'static, UiMessage> {
+    container(
+        row![
+            icon_text(Icon::OctagonAlert),
+            column![
+                text(title).size(15).color(theme::MediaServerTheme::ERROR),
+                text(error.to_string())
+                    .size(13)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            ]
+            .spacing(4)
+            .width(Length::Fill),
+            button("Retry")
+                .on_press(SettingsUiMessage::RefreshScanDashboard.into())
+                .style(theme::Button::Secondary.style()),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([12, 16])
+    .style(theme::Container::ErrorBox.style())
+    .width(Length::Fill)
+    .into()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HealthSeverity {
+    Healthy,
+    Active,
+    NeedsAttention,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScannerHealthCopy {
+    label: &'static str,
+    message: String,
+    severity: HealthSeverity,
+}
+
+fn scanner_health_copy(health: &ScannerHealthResponse) -> ScannerHealthCopy {
+    let incremental = &health.incremental;
+    let queue_total = queue_depth_total(health);
+    let watcher_needs_attention = incremental.watcher_error_count > 0
+        || incremental.overflow_events > 0
+        || incremental.stale_cursor_libraries > 0
+        || incremental.stale_cursors > 0
+        || incremental.last_watcher_error.is_some();
+    let watcher_shortfall = incremental.watch_enabled_libraries > 0
+        && incremental
+            .active_watch_libraries
+            .saturating_add(incremental.initializing_watch_libraries)
+            < incremental.watch_enabled_libraries;
+
+    if health.failed_runs > 0 || watcher_needs_attention || watcher_shortfall {
+        ScannerHealthCopy {
+            label: "Needs attention",
+            message: "Scanner history or watcher health has items that may need operator review. No media or library data is changed from this panel."
+                .to_string(),
+            severity: HealthSeverity::NeedsAttention,
+        }
+    } else if health.active_scans > 0
+        || queue_total > 0
+        || incremental.replay_pending_events > 0
+    {
+        ScannerHealthCopy {
+            label: "Active",
+            message: "Scanner work is in progress or queued.".to_string(),
+            severity: HealthSeverity::Active,
+        }
+    } else {
+        ScannerHealthCopy {
+            label: "Healthy",
+            message: "Scanner queues are clear and watchers report healthy."
+                .to_string(),
+            severity: HealthSeverity::Healthy,
+        }
+    }
+}
+
+fn scanner_health_card(
+    health: &ScannerHealthResponse,
+) -> Element<'_, UiMessage> {
+    let copy = scanner_health_copy(health);
+    let status_color = health_severity_color(copy.severity);
+    let incremental = &health.incremental;
+
+    let summary = row![
+        metric_chip("Scanner health", copy.label, status_color),
+        metric_chip("Active scans", health.active_scans.to_string(), accent(),),
+        metric_chip(
+            "Recent runs retained",
+            health.retained_runs.to_string(),
+            theme::MediaServerTheme::TEXT_PRIMARY,
+        ),
+        metric_chip(
+            "Failed after retries",
+            health.failed_runs.to_string(),
+            if health.failed_runs > 0 {
+                theme::MediaServerTheme::WARNING
+            } else {
+                theme::MediaServerTheme::TEXT_PRIMARY
+            },
+        ),
+    ]
+    .spacing(12)
+    .align_y(iced::Alignment::Center);
+
+    let queues = row![
+        metric_chip(
+            "Folder queue",
+            health.queue_depths.folder_scan.to_string(),
+            queue_depth_color(health.queue_depths.folder_scan),
+        ),
+        metric_chip(
+            "Analyze",
+            health.queue_depths.analyze.to_string(),
+            queue_depth_color(health.queue_depths.analyze),
+        ),
+        metric_chip(
+            "Metadata",
+            health.queue_depths.metadata.to_string(),
+            queue_depth_color(health.queue_depths.metadata),
+        ),
+        metric_chip(
+            "Index",
+            health.queue_depths.index.to_string(),
+            queue_depth_color(health.queue_depths.index),
+        ),
+        metric_chip(
+            "Images",
+            health.queue_depths.image_fetch.to_string(),
+            queue_depth_color(health.queue_depths.image_fetch),
+        ),
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center);
+
+    let watch_status = watcher_status_label(health);
+    let cursor_status = cursor_status_label(health);
+
+    let mut watch_details = column![
+        text(copy.message)
+            .size(13)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        row![
+            metric_chip(
+                "Watch health",
+                watch_status,
+                if scanner_health_copy(health).severity
+                    == HealthSeverity::NeedsAttention
+                {
+                    theme::MediaServerTheme::WARNING
+                } else {
+                    theme::MediaServerTheme::SUCCESS
+                },
+            ),
+            metric_chip(
+                "Watch libraries",
+                format!(
+                    "{}/{} active",
+                    incremental.active_watch_libraries,
+                    incremental.watch_enabled_libraries
+                ),
+                theme::MediaServerTheme::TEXT_PRIMARY,
+            ),
+            metric_chip(
+                "Watch roots",
+                format!(
+                    "{}/{} active",
+                    incremental.active_watch_roots,
+                    incremental.registered_watch_roots
+                ),
+                theme::MediaServerTheme::TEXT_PRIMARY,
+            ),
+            metric_chip(
+                "Cursor health",
+                cursor_status,
+                if incremental.stale_cursors > 0
+                    || incremental.replay_pending_events > 0
+                {
+                    theme::MediaServerTheme::WARNING
+                } else {
+                    theme::MediaServerTheme::SUCCESS
+                },
+            ),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(10);
+
+    if let Some(error) = &incremental.last_watcher_error {
+        watch_details = watch_details.push(
+            text(format!("Last watcher issue: {}", truncate_path(error)))
+                .size(12)
+                .color(theme::MediaServerTheme::WARNING),
+        );
+    }
+
+    container(
+        column![
+            row![
+                icon_text(Icon::HeartPulse),
+                text("Scanner health")
+                    .size(18)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+            summary,
+            text("Queue depths")
+                .size(14)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            queues,
+            watch_details,
+        ]
+        .spacing(14),
+    )
+    .padding(16)
+    .style(theme::Container::Card.style())
+    .width(Length::Fill)
+    .into()
+}
+
+fn metric_chip<'a>(
+    label: &'a str,
+    value: impl Into<String>,
+    color: Color,
+) -> Element<'a, UiMessage> {
+    container(
+        column![
+            text(label)
+                .size(11)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+            text(value.into()).size(16).color(color),
+        ]
+        .spacing(2),
+    )
+    .padding([8, 10])
+    .style(theme::Container::HeaderAccent.style())
+    .into()
+}
+
+fn active_and_latest_runs_panel<'a>(
+    active_runs: &'a [ScanRunDto],
+    latest_run: Option<&'a ScanRunDto>,
+    can_scan_libraries: bool,
+) -> Element<'a, UiMessage> {
+    let mut content = column![section_heading(
+        Icon::Radar,
+        "Active / latest run",
+        if active_runs.is_empty() {
+            "No active scan is running right now."
+        } else {
+            "Live scanner progress and safe controls."
+        },
+    )]
+    .spacing(12);
+
+    if active_runs.is_empty() {
+        if let Some(run) = latest_run {
+            content = content.push(scan_run_card(
+                run,
+                RunCardMode::Latest,
+                can_scan_libraries,
+                false,
+            ));
+        } else {
+            content = content.push(
+                container(
+                    column![
+                        text("No scan history yet")
+                            .size(15)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        text("Start a scan from a library card below to populate diagnostics.")
+                            .size(13)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(6),
+                )
+                .padding([12, 16])
+                .style(theme::Container::Card.style()),
+            );
+        }
+    } else {
+        let mut runs: Vec<&ScanRunDto> = active_runs.iter().collect();
+        runs.sort_by(|a, b| b.last_event_at.cmp(&a.last_event_at));
+        for run in runs.into_iter().take(4) {
+            content = content.push(scan_run_card(
+                run,
+                RunCardMode::Active,
+                can_scan_libraries,
+                false,
+            ));
+        }
+    }
+
+    container(content)
+        .padding(16)
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+        .into()
+}
+
+fn recent_run_history_panel<'a>(
+    recent_runs: &'a [ScanRunDto],
+    page: Option<&ferrex_core::player_prelude::ScanPageMeta>,
+    selected_run_id: Option<Uuid>,
+) -> Element<'a, UiMessage> {
+    let page_label = page
+        .map(|page| {
+            format!("Showing {} of {} retained runs", page.count, page.total)
+        })
+        .unwrap_or_else(|| "Recent durable run history".to_string());
+
+    let mut content = column![section_heading(
+        Icon::History,
+        "Recent scan history",
+        &page_label,
+    )]
+    .spacing(12);
+
+    if recent_runs.is_empty() {
+        content = content.push(
+            container(
+                column![
+                    text("No recent scan runs")
+                        .size(15)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    text("Completed and failed scan runs will appear here once scanner history is available.")
+                        .size(13)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                ]
+                .spacing(6),
+            )
+            .padding([12, 16])
+            .style(theme::Container::Card.style()),
+        );
+    } else {
+        for run in recent_runs.iter().take(8) {
+            content = content.push(scan_run_card(
+                run,
+                RunCardMode::History,
+                false,
+                selected_run_id == Some(run.scan_id),
+            ));
+        }
+    }
+
+    container(content)
+        .padding(16)
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+        .into()
+}
+
+fn selected_run_detail_panel(
+    state: &State,
+    can_scan_libraries: bool,
+) -> Element<'_, UiMessage> {
+    let dashboard = &state.domains.library.state.scan_dashboard;
+    let selected_id = dashboard.selected_run_id;
+
+    let mut content = column![section_heading(
+        Icon::ListTree,
+        "Run details",
+        "Timeline, terminal summary, failure summaries, and copyable IDs.",
+    )]
+    .spacing(14);
+
+    if let Some(run) = &dashboard.selected_run {
+        content = content.push(run_identity_panel(run));
+        content = content.push(terminal_summary_panel(
+            run,
+            dashboard.selected_terminal_summary.as_ref(),
+        ));
+    } else if let Some(scan_id) = selected_id {
+        content = content.push(
+            container(
+                row![
+                    text(format!("scan_id: {scan_id}"))
+                        .size(13)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY)
+                        .width(Length::Fill),
+                    copy_button("Copy scan_id", scan_id.to_string()),
+                ]
+                .spacing(10)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding([10, 12])
+            .style(theme::Container::HeaderAccent.style()),
+        );
+    }
+
+    match &dashboard.selected_run_state {
+        ScanDashboardLoadState::Loading => {
+            content = content.push(diagnostics_notice_card(
+                Icon::RefreshCw,
+                "Loading run details…",
+                "Fetching ordered timeline events and failure summaries for this run.",
+                None,
+            ));
+        }
+        ScanDashboardLoadState::Failed { error } => {
+            content = content.push(diagnostics_error_card(
+                "Run details could not be loaded",
+                error,
+            ));
+        }
+        ScanDashboardLoadState::Idle | ScanDashboardLoadState::Loaded => {}
+    }
+
+    content = content.push(timeline_panel(&dashboard.selected_events));
+    content = content.push(failure_summary_panel(
+        &dashboard.selected_failures,
+        can_scan_libraries,
+    ));
+
+    if let Some(replay) = &dashboard.selected_replay {
+        content = content.push(
+            container(
+                column![
+                    text("Timeline cursor")
+                        .size(14)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    text(format!(
+                        "Next sequence: {} · recoverable: {}",
+                        replay
+                            .next_sequence
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "current".to_string()),
+                        if replay.recoverable { "yes" } else { "no" }
+                    ))
+                    .size(12)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    text(replay.recovery_hint.clone())
+                        .size(12)
+                        .color(theme::MediaServerTheme::TEXT_SUBDUED),
+                ]
+                .spacing(6),
+            )
+            .padding([10, 12])
+            .style(theme::Container::HeaderAccent.style()),
+        );
+    }
+
+    container(content)
+        .padding(16)
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+        .into()
+}
+
+fn run_identity_panel(run: &ScanRunDto) -> Element<'_, UiMessage> {
+    container(
+        column![
+            row![
+                metric_chip(
+                    "Status",
+                    safe_run_status_label(run),
+                    status_color(&run.status),
+                ),
+                metric_chip(
+                    "Progress",
+                    format!(
+                        "{}/{} items",
+                        run.completed_items, run.total_items
+                    ),
+                    theme::MediaServerTheme::TEXT_PRIMARY,
+                ),
+                metric_chip(
+                    "Retrying",
+                    run.retrying_items.to_string(),
+                    if run.retrying_items > 0 {
+                        theme::MediaServerTheme::WARNING
+                    } else {
+                        theme::MediaServerTheme::TEXT_PRIMARY
+                    },
+                ),
+                metric_chip(
+                    "Needs attention",
+                    attention_count_text(run),
+                    if run.dead_lettered_items > 0 {
+                        theme::MediaServerTheme::WARNING
+                    } else {
+                        theme::MediaServerTheme::TEXT_PRIMARY
+                    },
+                ),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+            copyable_id_row("scan_id", run.scan_id.to_string()),
+            copyable_id_row("correlation_id", run.correlation_id.to_string()),
+        ]
+        .spacing(10),
+    )
+    .padding([10, 12])
+    .style(theme::Container::HeaderAccent.style())
+    .width(Length::Fill)
+    .into()
+}
+
+fn terminal_summary_panel(
+    run: &ScanRunDto,
+    terminal_summary: Option<&serde_json::Value>,
+) -> Element<'static, UiMessage> {
+    let mut lines = column![
+        text("Terminal summary")
+            .size(15)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+        text(run.status_message.clone())
+            .size(13)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        text(format!(
+            "Completed {} of {} items · Retrying {} · {}",
+            run.completed_items,
+            run.total_items,
+            run.retrying_items,
+            attention_summary_text(run),
+        ))
+        .size(13)
+        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        text(format!(
+            "Started {} · Last update {}",
+            format_timestamp(run.started_at),
+            format_timestamp(run.last_event_at),
+        ))
+        .size(12)
+        .color(theme::MediaServerTheme::TEXT_SUBDUED),
+    ]
+    .spacing(6);
+
+    if let Some(terminal_at) = run.terminal_at {
+        lines = lines.push(
+            text(format!("Finished {}", format_timestamp(terminal_at)))
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        );
+    } else {
+        lines = lines.push(
+            text("Run is still active; final summary will appear when it finishes.")
                 .size(12)
                 .color(theme::MediaServerTheme::TEXT_SUBDUED),
         );
     }
 
-    Some(
-        container(details)
-            .padding([8, 12])
-            .style(theme::Container::Default.style())
-            .into(),
-    )
+    for line in terminal_summary_supplemental_lines(terminal_summary) {
+        lines = lines.push(
+            text(line)
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        );
+    }
+
+    container(lines)
+        .padding([10, 12])
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+        .into()
 }
 
-fn reason_detail_copy(detail: &ScanPathReasonDetail) -> String {
-    let label = reason_detail_label(detail);
-    let message = detail
-        .message
-        .as_deref()
-        .filter(|message| !contains_dead_letter_term(message))
-        .unwrap_or_else(|| fallback_reason_message(&detail.reason_code));
+fn timeline_panel(events: &[ScanRunEventDto]) -> Element<'_, UiMessage> {
+    let mut content = column![section_heading(
+        Icon::ListOrdered,
+        "Timeline events",
+        "Ordered by scanner sequence.",
+    )]
+    .spacing(10);
 
-    if let Some(path) = &detail.path {
-        format!("{label}: {message} — {}", truncate_path(path))
+    if events.is_empty() {
+        content = content.push(
+            text("No timeline events are available for this run yet.")
+                .size(13)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        );
     } else {
-        format!("{label}: {message}")
+        let mut ordered: Vec<&ScanRunEventDto> = events.iter().collect();
+        ordered.sort_by(|a, b| {
+            a.sequence
+                .cmp(&b.sequence)
+                .then(a.occurred_at.cmp(&b.occurred_at))
+        });
+
+        for event in ordered.into_iter().take(12) {
+            content = content.push(timeline_event_row(event));
+        }
+
+        if events.len() > 12 {
+            content = content.push(
+                text(format!(
+                    "Showing first 12 of {} retained events.",
+                    events.len()
+                ))
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+            );
+        }
     }
+
+    container(content)
+        .padding([10, 12])
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+        .into()
 }
 
-fn reason_detail_label(detail: &ScanPathReasonDetail) -> &'static str {
-    match detail.category {
-        ScanPathReasonCategory::KnownUnchanged => "Already scanned",
-        ScanPathReasonCategory::Skipped => {
-            if detail.reason_code == "no_supported_media_found" {
-                "No media found"
-            } else {
-                "Skipped"
-            }
-        }
-        ScanPathReasonCategory::Retrying => "Retrying",
-        ScanPathReasonCategory::NeedsAttention => "Needs attention",
-    }
+fn timeline_event_row(event: &ScanRunEventDto) -> Element<'_, UiMessage> {
+    let status_label = if event.status_label.trim().is_empty() {
+        scan_status_display_text(&event.status).label
+    } else {
+        event.status_label.clone()
+    };
+
+    container(
+        row![
+            column![
+                text(format!(
+                    "#{} · {} · {}",
+                    event.sequence,
+                    event_kind_label(&event.event_kind),
+                    status_label,
+                ))
+                .size(13)
+                .color(status_color(&event.status)),
+                text(event.status_message.clone())
+                    .size(12)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                text(format!(
+                    "{} · Completed {}/{} · Retrying {} · {}",
+                    format_timestamp(event.occurred_at),
+                    event.completed_items,
+                    event.total_items,
+                    event.retrying_items,
+                    event_attention_text(
+                        event.dead_lettered_items,
+                        &event.status
+                    ),
+                ))
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+                event
+                    .current_path
+                    .as_ref()
+                    .map(|path| {
+                        text(format!("Path: {}", truncate_path(path)))
+                            .size(12)
+                            .color(theme::MediaServerTheme::TEXT_SUBDUED)
+                    })
+                    .unwrap_or_else(|| {
+                        text("Path: not reported")
+                            .size(12)
+                            .color(theme::MediaServerTheme::TEXT_SUBDUED)
+                    }),
+            ]
+            .spacing(4)
+            .width(Length::Fill),
+            copy_button("Copy correlation", event.correlation_id.to_string()),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([8, 10])
+    .style(theme::Container::HeaderAccent.style())
+    .width(Length::Fill)
+    .into()
 }
 
-fn fallback_reason_message(reason_code: &str) -> &'static str {
-    match reason_code {
-        "unchanged_since_last_scan" => {
-            "Already up to date from a previous scan"
+fn failure_summary_panel(
+    failures: &[ScanFailureDto],
+    can_scan_libraries: bool,
+) -> Element<'_, UiMessage> {
+    let mut content = column![section_heading(
+        Icon::TriangleAlert,
+        "Failure summaries",
+        "Actionable scan items with non-destructive recovery controls.",
+    )]
+    .spacing(10);
+
+    if failures.is_empty() {
+        content = content.push(
+            text("No failure summaries for this run.")
+                .size(13)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        );
+    } else {
+        for failure in failures.iter().take(8) {
+            content = content.push(failure_card(failure, can_scan_libraries));
         }
-        "path_missing" => "The path was not available during the scan",
-        "no_supported_media_found" => {
-            "No supported media files were found at this path"
+
+        if failures.len() > 8 {
+            content = content.push(
+                text(format!(
+                    "Showing first 8 of {} failure summaries.",
+                    failures.len()
+                ))
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+            );
         }
-        "unsupported_media_layout" => {
-            "This path does not contain a supported media layout"
-        }
-        "temporary_scan_issue" => "A temporary scan issue is being retried",
-        _ => "Review this path and rescan when it is ready",
     }
+
+    container(content)
+        .padding([10, 12])
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+        .into()
 }
 
-fn contains_dead_letter_term(text: &str) -> bool {
-    let compact: String = text
-        .chars()
-        .filter_map(|ch| {
-            let lower = ch.to_ascii_lowercase();
-            lower.is_ascii_alphanumeric().then_some(lower)
+fn failure_card(
+    failure: &ScanFailureDto,
+    can_scan_libraries: bool,
+) -> Element<'_, UiMessage> {
+    let copy = safe_failure_copy(failure);
+    let recovery_target = recovery_path_for_failure(failure);
+
+    let mut recovery = row![
+        text("Recovery is non-destructive: it queues a retry and keeps library data in place.")
+            .size(12)
+            .color(theme::MediaServerTheme::TEXT_SUBDUED)
+            .width(Length::Fill),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+
+    if !failure.retryable {
+        recovery = recovery.push(
+            text("Failed after retries")
+                .size(12)
+                .color(theme::MediaServerTheme::WARNING),
+        );
+    } else if !can_scan_libraries {
+        recovery = recovery.push(
+            text("Retry requires library scan permission")
+                .size(12)
+                .color(theme::MediaServerTheme::WARNING),
+        );
+    } else if let Some(path) = recovery_target {
+        recovery = recovery.push(
+            button("Retry this path")
+                .on_press(
+                    SettingsUiMessage::RecoverScanPath(ScanRecoveryRequest {
+                        library_id: failure.library_id,
+                        path,
+                        correlation_id: None,
+                    })
+                    .into(),
+                )
+                .style(theme::Button::Secondary.style()),
+        );
+    } else {
+        recovery = recovery.push(
+            text("Retry path is not available")
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        );
+    }
+
+    container(
+        column![
+            row![
+                column![
+                    text(copy.0)
+                        .size(14)
+                        .color(theme::MediaServerTheme::WARNING),
+                    text(copy.1)
+                        .size(12)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                ]
+                .spacing(4)
+                .width(Length::Fill),
+                metric_chip(
+                    "Occurrences",
+                    failure.occurrences.to_string(),
+                    theme::MediaServerTheme::TEXT_PRIMARY,
+                ),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+            text(format!("Item: {}", truncate_path(&failure.subject_key)))
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+            text(format!(
+                "First seen {} · Last seen {}",
+                format_timestamp(failure.first_seen_at),
+                format_timestamp(failure.last_seen_at),
+            ))
+            .size(12)
+            .color(theme::MediaServerTheme::TEXT_SUBDUED),
+            recovery,
+        ]
+        .spacing(8),
+    )
+    .padding([10, 12])
+    .style(theme::Container::HeaderAccent.style())
+    .width(Length::Fill)
+    .into()
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RunCardMode {
+    Active,
+    Latest,
+    History,
+}
+
+fn scan_run_card<'a>(
+    run: &'a ScanRunDto,
+    mode: RunCardMode,
+    can_scan_libraries: bool,
+    selected: bool,
+) -> Element<'a, UiMessage> {
+    let title = match mode {
+        RunCardMode::Active => "Active run",
+        RunCardMode::Latest => "Latest run",
+        RunCardMode::History => "History run",
+    };
+    let percent = run_progress_percent(run);
+    let style = if selected {
+        theme::Container::CardHovered.style()
+    } else {
+        theme::Container::HeaderAccent.style()
+    };
+
+    let mut actions = row![
+        button(if selected {
+            "Refresh details"
+        } else {
+            "Details"
         })
-        .collect();
-    compact.contains("deadletter")
+        .on_press(
+            if selected {
+                SettingsUiMessage::RefreshScanDashboardRun(run.scan_id)
+            } else {
+                SettingsUiMessage::SelectScanDashboardRun(run.scan_id)
+            }
+            .into(),
+        )
+        .style(theme::Button::Secondary.style()),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+
+    if matches!(mode, RunCardMode::Active) {
+        actions = add_scan_control_buttons(actions, run, can_scan_libraries);
+    }
+
+    container(
+        column![
+            row![
+                column![
+                    row![
+                        text(title)
+                            .size(12)
+                            .color(theme::MediaServerTheme::TEXT_SUBDUED),
+                        status_badge(
+                            safe_run_status_label(run),
+                            status_color(&run.status)
+                        ),
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+                    text(format!(
+                        "Library {} · {}",
+                        run.library_id,
+                        format_timestamp(run.last_event_at),
+                    ))
+                    .size(12)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    text(run.status_message.clone())
+                        .size(12)
+                        .color(theme::MediaServerTheme::TEXT_SUBDUED),
+                ]
+                .spacing(4)
+                .width(Length::Fill),
+                actions,
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+            container(progress_bar(0.0..=100.0, percent))
+                .height(Length::Fixed(6.0))
+                .width(Length::Fill),
+            row![
+                text(format!(
+                    "{}% · {}/{} items",
+                    percent.round(),
+                    run.completed_items,
+                    run.total_items,
+                ))
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                Space::new().width(16),
+                text(format!("Retrying: {}", run.retrying_items))
+                    .size(12)
+                    .color(if run.retrying_items > 0 {
+                        theme::MediaServerTheme::WARNING
+                    } else {
+                        theme::MediaServerTheme::TEXT_SECONDARY
+                    }),
+                Space::new().width(16),
+                text(attention_summary_text(run)).size(12).color(
+                    if run.dead_lettered_items > 0 {
+                        theme::MediaServerTheme::WARNING
+                    } else {
+                        theme::MediaServerTheme::TEXT_SECONDARY
+                    }
+                ),
+                Space::new().width(16),
+                text(
+                    run.current_path
+                        .as_deref()
+                        .map(|path| format!("Current: {}", truncate_path(path)))
+                        .unwrap_or_else(
+                            || "Current: awaiting scanner update".to_string()
+                        ),
+                )
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            ]
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(10),
+    )
+    .padding([10, 12])
+    .style(style)
+    .width(Length::Fill)
+    .into()
 }
 
-fn reason_detail_needs_rescan(detail: &ScanPathReasonDetail) -> bool {
-    match detail.category {
-        ScanPathReasonCategory::NeedsAttention => true,
-        ScanPathReasonCategory::Skipped => matches!(
-            detail.reason_code.as_str(),
-            "path_missing"
-                | "no_supported_media_found"
-                | "unsupported_media_layout"
-                | "skipped"
-        ),
-        ScanPathReasonCategory::KnownUnchanged
-        | ScanPathReasonCategory::Retrying => false,
+fn add_scan_control_buttons<'a>(
+    mut actions: iced::widget::Row<'a, UiMessage>,
+    run: &ScanRunDto,
+    can_scan_libraries: bool,
+) -> iced::widget::Row<'a, UiMessage> {
+    if !can_scan_libraries {
+        return actions.push(
+            text("Controls require scan permission")
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        );
+    }
+
+    match run.status.as_str() {
+        "running" => {
+            actions = actions.push(
+                button("Pause")
+                    .on_press(
+                        SettingsUiMessage::PauseLibraryScan(
+                            run.library_id,
+                            run.scan_id,
+                        )
+                        .into(),
+                    )
+                    .style(theme::Button::Secondary.style()),
+            );
+            actions = actions.push(
+                button("Cancel scan")
+                    .on_press(
+                        SettingsUiMessage::CancelLibraryScan(
+                            run.library_id,
+                            run.scan_id,
+                        )
+                        .into(),
+                    )
+                    .style(theme::Button::Destructive.style()),
+            );
+        }
+        "paused" => {
+            actions = actions.push(
+                button("Resume")
+                    .on_press(
+                        SettingsUiMessage::ResumeLibraryScan(
+                            run.library_id,
+                            run.scan_id,
+                        )
+                        .into(),
+                    )
+                    .style(theme::Button::Primary.style()),
+            );
+            actions = actions.push(
+                button("Cancel scan")
+                    .on_press(
+                        SettingsUiMessage::CancelLibraryScan(
+                            run.library_id,
+                            run.scan_id,
+                        )
+                        .into(),
+                    )
+                    .style(theme::Button::Destructive.style()),
+            );
+        }
+        "pending" => {
+            actions = actions.push(
+                button("Cancel scan")
+                    .on_press(
+                        SettingsUiMessage::CancelLibraryScan(
+                            run.library_id,
+                            run.scan_id,
+                        )
+                        .into(),
+                    )
+                    .style(theme::Button::Destructive.style()),
+            );
+        }
+        _ => {}
+    }
+
+    actions
+}
+
+fn section_heading<'a>(
+    icon: Icon,
+    title: impl Into<String>,
+    subtitle: impl Into<String>,
+) -> Element<'a, UiMessage> {
+    row![
+        icon_text(icon),
+        column![
+            text(title.into())
+                .size(16)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            text(subtitle.into())
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        ]
+        .spacing(2),
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+fn status_badge<'a>(
+    label: impl Into<String>,
+    color: Color,
+) -> Element<'a, UiMessage> {
+    container(text(label.into()).size(12).color(color))
+        .padding([4, 8])
+        .style(theme::Container::HeaderAccent.style())
+        .into()
+}
+
+fn copyable_id_row<'a>(
+    label: &'a str,
+    value: String,
+) -> Element<'a, UiMessage> {
+    row![
+        text(format!("{label}: {value}"))
+            .size(12)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY)
+            .width(Length::Fill),
+        copy_button(format!("Copy {label}"), value),
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+fn copy_button<'a>(
+    label: impl Into<String>,
+    value: String,
+) -> Element<'a, UiMessage> {
+    button(text(label.into()))
+        .on_press(SettingsUiMessage::CopyScannerDiagnostic(value).into())
+        .style(theme::Button::Secondary.style())
+        .into()
+}
+
+fn safe_run_status_label(run: &ScanRunDto) -> String {
+    if run.status_label.trim().is_empty() {
+        scan_status_display_text(&run.status).label
+    } else {
+        run.status_label.clone()
     }
 }
 
-fn scan_has_no_media_found(reason_details: &[ScanPathReasonDetail]) -> bool {
-    reason_details
-        .iter()
-        .any(|detail| detail.reason_code == "no_supported_media_found")
+fn safe_failure_copy(failure: &ScanFailureDto) -> (String, String) {
+    if failure.category == "content_not_indexed"
+        || failure.message_code == "scan.no_indexable_media"
+    {
+        return (
+            "No playable media found".to_string(),
+            "No playable media files were found in this folder. Check the path or add supported media before retrying."
+                .to_string(),
+        );
+    }
+
+    if failure.category_label.trim().is_empty()
+        || failure.message.trim().is_empty()
+    {
+        let display =
+            scan_failure_display_text(&failure.category, &failure.message_code);
+        return (display.label, display.message);
+    }
+
+    (failure.category_label.clone(), failure.message.clone())
+}
+
+fn recovery_path_for_failure(failure: &ScanFailureDto) -> Option<String> {
+    let subject = failure.subject_key.trim();
+    if subject.starts_with('/')
+        || subject.starts_with("~/")
+        || subject.as_bytes().get(1).is_some_and(|byte| *byte == b':')
+    {
+        Some(subject.to_string())
+    } else {
+        None
+    }
+}
+
+fn terminal_summary_supplemental_lines(
+    terminal_summary: Option<&serde_json::Value>,
+) -> Vec<String> {
+    let Some(summary) = terminal_summary else {
+        return Vec::new();
+    };
+    let Some(object) = summary.as_object() else {
+        return Vec::new();
+    };
+
+    let mut lines = Vec::new();
+    if let Some(source) = object.get("source").and_then(|value| value.as_str())
+    {
+        lines.push(format!("Summary source: {source}"));
+    }
+    if let Some(sequence) =
+        object.get("sequence").and_then(|value| value.as_u64())
+    {
+        lines.push(format!("Final event sequence: {sequence}"));
+    }
+    if let Some(path) =
+        object.get("current_path").and_then(|value| value.as_str())
+    {
+        lines.push(format!("Last reported path: {}", truncate_path(path)));
+    }
+
+    lines
+}
+
+fn watcher_status_label(health: &ScannerHealthResponse) -> String {
+    let incremental = &health.incremental;
+    if incremental.watcher_error_count > 0
+        || incremental.last_watcher_error.is_some()
+    {
+        format!(
+            "Needs attention · {} issue(s)",
+            incremental.watcher_error_count
+        )
+    } else if incremental.initializing_watch_libraries > 0 {
+        format!(
+            "Starting · {} initializing",
+            incremental.initializing_watch_libraries
+        )
+    } else if incremental.watch_enabled_libraries == 0 {
+        "No watched libraries".to_string()
+    } else if incremental.active_watch_libraries
+        < incremental.watch_enabled_libraries
+    {
+        "Needs attention".to_string()
+    } else {
+        "Healthy".to_string()
+    }
+}
+
+fn cursor_status_label(health: &ScannerHealthResponse) -> String {
+    let incremental = &health.incremental;
+    if incremental.stale_cursors > 0 || incremental.stale_cursor_libraries > 0 {
+        format!(
+            "Needs attention · {} stale cursor(s)",
+            incremental.stale_cursors
+        )
+    } else if incremental.replay_pending_events > 0 {
+        format!(
+            "Retrying · {} pending event(s)",
+            incremental.replay_pending_events
+        )
+    } else if let Some(lag) = incremental.replay_lag_ms {
+        format!("Healthy · replay lag {}", format_duration_ms(lag))
+    } else {
+        "Healthy".to_string()
+    }
+}
+
+fn queue_depth_total(health: &ScannerHealthResponse) -> usize {
+    health.queue_depths.folder_scan
+        + health.queue_depths.analyze
+        + health.queue_depths.metadata
+        + health.queue_depths.index
+        + health.queue_depths.image_fetch
+}
+
+fn queue_depth_color(depth: usize) -> Color {
+    if depth > 0 {
+        accent()
+    } else {
+        theme::MediaServerTheme::TEXT_PRIMARY
+    }
+}
+
+fn health_severity_color(severity: HealthSeverity) -> Color {
+    match severity {
+        HealthSeverity::Healthy => theme::MediaServerTheme::SUCCESS,
+        HealthSeverity::Active => accent(),
+        HealthSeverity::NeedsAttention => theme::MediaServerTheme::WARNING,
+    }
+}
+
+fn status_color(status: &str) -> Color {
+    match status {
+        "completed" => theme::MediaServerTheme::SUCCESS,
+        "failed" => theme::MediaServerTheme::ERROR,
+        "paused" => theme::MediaServerTheme::WARNING,
+        "running" | "pending" => accent(),
+        "canceled" | "cancelled" => theme::MediaServerTheme::TEXT_SECONDARY,
+        _ => theme::MediaServerTheme::TEXT_PRIMARY,
+    }
+}
+
+fn run_progress_percent(run: &ScanRunDto) -> f32 {
+    if run.total_items == 0 {
+        0.0
+    } else {
+        ((run.completed_items as f32 / run.total_items as f32) * 100.0)
+            .clamp(0.0, 100.0)
+    }
+}
+
+fn attention_count_text(run: &ScanRunDto) -> String {
+    run.dead_lettered_items.to_string()
+}
+
+fn attention_summary_text(run: &ScanRunDto) -> String {
+    event_attention_text(run.dead_lettered_items, &run.status)
+}
+
+fn event_attention_text(count: u64, status: &str) -> String {
+    if count == 0 {
+        "No items need attention".to_string()
+    } else if status == "failed" {
+        format!("Failed after retries: {count}")
+    } else {
+        format!("Needs attention: {count}")
+    }
+}
+
+fn event_kind_label(kind: &str) -> &'static str {
+    match kind {
+        "progress" => "Progress",
+        "terminal" => "Terminal update",
+        "failure" | "failed" => "Failed after retries",
+        "retry" | "retrying" => "Retrying",
+        "skipped" | "skip" => "Skipped",
+        _ => "Scanner update",
+    }
+}
+
+fn format_timestamp(timestamp: DateTime<Utc>) -> String {
+    timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+}
+
+fn format_duration_ms(milliseconds: u64) -> String {
+    if milliseconds >= 1_000 {
+        format!("{:.1}s", milliseconds as f32 / 1_000.0)
+    } else {
+        format!("{milliseconds}ms")
+    }
 }
 
 fn truncate_path(path: &str) -> String {
-    const MAX_LEN: usize = 48;
+    const MAX_LEN: usize = 56;
     if path.len() <= MAX_LEN {
         path.to_string()
     } else {
@@ -944,41 +1745,33 @@ fn truncate_path(path: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod scanner_diagnostics_ui_tests {
     use super::*;
-    use chrono::{DateTime, Utc};
+    use chrono::TimeZone;
+    use ferrex_core::api::scan::{IncrementalScanStatusView, ScanQueueDepths};
+    use ferrex_core::player_prelude::{ScanSnapshotDto, ScanStartDisposition};
 
-    fn fixed_time() -> DateTime<Utc> {
-        DateTime::<Utc>::from_timestamp(1_700_000_000, 0)
-            .expect("valid fixed timestamp")
+    fn active_scan_panel_snapshots(state: &State) -> Vec<ScanSnapshotDto> {
+        let mut scans: Vec<ScanSnapshotDto> = state
+            .domains
+            .library
+            .state
+            .active_scans
+            .values()
+            .cloned()
+            .collect();
+        scans.sort_by_key(|snapshot| snapshot.started_at);
+        scans
     }
 
-    fn reason_detail(
-        category: ScanPathReasonCategory,
-        reason_code: &str,
-        message: Option<&str>,
-    ) -> ScanPathReasonDetail {
-        ScanPathReasonDetail {
-            category,
-            reason_code: reason_code.into(),
-            message: message.map(str::to_string),
-            path: Some("/media/library/missing/movie.mkv".into()),
-            path_key: None,
-            retryable: false,
-            action_hint: Some("rescan_library".into()),
-        }
-    }
-
-    fn snapshot(status: ScanLifecycleStatus) -> ScanSnapshotDto {
-        let scan_id = Uuid::now_v7();
-        let library_id = LibraryId::new();
+    fn scan_snapshot(library_id: LibraryId, scan_id: Uuid) -> ScanSnapshotDto {
         ScanSnapshotDto {
             scan_id,
             library_id,
-            status,
+            status: ScanLifecycleStatus::Running,
             mode: ScanRunMode::Manual,
             completed_items: 0,
-            total_items: 1,
+            total_items: 10,
             validated_items: 0,
             known_unchanged_items: 0,
             skipped_items: 0,
@@ -986,30 +1779,64 @@ mod tests {
             needs_attention_items: 0,
             retrying_items: 0,
             correlation_id: scan_id,
-            idempotency_key: "scan:test:1".into(),
+            idempotency_key: format!("scan:{scan_id}:1"),
             run_key: ScanRunMode::Manual.run_key(library_id),
-            disposition: None,
+            disposition: Some(ScanStartDisposition::Created),
             current_path: None,
-            started_at: fixed_time(),
+            started_at: chrono::Utc::now(),
             terminal_at: None,
             sequence: 1,
             reason_details: Vec::new(),
         }
     }
 
+    fn health() -> ScannerHealthResponse {
+        ScannerHealthResponse {
+            queue_depths: ScanQueueDepths {
+                folder_scan: 0,
+                manifest_scan: 0,
+                analyze: 0,
+                metadata: 0,
+                index: 0,
+                image_fetch: 0,
+            },
+            active_scans: 0,
+            retained_runs: 0,
+            failed_runs: 0,
+            incremental: IncrementalScanStatusView::default(),
+        }
+    }
+
+    fn failure(message_code: &str, subject_key: &str) -> ScanFailureDto {
+        let now = Utc.timestamp_opt(1, 0).single().unwrap();
+        ScanFailureDto {
+            scan_id: Uuid::from_u128(1),
+            library_id: LibraryId(Uuid::from_u128(2)),
+            subject_key: subject_key.to_string(),
+            category: "content_not_indexed".to_string(),
+            category_label: String::new(),
+            message_code: message_code.to_string(),
+            message: String::new(),
+            occurrences: 1,
+            first_seen_at: now,
+            last_seen_at: now,
+            retryable: true,
+            debug: None,
+        }
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn admin_active_panel_has_one_card_for_one_library_mode() {
         let mut state = State::new("http://localhost:3000".to_string());
-        let scan = snapshot(ScanLifecycleStatus::Running);
-        let library_id = scan.library_id;
-        let scan_id = scan.scan_id;
+        let library_id = LibraryId(Uuid::now_v7());
+        let scan_id = Uuid::now_v7();
 
         state
             .domains
             .library
             .state
             .active_scans
-            .insert(scan_id, scan);
+            .insert(scan_id, scan_snapshot(library_id, scan_id));
 
         let cards = active_scan_panel_snapshots(&state);
 
@@ -1020,80 +1847,47 @@ mod tests {
     }
 
     #[test]
-    fn reason_copy_uses_safe_attention_terms() {
-        let detail = reason_detail(
-            ScanPathReasonCategory::NeedsAttention,
-            "needs_attention",
-            None,
-        );
+    fn scanner_health_copy_flags_watcher_issues() {
+        let mut health = health();
+        health.incremental.watch_enabled_libraries = 1;
+        health.incremental.active_watch_libraries = 0;
+        health.incremental.watcher_error_count = 1;
 
-        assert_eq!(reason_detail_label(&detail), "Needs attention");
-        let copy = reason_detail_copy(&detail);
-        assert!(copy.contains("Needs attention"));
-        assert!(copy.contains("Review this path and rescan"));
-        assert!(!copy.contains("dead_letter"));
-        assert!(!copy.contains("deadletter"));
+        let copy = scanner_health_copy(&health);
+
+        assert_eq!(copy.label, "Needs attention");
+        assert_eq!(copy.severity, HealthSeverity::NeedsAttention);
     }
 
     #[test]
-    fn reason_copy_sanitizes_backend_dead_letter_terms() {
-        let detail = reason_detail(
-            ScanPathReasonCategory::NeedsAttention,
-            "deadletter_queue",
-            Some("dead-letter queue entry needs operator review"),
-        );
+    fn primary_attention_copy_avoids_internal_terms() {
+        let text = event_attention_text(3, "failed");
 
-        let copy = reason_detail_copy(&detail);
-        let normalized = copy.to_ascii_lowercase();
-        assert!(copy.contains("Needs attention"));
-        assert!(copy.contains("Review this path and rescan"));
-        assert!(!normalized.contains("dead_letter"));
-        assert!(!normalized.contains("dead-letter"));
-        assert!(!normalized.contains("deadletter"));
-        assert!(!normalized.contains("dead letter"));
+        assert_eq!(text, "Failed after retries: 3");
+        assert!(!text.to_ascii_lowercase().contains("dead-letter"));
     }
 
     #[test]
-    fn no_media_found_reason_gets_label_and_rescan_copy() {
-        let mut scan = snapshot(ScanLifecycleStatus::Completed);
-        scan.skipped_items = 1;
-        let details = vec![reason_detail(
-            ScanPathReasonCategory::Skipped,
-            "no_supported_media_found",
-            None,
-        )];
+    fn no_media_failure_uses_playable_media_copy() {
+        let failure = failure("scan.no_indexable_media", "/media/empty");
+        let copy = safe_failure_copy(&failure);
 
-        assert_eq!(reason_detail_label(&details[0]), "No media found");
-        assert_eq!(
-            scan_status_label(&scan, &details, 1, 0, 0).0,
-            "No media found"
-        );
-        assert!(scan_has_rescan_recovery(&scan, &details, 1, 0));
-        assert_eq!(
-            scan_recovery_copy(&scan, &details, 1, 0),
-            Some(
-                "Add supported media or update the folder, then rescan this library."
-            )
-        );
+        assert_eq!(copy.0, "No playable media found");
+        assert!(copy.1.contains("playable media"));
     }
 
     #[test]
-    fn panel_count_reports_attention_instead_of_running_only() {
-        let mut running = snapshot(ScanLifecycleStatus::Running);
-        let mut failed = snapshot(ScanLifecycleStatus::Failed);
-        failed.needs_attention_items = 1;
-        failed.failed_items = 1;
+    fn recovery_is_only_offered_for_path_subjects() {
+        let path_failure =
+            failure("scan.folder_permission_denied", "/media/movies");
+        let opaque_failure =
+            failure("scan.folder_permission_denied", "movie:123");
 
         assert_eq!(
-            scan_panel_count_label(&[running.clone(), failed]),
-            "1 running • 1 needs attention"
+            recovery_path_for_failure(&path_failure),
+            Some("/media/movies".to_string())
         );
-
-        running.retrying_items = 1;
-        assert_eq!(
-            scan_status_label(&running, &[], 0, 0, running.retrying_items).0,
-            "Retrying"
-        );
+        assert_eq!(recovery_path_for_failure(&opaque_failure), None);
     }
 }
 

@@ -12,6 +12,7 @@ use crate::{
             handle_scan_library,
         },
         ui::{
+            feedback_ui::{FeedbackMessage, ToastNotification},
             tabs::{TabId, TabState},
             update_handlers::{
                 emit_initial_all_tab_snapshots_combined, init_all_tab_view,
@@ -618,11 +619,23 @@ pub fn update_library(
                     response.normalized_path,
                     response.job_id
                 );
-                DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                state.domains.library.state.library_form_success =
+                    Some(response.message.clone());
+                let refresh_task = Task::done(DomainMessage::Library(
                     LibraryMessage::RefreshScanDashboard(
                         ScanDashboardRefreshReason::RecoveryAccepted,
                     ),
-                )))
+                ));
+                let toast_task = Task::done(DomainMessage::Ui(
+                    FeedbackMessage::ShowToast(ToastNotification::success(
+                        response.message,
+                    ))
+                    .into(),
+                ));
+                DomainUpdateResult::task(Task::batch([
+                    refresh_task,
+                    toast_task,
+                ]))
             }
             Err(err) => {
                 log::warn!("Scan recovery failed: {}", err);
@@ -632,8 +645,14 @@ pub fn update_library(
                     .library
                     .state
                     .scan_dashboard
-                    .fail_overview_load(err);
-                DomainUpdateResult::task(Task::none())
+                    .fail_overview_load(err.clone());
+                let toast_task = Task::done(DomainMessage::Ui(
+                    FeedbackMessage::ShowToast(ToastNotification::error(
+                        format!("Scan recovery failed: {err}"),
+                    ))
+                    .into(),
+                ));
+                DomainUpdateResult::task(toast_task)
             }
         },
 

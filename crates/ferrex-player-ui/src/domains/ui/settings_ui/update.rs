@@ -1,5 +1,7 @@
 use iced::Task;
 
+use ferrex_player_library::scan_dashboard::ScanDashboardRefreshReason;
+
 use crate::infra::cache::PlayerDiskImageCacheLimits;
 use crate::{
     common::{
@@ -75,9 +77,14 @@ pub fn update_settings_ui(
             let fetch_scans_task = Task::done(DomainMessage::Library(
                 LibraryMessage::FetchActiveScans,
             ));
+            let fetch_dashboard_task = Task::done(DomainMessage::Library(
+                LibraryMessage::RefreshScanDashboard(
+                    ScanDashboardRefreshReason::InitialLoad,
+                ),
+            ));
 
             let tasks = {
-                let tasks = vec![fetch_scans_task];
+                let tasks = vec![fetch_scans_task, fetch_dashboard_task];
 
                 #[cfg(feature = "demo")]
                 let tasks = {
@@ -448,6 +455,38 @@ pub fn update_settings_ui(
                 LibraryMessage::FetchScanMetrics,
             )),
         ),
+        SettingsUiMessage::RefreshScanDashboard => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                LibraryMessage::RefreshScanDashboard(
+                    ScanDashboardRefreshReason::UserRequested,
+                ),
+            )))
+        }
+        SettingsUiMessage::SelectScanDashboardRun(scan_id) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                LibraryMessage::SelectScanDashboardRun(scan_id),
+            )))
+        }
+        SettingsUiMessage::RefreshScanDashboardRun(scan_id) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                LibraryMessage::RefreshScanDashboardRun(scan_id),
+            )))
+        }
+        SettingsUiMessage::RecoverScanPath(request) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                LibraryMessage::RecoverScanPath(request),
+            )))
+        }
+        SettingsUiMessage::CopyScannerDiagnostic(value) => {
+            let copy_task: Task<DomainMessage> = iced::clipboard::write(value);
+            let toast_task = Task::done(DomainMessage::Ui(
+                FeedbackMessage::ShowToast(ToastNotification::success(
+                    "Copied scanner diagnostic ID",
+                ))
+                .into(),
+            ));
+            DomainUpdateResult::task(Task::batch([copy_task, toast_task]))
+        }
         SettingsUiMessage::ResetLibrary(library_id) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 LibraryMessage::ResetLibrary(library_id),
