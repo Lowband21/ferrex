@@ -9,6 +9,7 @@ use crate::database::{
     repositories::{
         folder_inventory::PostgresFolderInventoryRepository,
         images::PostgresImageRepository, indices::PostgresIndicesRepository,
+        intelligence::PostgresIntelligenceRepository,
         library::PostgresLibraryRepository, media::PostgresMediaRepository,
         media_references::PostgresMediaReferencesRepository,
         processing_status::PostgresProcessingStatusRepository,
@@ -21,8 +22,9 @@ use crate::database::{
     },
     repository_ports::{
         folder_inventory::FolderInventoryRepository, images::ImageRepository,
-        indices::IndicesRepository, library::LibraryRepository,
-        media_files::MediaFilesReadPort, media_files::MediaFilesWritePort,
+        indices::IndicesRepository, intelligence::IntelligenceRepository,
+        library::LibraryRepository, media_files::MediaFilesReadPort,
+        media_files::MediaFilesWritePort,
         media_references::MediaReferencesRepository,
         processing_status::ProcessingStatusRepositoryTrait,
         query::QueryRepository, rbac::RbacRepository,
@@ -64,6 +66,7 @@ pub struct AppUnitOfWork {
     pub processing_status: Arc<dyn ProcessingStatusRepositoryTrait>,
     pub indices: Arc<dyn IndicesRepository>,
     pub scan_runs: Arc<dyn ScanRunRepository>,
+    pub intelligence: Arc<dyn IntelligenceRepository>,
 }
 
 impl fmt::Debug for AppUnitOfWork {
@@ -113,6 +116,10 @@ impl fmt::Debug for AppUnitOfWork {
             )
             .field("indices", &type_name_of_val(self.indices.as_ref()))
             .field("scan_runs", &type_name_of_val(self.scan_runs.as_ref()))
+            .field(
+                "intelligence",
+                &type_name_of_val(self.intelligence.as_ref()),
+            )
             .finish()
     }
 }
@@ -140,6 +147,7 @@ pub struct AppUnitOfWorkBuilder {
     processing_status: Option<Arc<dyn ProcessingStatusRepositoryTrait>>,
     indices: Option<Arc<dyn IndicesRepository>>,
     scan_runs: Option<Arc<dyn ScanRunRepository>>,
+    intelligence: Option<Arc<dyn IntelligenceRepository>>,
 }
 
 impl fmt::Debug for AppUnitOfWorkBuilder {
@@ -162,6 +170,7 @@ impl fmt::Debug for AppUnitOfWorkBuilder {
             .field("processing_status", &self.processing_status.is_some())
             .field("indices", &self.indices.is_some())
             .field("scan_runs", &self.scan_runs.is_some())
+            .field("intelligence", &self.intelligence.is_some())
             .finish()
     }
 }
@@ -263,6 +272,14 @@ impl AppUnitOfWorkBuilder {
         self
     }
 
+    pub fn with_intelligence(
+        mut self,
+        repo: Arc<dyn IntelligenceRepository>,
+    ) -> Self {
+        self.intelligence = Some(repo);
+        self
+    }
+
     /// Build a validated AppUnitOfWork. Returns a string error if any required
     /// repository is missing. Keep errors simple for ease of use at call sites.
     pub fn build(self) -> Result<AppUnitOfWork, String> {
@@ -318,6 +335,9 @@ impl AppUnitOfWorkBuilder {
             scan_runs: self
                 .scan_runs
                 .ok_or_else(|| "missing ScanRunRepository".to_string())?,
+            intelligence: self
+                .intelligence
+                .ok_or_else(|| "missing IntelligenceRepository".to_string())?,
         })
     }
 }
@@ -397,8 +417,12 @@ impl AppUnitOfWorkBuilder {
         self.processing_status = Some(processing_status);
 
         let scan_runs: Arc<dyn ScanRunRepository> =
-            Arc::new(PostgresScanRunRepository::new(pool));
+            Arc::new(PostgresScanRunRepository::new(pool.clone()));
         self.scan_runs = Some(scan_runs);
+
+        let intelligence: Arc<dyn IntelligenceRepository> =
+            Arc::new(PostgresIntelligenceRepository::new(pool));
+        self.intelligence = Some(intelligence);
 
         self
     }
