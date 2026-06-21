@@ -1330,8 +1330,11 @@ mod tests {
         MovieFolderScanContext, MovieRootPath, MovieScanHierarchy,
         ScanNodeKind, SeriesHint,
     };
-    use crate::domain::scan::orchestration::context::SeriesRootPath;
-    use crate::domain::scan::orchestration::context::SeriesScanHierarchy;
+    use crate::domain::scan::orchestration::context::{
+        EpisodeHint, EpisodeLink, EpisodeScanHierarchy, SeasonFolderPath,
+        SeasonFolderScanContext, SeasonLink, SeriesFolderScanContext,
+        SeriesLink, SeriesRootPath, SeriesScanHierarchy,
+    };
     use crate::domain::scan::orchestration::persistence::{
         PostgresCursorRepository, PostgresQueueService,
     };
@@ -1340,16 +1343,22 @@ mod tests {
     use crate::domain::scan::orchestration::series_state::{
         InMemorySeriesScanStateRepository, SeriesScanState,
     };
-    use crate::domain::scan::orchestration::{job::*, lease::DequeueRequest};
+    use crate::domain::scan::orchestration::{
+        job::*,
+        lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
+    };
     use crate::types::ids::{LibraryId, SeriesID};
     use crate::types::library::LibraryType;
     use ferrex_model::{MediaID, VideoMediaType};
     use sqlx::PgPool;
+    use std::collections::HashMap;
+    use tokio::sync::Mutex;
     use tokio::time::Duration;
     use uuid::Uuid;
 
     const FIXTURE_LIB_A: LibraryId =
         LibraryId(Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
+    static DB_TEST_LOCK: Mutex<()> = Mutex::const_new(());
     // const FIXTURE_LIB_B: LibraryId =
     //     LibraryId(Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb));
 
@@ -1462,19 +1471,8 @@ mod tests {
                 library_id: command.library_id,
                 media_id: command.media_id,
                 variant: command.variant,
-                hierarchy: AnalyzeScanHierarchy::Series(SeriesScanHierarchy {
-                    series_root_path: SeriesRootPath::try_new(
-                        "/library/series",
-                    )
-                    .unwrap(),
-                    series: SeriesLink::Hint(SeriesHint {
-                        title: "series".to_string(),
-                        slug: None,
-                        year: None,
-                        region: None,
-                    }),
-                }),
-                node: ScanNodeKind::default(),
+                hierarchy: command.hierarchy,
+                node: command.node,
                 path_norm: command.path_norm,
                 fingerprint: command.fingerprint,
                 analyzed_at: Utc::now(),
@@ -1629,6 +1627,190 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingQueue {
+        enqueued: Mutex<Vec<EnqueueRequest>>,
+        released_dependencies: Mutex<Vec<(LibraryId, DependencyKey)>>,
+    }
+
+    impl RecordingQueue {
+        async fn enqueued(&self) -> Vec<EnqueueRequest> {
+            self.enqueued.lock().await.clone()
+        }
+    }
+
+    #[async_trait]
+    impl QueueService for RecordingQueue {
+        async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
+            request.validate()?;
+            let handle = JobHandle::accepted(
+                JobId::new(),
+                &request.payload,
+                request.priority,
+            );
+            self.enqueued.lock().await.push(request);
+            Ok(handle)
+        }
+
+        async fn enqueue_many(
+            &self,
+            requests: Vec<EnqueueRequest>,
+        ) -> Result<Vec<JobHandle>> {
+            let mut handles = Vec::with_capacity(requests.len());
+            for request in requests {
+                request.validate()?;
+                handles.push(JobHandle::accepted(
+                    JobId::new(),
+                    &request.payload,
+                    request.priority,
+                ));
+                self.enqueued.lock().await.push(request);
+            }
+            Ok(handles)
+        }
+
+        async fn dequeue(
+            &self,
+            _request: DequeueRequest,
+        ) -> Result<Option<JobLease>> {
+            Ok(None)
+        }
+
+        async fn renew(&self, _renewal: LeaseRenewal) -> Result<JobLease> {
+            Err(MediaError::NotFound(
+                "recording queue does not lease jobs".into(),
+            ))
+        }
+
+        async fn complete(&self, _lease_id: LeaseId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn fail(
+            &self,
+            _lease_id: LeaseId,
+            _retryable: bool,
+            _error: Option<String>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn dead_letter(
+            &self,
+            _lease_id: LeaseId,
+            _error: Option<String>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn cancel_job(&self, _job_id: JobId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn queue_depth(&self, kind: JobKind) -> Result<usize> {
+            Ok(self
+                .enqueued
+                .lock()
+                .await
+                .iter()
+                .filter(|request| request.payload.kind() == kind)
+                .count())
+        }
+
+        async fn release_dependency(
+            &self,
+            library_id: LibraryId,
+            dependency_key: &DependencyKey,
+        ) -> Result<u64> {
+            self.released_dependencies
+                .lock()
+                .await
+                .push((library_id, dependency_key.clone()));
+            Ok(0)
+        }
+    }
+
+    #[derive(Default)]
+    struct MemoryCursorRepository {
+        cursors: Mutex<HashMap<ScanCursorId, ScanCursor>>,
+    }
+
+    #[async_trait]
+    impl ScanCursorRepository for MemoryCursorRepository {
+        async fn get(&self, id: &ScanCursorId) -> Result<Option<ScanCursor>> {
+            Ok(self.cursors.lock().await.get(id).cloned())
+        }
+
+        async fn list_by_library(
+            &self,
+            library_id: LibraryId,
+        ) -> Result<Vec<ScanCursor>> {
+            Ok(self
+                .cursors
+                .lock()
+                .await
+                .values()
+                .filter(|cursor| cursor.id.library_id == library_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn upsert(&self, cursor: ScanCursor) -> Result<()> {
+            self.cursors.lock().await.insert(cursor.id.clone(), cursor);
+            Ok(())
+        }
+
+        async fn delete_by_library(
+            &self,
+            library_id: LibraryId,
+        ) -> Result<usize> {
+            let mut cursors = self.cursors.lock().await;
+            let before = cursors.len();
+            cursors.retain(|_, cursor| cursor.id.library_id != library_id);
+            Ok(before - cursors.len())
+        }
+
+        async fn delete_by_path_prefixes(
+            &self,
+            library_id: LibraryId,
+            prefixes: Vec<String>,
+        ) -> Result<usize> {
+            let mut cursors = self.cursors.lock().await;
+            let before = cursors.len();
+            cursors.retain(|_, cursor| {
+                if cursor.id.library_id != library_id {
+                    return true;
+                }
+                !prefixes.iter().any(|prefix| {
+                    cursor.folder_path_norm == *prefix
+                        || cursor
+                            .folder_path_norm
+                            .strip_prefix(prefix)
+                            .is_some_and(|rest| rest.starts_with('/'))
+                })
+            });
+            Ok(before - cursors.len())
+        }
+
+        async fn list_stale(
+            &self,
+            library_id: LibraryId,
+            older_than: chrono::DateTime<Utc>,
+        ) -> Result<Vec<ScanCursor>> {
+            Ok(self
+                .cursors
+                .lock()
+                .await
+                .values()
+                .filter(|cursor| {
+                    cursor.id.library_id == library_id
+                        && cursor.last_scan_at < older_than
+                })
+                .cloned()
+                .collect())
+        }
+    }
+
     async fn dispatcher_fixture(
         pool: &PgPool,
     ) -> (
@@ -1766,6 +1948,922 @@ mod tests {
             "test-worker".into(),
             chrono::Duration::seconds(30),
         )
+    }
+
+    fn series_hint(title: &str) -> SeriesHint {
+        SeriesHint {
+            title: title.to_string(),
+            slug: Some(
+                title
+                    .to_ascii_lowercase()
+                    .replace(|ch: char| !ch.is_ascii_alphanumeric(), "-"),
+            ),
+            year: None,
+            region: None,
+        }
+    }
+
+    fn unresolved_episode_hierarchy(
+        series_root_path: SeriesRootPath,
+        title: &str,
+        episode_number: u16,
+    ) -> EpisodeScanHierarchy {
+        EpisodeScanHierarchy {
+            series_root_path,
+            series: SeriesLink::Hint(series_hint(title)),
+            season: SeasonLink::Number(1),
+            episode: EpisodeLink::Hint(EpisodeHint {
+                number: episode_number,
+                title: Some(format!("Episode {episode_number}")),
+            }),
+        }
+    }
+
+    fn episode_match_job(
+        library_id: LibraryId,
+        series_root_path: SeriesRootPath,
+        title: &str,
+        path_norm: &str,
+        episode_number: u16,
+    ) -> EpisodeMatchJob {
+        EpisodeMatchJob {
+            library_id,
+            media_id: MediaID::new(VideoMediaType::Episode),
+            path_norm: path_norm.to_string(),
+            fingerprint: MediaFingerprint {
+                device_id: None,
+                inode: Some(u64::from(episode_number)),
+                size: 100 + u64::from(episode_number),
+                mtime: 1_700_000_000 + i64::from(episode_number),
+                weak_hash: Some(format!("episode-{episode_number}")),
+            },
+            hierarchy: unresolved_episode_hierarchy(
+                series_root_path,
+                title,
+                episode_number,
+            ),
+            node: ScanNodeKind::EpisodeFile,
+            scan_reason: ScanReason::BulkSeed,
+        }
+    }
+
+    fn media_analyze_episode_job(
+        library_id: LibraryId,
+        series_root_path: SeriesRootPath,
+        title: &str,
+        path_norm: &str,
+        episode_number: u16,
+    ) -> MediaAnalyzeJob {
+        let episode = episode_match_job(
+            library_id,
+            series_root_path,
+            title,
+            path_norm,
+            episode_number,
+        );
+        MediaAnalyzeJob {
+            library_id: episode.library_id,
+            path_norm: episode.path_norm,
+            fingerprint: episode.fingerprint,
+            discovered_at: Utc::now(),
+            media_id: episode.media_id,
+            variant: VideoMediaType::Episode,
+            hierarchy: AnalyzeScanHierarchy::Episode(episode.hierarchy),
+            node: ScanNodeKind::EpisodeFile,
+            scan_reason: ScanReason::BulkSeed,
+        }
+    }
+
+    async fn postgres_pool_or_skip(test_name: &str) -> Option<PgPool> {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping {test_name}: DATABASE_URL not set");
+                return None;
+            }
+        };
+
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping {test_name}: failed to connect to DATABASE_URL ({err})"
+                );
+                return None;
+            }
+        };
+
+        if let Err(err) = crate::MIGRATOR.run(&pool).await {
+            eprintln!("skipping {test_name}: migrations failed ({err})");
+            return None;
+        }
+
+        Some(pool)
+    }
+
+    async fn clear_queue_rows(pool: &PgPool, library_id: LibraryId) {
+        sqlx::query("DELETE FROM orchestrator_jobs WHERE library_id = $1")
+            .bind(library_id.as_uuid())
+            .execute(pool)
+            .await
+            .expect("clear fixture jobs");
+    }
+
+    async fn job_state(pool: &PgPool, job_id: JobId) -> String {
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM orchestrator_jobs WHERE id = $1",
+        )
+        .bind(job_id.0)
+        .fetch_one(pool)
+        .await
+        .expect("job state")
+    }
+
+    async fn job_correlation_id(pool: &PgPool, job_id: JobId) -> Option<Uuid> {
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT correlation_id FROM orchestrator_jobs WHERE id = $1",
+        )
+        .bind(job_id.0)
+        .fetch_one(pool)
+        .await
+        .expect("job correlation id")
+    }
+
+    async fn active_episode_matches_for_series(
+        pool: &PgPool,
+        library_id: LibraryId,
+        series_root_path: &SeriesRootPath,
+    ) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM orchestrator_jobs
+            WHERE library_id = $1
+              AND kind = $2
+              AND state IN ('ready','deferred','leased')
+              AND payload #>> '{payload,hierarchy,series_root_path}' = $3
+            "#,
+        )
+        .bind(library_id.as_uuid())
+        .bind(JobKind::EpisodeMatch as i16)
+        .bind(series_root_path.as_str())
+        .fetch_one(pool)
+        .await
+        .expect("active episode matches for series")
+    }
+
+    async fn episode_matches_for_series_in_state(
+        pool: &PgPool,
+        library_id: LibraryId,
+        series_root_path: &SeriesRootPath,
+        state: &str,
+    ) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM orchestrator_jobs
+            WHERE library_id = $1
+              AND kind = $2
+              AND state = $3
+              AND payload #>> '{payload,hierarchy,series_root_path}' = $4
+            "#,
+        )
+        .bind(library_id.as_uuid())
+        .bind(JobKind::EpisodeMatch as i16)
+        .bind(state)
+        .bind(series_root_path.as_str())
+        .fetch_one(pool)
+        .await
+        .expect("episode matches for series in state")
+    }
+
+    fn dequeue_request(kind: JobKind, worker_id: &str) -> DequeueRequest {
+        DequeueRequest {
+            kind,
+            worker_id: worker_id.into(),
+            lease_ttl: chrono::Duration::seconds(30),
+            selector: None,
+        }
+    }
+
+    fn noop_folder_actor(library_id: LibraryId) -> Arc<dyn FolderScanActor> {
+        let movie_root_path = MovieRootPath::try_new_under_library_root(
+            "/library",
+            "/library/noop",
+        )
+        .unwrap();
+        let context = FolderScanContext::Movie(MovieFolderScanContext {
+            library_id,
+            movie_root_path,
+        });
+        Arc::new(StubFolderActor {
+            plan: FolderListingPlan {
+                directories: vec![],
+                media_files: vec![],
+                ancillary_files: vec![],
+                generated_listing_hash: "noop".into(),
+                total_entries: 0,
+                folder_missing: false,
+            },
+            discovered: vec![],
+            children: vec![],
+            summary: FolderScanSummary {
+                context,
+                discovered_files: 0,
+                enqueued_subfolders: 0,
+                listing_hash: "noop".into(),
+                outcome: FolderScanOutcome::Empty,
+                completed_at: Utc::now(),
+            },
+        }) as Arc<dyn FolderScanActor>
+    }
+
+    #[tokio::test]
+    async fn series_root_scan_enqueues_resolve_and_season_discovery() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000001));
+        let library_root = "/library";
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            library_root,
+            "/library/Deterministic Show",
+        )
+        .unwrap();
+        let (season_folder_path, season_number) =
+            SeasonFolderPath::try_new_under_series_root(
+                &series_root_path,
+                "/library/Deterministic Show/Season 1",
+            )
+            .unwrap();
+
+        let series_context =
+            FolderScanContext::Series(SeriesFolderScanContext {
+                library_id,
+                series_root_path: series_root_path.clone(),
+            });
+        let season_context =
+            FolderScanContext::Season(SeasonFolderScanContext {
+                library_id,
+                series_root_path: series_root_path.clone(),
+                season_folder_path: season_folder_path.clone(),
+                season_number,
+            });
+
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(16));
+        let mut job_rx = events.subscribe();
+        let mut scan_rx = events.subscribe_scan();
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let correlations = CorrelationCache::default();
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&series_states)));
+
+        let listing_hash = "series-root-listing".to_string();
+        let folder_actor = Arc::new(StubFolderActor {
+            plan: FolderListingPlan {
+                directories: vec![PathBuf::from(season_folder_path.as_str())],
+                media_files: vec![],
+                ancillary_files: vec![],
+                generated_listing_hash: listing_hash.clone(),
+                total_entries: 1,
+                folder_missing: false,
+            },
+            discovered: vec![],
+            children: vec![season_context.clone()],
+            summary: FolderScanSummary {
+                context: series_context.clone(),
+                discovered_files: 0,
+                enqueued_subfolders: 1,
+                listing_hash,
+                outcome: FolderScanOutcome::Changed,
+                completed_at: Utc::now(),
+            },
+        }) as Arc<dyn FolderScanActor>;
+
+        let actors = DispatcherActors::new(
+            folder_actor,
+            Arc::new(StubAnalyzeActor) as Arc<dyn MediaAnalyzeActor>,
+            Arc::new(StubMetadataActor) as Arc<dyn MetadataActor>,
+            Arc::new(StubIndexActor) as Arc<dyn IndexerActor>,
+            Arc::new(StubImageActor) as Arc<dyn ImageFetchActor>,
+        );
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            Arc::clone(&cursors),
+            Arc::clone(&series_states),
+            series_resolver,
+            actors,
+            correlations.clone(),
+        );
+
+        let lease = lease_for_payload(JobPayload::FolderScan(FolderScanJob {
+            context: series_context.clone(),
+            scan_reason: ScanReason::BulkSeed,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        }));
+
+        let status = dispatcher.dispatch(&lease).await;
+        assert!(matches!(status, DispatchStatus::Success));
+
+        let state = series_states
+            .get(library_id, &series_root_path)
+            .await
+            .expect("series state lookup")
+            .expect("series state recorded");
+        assert!(matches!(state.status, SeriesScanStatus::Discovered));
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 1, "series root scan enqueues one job");
+        let JobPayload::SeriesResolve(series_job) = &enqueued[0].payload else {
+            panic!("expected SeriesResolve follow-up");
+        };
+        assert_eq!(series_job.library_id, library_id);
+        assert_eq!(series_job.series_root_path, series_root_path);
+        assert_eq!(series_job.folder_name, "Deterministic Show");
+        assert!(matches!(series_job.scan_reason, ScanReason::BulkSeed));
+        assert!(enqueued[0].correlation_id.is_none());
+
+        let mut saw_series_resolve_enqueue = false;
+        while let Ok(event) = job_rx.try_recv() {
+            if let JobEventPayload::Enqueued {
+                job_id,
+                kind: JobKind::SeriesResolve,
+                ..
+            } = event.payload
+            {
+                assert_ne!(event.meta.correlation_id, Uuid::nil());
+                assert_eq!(
+                    correlations.fetch(&job_id).await,
+                    Some(event.meta.correlation_id)
+                );
+                saw_series_resolve_enqueue = true;
+            }
+        }
+        assert!(
+            saw_series_resolve_enqueue,
+            "SeriesResolve enqueue event should be published"
+        );
+
+        let mut saw_season_discovered = false;
+        let mut saw_completion = false;
+        while let Ok(event) = scan_rx.try_recv() {
+            match event {
+                ScanEvent::FolderDiscovered { context, reason } => {
+                    assert!(matches!(reason, ScanReason::BulkSeed));
+                    let FolderScanContext::Season(ctx) = *context else {
+                        panic!("expected season FolderDiscovered context");
+                    };
+                    assert_eq!(ctx.library_id, library_id);
+                    assert_eq!(ctx.series_root_path, series_root_path);
+                    assert_eq!(ctx.season_folder_path, season_folder_path);
+                    assert_eq!(ctx.season_number, 1);
+                    saw_season_discovered = true;
+                }
+                ScanEvent::FolderScanCompleted(summary) => {
+                    assert_eq!(
+                        summary.context.folder_path_norm(),
+                        series_root_path.as_str()
+                    );
+                    saw_completion = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            saw_completion,
+            "series root completion event is deterministic"
+        );
+        assert!(
+            saw_season_discovered,
+            "season folder discovery should be emitted deterministically"
+        );
+    }
+
+    #[tokio::test]
+    async fn correlation_ids_are_stable_across_merge_dequeue_and_completion() {
+        let correlations = CorrelationCache::default();
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000002));
+        let movie_root_path = MovieRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Correlation",
+        )
+        .unwrap();
+        let payload = JobPayload::FolderScan(FolderScanJob {
+            context: FolderScanContext::Movie(MovieFolderScanContext {
+                library_id,
+                movie_root_path,
+            }),
+            scan_reason: ScanReason::UserRequested,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        });
+        let priority = JobPriority::P1;
+        let handle = JobHandle::accepted(JobId::new(), &payload, priority);
+        let provided = Uuid::from_u128(0x5760000000000000000000000000c011);
+
+        let enqueued_event = JobEvent::from_handle(
+            &handle,
+            Some(provided),
+            JobEventPayload::Enqueued {
+                job_id: handle.job_id,
+                kind: payload.kind(),
+                priority,
+            },
+            None,
+        );
+        correlations
+            .remember(handle.job_id, enqueued_event.meta.correlation_id)
+            .await;
+        assert_eq!(enqueued_event.meta.correlation_id, provided);
+
+        let merged = JobHandle::merged(handle.job_id, &payload, priority);
+        let merge_event = JobEvent::from_handle(
+            &merged,
+            correlations.fetch(&handle.job_id).await,
+            JobEventPayload::Merged {
+                existing_job_id: handle.job_id,
+                merged_job_id: merged.job_id,
+                kind: payload.kind(),
+                priority,
+            },
+            None,
+        );
+        correlations
+            .remember_if_absent(merged.job_id, merge_event.meta.correlation_id)
+            .await;
+        assert_eq!(merge_event.meta.correlation_id, provided);
+
+        let dequeue_event = JobEvent::from_job(
+            Some(correlations.fetch_or_generate(handle.job_id).await),
+            payload.library_id(),
+            handle.dedupe_key.clone(),
+            None,
+            JobEventPayload::Dequeued {
+                job_id: handle.job_id,
+                kind: payload.kind(),
+                priority,
+                lease_id: LeaseId::new(),
+            },
+        );
+        assert_eq!(dequeue_event.meta.correlation_id, provided);
+
+        let completed_event = JobEvent::from_job(
+            Some(correlations.take_or_generate(handle.job_id).await),
+            payload.library_id(),
+            handle.dedupe_key.clone(),
+            None,
+            JobEventPayload::Completed {
+                job_id: handle.job_id,
+                kind: payload.kind(),
+                priority,
+            },
+        );
+        assert_eq!(completed_event.meta.correlation_id, provided);
+        assert!(correlations.fetch(&handle.job_id).await.is_none());
+
+        let generated_handle =
+            JobHandle::accepted(JobId::new(), &payload, JobPriority::P2);
+        let generated_enqueue = JobEvent::from_handle(
+            &generated_handle,
+            None,
+            JobEventPayload::Enqueued {
+                job_id: generated_handle.job_id,
+                kind: payload.kind(),
+                priority: JobPriority::P2,
+            },
+            None,
+        );
+        assert_ne!(generated_enqueue.meta.correlation_id, Uuid::nil());
+        correlations
+            .remember(
+                generated_handle.job_id,
+                generated_enqueue.meta.correlation_id,
+            )
+            .await;
+        let generated_completion =
+            correlations.take_or_generate(generated_handle.job_id).await;
+        assert_eq!(generated_completion, generated_enqueue.meta.correlation_id);
+        assert!(correlations.fetch(&generated_handle.job_id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn episode_match_dependency_key_defers_until_release() {
+        let Some(pool) = postgres_pool_or_skip(
+            "episode_match_dependency_key_defers_until_release",
+        )
+        .await
+        else {
+            return;
+        };
+        let _db_guard = DB_TEST_LOCK.lock().await;
+        let queue = PostgresQueueService::new(pool.clone())
+            .await
+            .expect("queue init");
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000003));
+        upsert_library(
+            &pool,
+            library_id,
+            "Episode Match Gating",
+            LibraryType::Series,
+            vec!["/library".into()],
+        )
+        .await
+        .expect("seed series library");
+        clear_queue_rows(&pool, library_id).await;
+
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Gated Show",
+        )
+        .unwrap();
+        let dependency_key = DependencyKey::series_root(&series_root_path);
+        let mut request = EnqueueRequest::new(
+            JobPriority::P0,
+            JobPayload::EpisodeMatch(episode_match_job(
+                library_id,
+                series_root_path.clone(),
+                "Gated Show",
+                "/library/Gated Show/Season 1/S01E01.mkv",
+                1,
+            )),
+        )
+        .with_dependency(dependency_key.clone());
+        let correlation_id =
+            Uuid::from_u128(0x5760000000000000000000000000c012);
+        request.correlation_id = Some(correlation_id);
+
+        let handle = queue.enqueue(request).await.expect("enqueue deferred");
+        assert!(handle.accepted);
+        assert_eq!(job_state(&pool, handle.job_id).await, "deferred");
+        assert_eq!(
+            job_correlation_id(&pool, handle.job_id).await,
+            Some(correlation_id)
+        );
+
+        let before_release = queue
+            .dequeue(dequeue_request(JobKind::EpisodeMatch, "before-release"))
+            .await
+            .expect("dequeue before release");
+        assert!(
+            before_release.is_none(),
+            "deferred EpisodeMatch must not dequeue before dependency release"
+        );
+
+        let released = queue
+            .release_dependency(library_id, &dependency_key)
+            .await
+            .expect("release dependency");
+        assert_eq!(released, 1, "exactly one matching dependency is released");
+
+        let lease = queue
+            .dequeue(dequeue_request(JobKind::EpisodeMatch, "after-release"))
+            .await
+            .expect("dequeue after release")
+            .expect("EpisodeMatch should be ready after release");
+        assert_eq!(lease.job.id, handle.job_id);
+        assert_eq!(lease.job.correlation_id, Some(correlation_id));
+        assert!(lease.job.dependency_key.is_none());
+
+        queue
+            .complete(lease.lease_id)
+            .await
+            .expect("complete episode match");
+        assert_eq!(job_state(&pool, handle.job_id).await, "completed");
+        assert_eq!(
+            active_episode_matches_for_series(
+                &pool,
+                library_id,
+                &series_root_path
+            )
+            .await,
+            0,
+            "completed dependency-gated EpisodeMatch leaves no active row"
+        );
+    }
+
+    #[tokio::test]
+    async fn series_resolve_releases_episode_match_and_reaches_index() {
+        let Some(pool) = postgres_pool_or_skip(
+            "series_resolve_releases_matching_episode_match_and_pipeline_reaches_index",
+        )
+        .await
+        else {
+            return;
+        };
+        let _db_guard = DB_TEST_LOCK.lock().await;
+        let queue = Arc::new(
+            PostgresQueueService::new(pool.clone())
+                .await
+                .expect("queue init"),
+        );
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let mut job_rx = events.subscribe();
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let correlations = CorrelationCache::default();
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000004));
+        upsert_library(
+            &pool,
+            library_id,
+            "Series Resolve Pipeline",
+            LibraryType::Series,
+            vec!["/library".into()],
+        )
+        .await
+        .expect("seed series library");
+        clear_queue_rows(&pool, library_id).await;
+
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Pipeline Show",
+        )
+        .unwrap();
+        let other_series_root_path =
+            SeriesRootPath::try_new_under_library_root(
+                "/library",
+                "/library/Other Pipeline Show",
+            )
+            .unwrap();
+        let episode_path = "/library/Pipeline Show/Season 1/S01E01.mkv";
+        let other_episode_path =
+            "/library/Other Pipeline Show/Season 1/S01E01.mkv";
+        let other_dependency =
+            DependencyKey::series_root(&other_series_root_path);
+        queue
+            .enqueue(
+                EnqueueRequest::new(
+                    JobPriority::P0,
+                    JobPayload::EpisodeMatch(episode_match_job(
+                        library_id,
+                        other_series_root_path.clone(),
+                        "Other Pipeline Show",
+                        other_episode_path,
+                        1,
+                    )),
+                )
+                .with_dependency(other_dependency.clone()),
+            )
+            .await
+            .expect("enqueue unrelated deferred EpisodeMatch");
+
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&series_states)));
+        let actors = DispatcherActors::new(
+            noop_folder_actor(library_id),
+            Arc::new(StubAnalyzeActor) as Arc<dyn MediaAnalyzeActor>,
+            Arc::new(StubMetadataActor) as Arc<dyn MetadataActor>,
+            Arc::new(StubIndexActor) as Arc<dyn IndexerActor>,
+            Arc::new(StubImageActor) as Arc<dyn ImageFetchActor>,
+        );
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            Arc::clone(&cursors),
+            Arc::clone(&series_states),
+            series_resolver,
+            actors,
+            correlations.clone(),
+        );
+
+        let media_analyze = media_analyze_episode_job(
+            library_id,
+            series_root_path.clone(),
+            "Pipeline Show",
+            episode_path,
+            1,
+        );
+        let status = dispatcher
+            .dispatch(&lease_for_payload(JobPayload::MediaAnalyze(
+                media_analyze,
+            )))
+            .await;
+        assert!(matches!(status, DispatchStatus::Success));
+        assert_eq!(
+            episode_matches_for_series_in_state(
+                &pool,
+                library_id,
+                &series_root_path,
+                "deferred"
+            )
+            .await,
+            1,
+            "episode analyze defers EpisodeMatch behind series_root dependency"
+        );
+        assert!(
+            queue
+                .dequeue(dequeue_request(JobKind::EpisodeMatch, "blocked"))
+                .await
+                .expect("blocked dequeue")
+                .is_none(),
+            "EpisodeMatch cannot dequeue before SeriesResolve releases its dependency"
+        );
+
+        let series_resolve = SeriesResolveJob {
+            library_id,
+            series_root_path: series_root_path.clone(),
+            hint: Some(series_hint("Pipeline Show")),
+            folder_name: "Pipeline Show".into(),
+            scan_reason: ScanReason::BulkSeed,
+        };
+        let status = dispatcher
+            .dispatch(&lease_for_payload(JobPayload::SeriesResolve(
+                series_resolve,
+            )))
+            .await;
+        assert!(matches!(status, DispatchStatus::Success));
+        assert_eq!(
+            episode_matches_for_series_in_state(
+                &pool,
+                library_id,
+                &series_root_path,
+                "ready"
+            )
+            .await,
+            1,
+            "SeriesResolve releases the matching series_root dependency"
+        );
+        assert_eq!(
+            episode_matches_for_series_in_state(
+                &pool,
+                library_id,
+                &other_series_root_path,
+                "deferred"
+            )
+            .await,
+            1,
+            "SeriesResolve must not release another series root dependency"
+        );
+
+        let episode_lease = queue
+            .dequeue(dequeue_request(JobKind::EpisodeMatch, "episode"))
+            .await
+            .expect("episode dequeue")
+            .expect("released EpisodeMatch");
+        let JobPayload::EpisodeMatch(episode_job) = &episode_lease.job.payload
+        else {
+            panic!("expected EpisodeMatch payload");
+        };
+        assert_eq!(episode_job.path_norm, episode_path);
+        assert_eq!(episode_job.hierarchy.series_root_path, series_root_path);
+        let episode_correlation = correlations
+            .fetch_persisted_or_generate(
+                episode_lease.job.id,
+                episode_lease.job.correlation_id,
+            )
+            .await;
+        assert_ne!(episode_correlation, Uuid::nil());
+
+        let status = dispatcher.dispatch(&episode_lease).await;
+        assert!(matches!(status, DispatchStatus::Success));
+        queue
+            .complete(episode_lease.lease_id)
+            .await
+            .expect("complete EpisodeMatch");
+        assert_eq!(
+            correlations
+                .take_persisted_or_generate(
+                    episode_lease.job.id,
+                    episode_lease.job.correlation_id,
+                )
+                .await,
+            episode_correlation
+        );
+
+        let metadata_lease = queue
+            .dequeue(dequeue_request(JobKind::MetadataEnrich, "metadata"))
+            .await
+            .expect("metadata dequeue")
+            .expect("episode MetadataEnrich");
+        let metadata_correlation = correlations
+            .fetch_persisted_or_generate(
+                metadata_lease.job.id,
+                metadata_lease.job.correlation_id,
+            )
+            .await;
+        assert_ne!(metadata_correlation, Uuid::nil());
+        let JobPayload::MetadataEnrich(metadata_job) =
+            &metadata_lease.job.payload
+        else {
+            panic!("expected MetadataEnrich payload");
+        };
+        assert_eq!(metadata_job.path_norm, episode_path);
+        let AnalyzeScanHierarchy::Episode(resolved_hierarchy) =
+            &metadata_job.hierarchy
+        else {
+            panic!("episode MetadataEnrich should keep episode hierarchy");
+        };
+        assert!(
+            matches!(resolved_hierarchy.series, SeriesLink::Resolved(_)),
+            "EpisodeMatch should resolve the episode series before metadata enrichment"
+        );
+
+        let status = dispatcher.dispatch(&metadata_lease).await;
+        assert!(matches!(status, DispatchStatus::Success));
+        queue
+            .complete(metadata_lease.lease_id)
+            .await
+            .expect("complete MetadataEnrich");
+        assert_eq!(
+            correlations
+                .take_persisted_or_generate(
+                    metadata_lease.job.id,
+                    metadata_lease.job.correlation_id,
+                )
+                .await,
+            metadata_correlation
+        );
+
+        let mut saw_episode_index = false;
+        loop {
+            let Some(index_lease) = queue
+                .dequeue(dequeue_request(JobKind::IndexUpsert, "index"))
+                .await
+                .expect("index dequeue")
+            else {
+                break;
+            };
+            let index_correlation = correlations
+                .fetch_persisted_or_generate(
+                    index_lease.job.id,
+                    index_lease.job.correlation_id,
+                )
+                .await;
+            assert_ne!(index_correlation, Uuid::nil());
+            let JobPayload::IndexUpsert(index_job) = &index_lease.job.payload
+            else {
+                panic!("expected IndexUpsert payload");
+            };
+            if index_job.path_norm == episode_path {
+                saw_episode_index = true;
+                let AnalyzeScanHierarchy::Episode(index_hierarchy) =
+                    &index_job.hierarchy
+                else {
+                    panic!("episode IndexUpsert should keep episode hierarchy");
+                };
+                assert!(matches!(
+                    index_hierarchy.series,
+                    SeriesLink::Resolved(_)
+                ));
+            }
+            let status = dispatcher.dispatch(&index_lease).await;
+            assert!(matches!(status, DispatchStatus::Success));
+            queue
+                .complete(index_lease.lease_id)
+                .await
+                .expect("complete IndexUpsert");
+            assert_eq!(
+                correlations
+                    .take_persisted_or_generate(
+                        index_lease.job.id,
+                        index_lease.job.correlation_id,
+                    )
+                    .await,
+                index_correlation
+            );
+        }
+        assert!(
+            saw_episode_index,
+            "episode MetadataEnrich should progress to IndexUpsert"
+        );
+        assert_eq!(
+            active_episode_matches_for_series(
+                &pool,
+                library_id,
+                &series_root_path
+            )
+            .await,
+            0,
+            "successful scanned series leaves no ready/deferred/leased EpisodeMatch jobs"
+        );
+
+        let mut saw_generated_follow_up_correlation = false;
+        while let Ok(event) = job_rx.try_recv() {
+            match event.payload {
+                JobEventPayload::Enqueued { job_id, .. }
+                | JobEventPayload::Merged {
+                    merged_job_id: job_id,
+                    ..
+                } => {
+                    assert_ne!(event.meta.correlation_id, Uuid::nil());
+                    if let Some(cached) = correlations.fetch(&job_id).await {
+                        assert_eq!(cached, event.meta.correlation_id);
+                    }
+                    saw_generated_follow_up_correlation = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            saw_generated_follow_up_correlation,
+            "dispatcher follow-up jobs should publish and cache correlation ids"
+        );
     }
 
     #[tokio::test]

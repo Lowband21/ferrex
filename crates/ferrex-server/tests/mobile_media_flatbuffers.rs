@@ -1,4 +1,6 @@
-use std::{collections::HashSet, net::SocketAddr, path::PathBuf};
+use std::{
+    collections::HashSet, net::SocketAddr, path::PathBuf, time::Duration,
+};
 
 use anyhow::{Context, Result};
 use axum::{Router, body::Bytes, http::StatusCode, http::header};
@@ -6,6 +8,26 @@ use axum_test::{TestResponse, TestServer};
 use chrono::Utc;
 use ferrex_core::{
     api::routes::{utils::replace_param, v1},
+    domain::scan::{
+        AnalyzeScanHierarchy,
+        actors::{
+            FolderScanOutcome, FolderScanSummary, MediaFileDiscovered,
+            MediaKindHint,
+            index::{IndexingChange, IndexingOutcome},
+        },
+        orchestration::{
+            ScanReason,
+            context::{
+                EpisodeHint, EpisodeLink, EpisodeRef, EpisodeScanHierarchy,
+                FolderScanContext, ScanNodeKind, SeasonFolderPath,
+                SeasonFolderScanContext, SeasonLink, SeasonRef,
+                SeasonScanHierarchy, SeriesFolderScanContext, SeriesHint,
+                SeriesLink, SeriesRef, SeriesRootPath, SeriesScanHierarchy,
+            },
+            events::{ScanEvent, ScanEventPublisher},
+            job::MediaFingerprint,
+        },
+    },
     infra::cache::{
         ImageBlobStore, ImageCacheRoot, ImageFileStore, image_cache_key_for,
     },
@@ -19,8 +41,8 @@ use ferrex_flatbuffers::{
 use ferrex_model::library::LibraryLikeMut;
 use ferrex_model::{
     EpisodeID, EpisodeReference, ImageSize, Library, LibraryId, LibraryType,
-    MediaFile, MediaFileMetadata, MediaID, MovieID, MovieReference, SeasonID,
-    SeasonReference, Series, SeriesID,
+    MediaEvent, MediaFile, MediaFileMetadata, MediaID, MovieID, MovieReference,
+    SeasonID, SeasonReference, Series, SeriesID, VideoMediaType,
 };
 use flatbuffers::FlatBufferBuilder;
 use rkyv::util::AlignedVec;
@@ -271,12 +293,29 @@ fn make_episode_details() -> ferrex_model::EpisodeDetails {
 }
 
 fn make_media_file(media_id: MediaID, library_id: LibraryId) -> MediaFile {
+    make_media_file_at_path(
+        media_id,
+        library_id,
+        PathBuf::from(format!("/media/{}.mkv", Uuid::now_v7())),
+    )
+}
+
+fn make_media_file_at_path(
+    media_id: MediaID,
+    library_id: LibraryId,
+    path: PathBuf,
+) -> MediaFile {
     let now = Utc::now();
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file.mkv")
+        .to_string();
     MediaFile {
         id: Uuid::now_v7(),
         media_id,
-        path: PathBuf::from(format!("/media/{}.mkv", Uuid::now_v7())),
-        filename: "file.mkv".to_string(),
+        path,
+        filename,
         size: 123_456,
         discovered_at: now,
         created_at: now,
@@ -795,6 +834,337 @@ async fn post_series_bundle_sync_flatbuffers(
     parse_series_bundle_sync_response(response.as_bytes().as_ref())
 }
 
+async fn seed_series_records(
+    state: &AppState,
+    pool: &PgPool,
+    library_id: LibraryId,
+    series_id: SeriesID,
+    season_id: SeasonID,
+    episode_id: EpisodeID,
+    episode_path: &str,
+) -> Result<()> {
+    let now = Utc::now();
+    let title = "Finalized Contract Series";
+    let series_poster_iid = Uuid::now_v7();
+    let season_poster_iid = Uuid::now_v7();
+    seed_primary_image(
+        pool,
+        series_id.to_uuid(),
+        "series",
+        "poster",
+        series_poster_iid,
+    )
+    .await?;
+    seed_primary_image(
+        pool,
+        season_id.to_uuid(),
+        "season",
+        "poster",
+        season_poster_iid,
+    )
+    .await?;
+    let mut series_details = make_series_details(title);
+    series_details.id = 9_200;
+    series_details.primary_poster_iid = Some(series_poster_iid);
+    let mut season_details = make_season_details();
+    season_details.id = 9_201;
+    season_details.primary_poster_iid = Some(season_poster_iid);
+    let mut episode_details = make_episode_details();
+    episode_details.id = 9_202;
+    let series = Series {
+        id: series_id,
+        library_id,
+        tmdb_id: 9_200,
+        title: title.into(),
+        details: series_details,
+        endpoint: "/api/v1/series/finalized-contract".to_string().into(),
+        discovered_at: now,
+        created_at: now,
+        theme_color: None,
+    };
+    let season = SeasonReference {
+        id: season_id,
+        library_id,
+        season_number: 1.into(),
+        series_id,
+        tmdb_series_id: 9_200,
+        details: season_details,
+        endpoint: "/api/v1/series/finalized-contract/season/1"
+            .to_string()
+            .into(),
+        discovered_at: now,
+        created_at: now,
+        theme_color: None,
+    };
+    let episode = EpisodeReference {
+        id: episode_id,
+        library_id,
+        episode_number: 1.into(),
+        season_number: 1.into(),
+        season_id,
+        series_id,
+        tmdb_series_id: 9_200,
+        details: episode_details,
+        endpoint: "/api/v1/series/finalized-contract/season/1/episode/1"
+            .to_string()
+            .into(),
+        file: make_media_file_at_path(
+            MediaID::Episode(episode_id),
+            library_id,
+            PathBuf::from(episode_path),
+        ),
+        discovered_at: now,
+        created_at: now,
+    };
+
+    state
+        .unit_of_work()
+        .media_refs
+        .store_series_reference(&series)
+        .await
+        .context("store finalization series")?;
+    state
+        .unit_of_work()
+        .media_refs
+        .store_season_reference(&season)
+        .await
+        .context("store finalization season")?;
+    state
+        .unit_of_work()
+        .media_refs
+        .store_episode_reference(&episode)
+        .await
+        .context("store finalization episode")?;
+
+    Ok(())
+}
+
+async fn series_bundle_version_row(
+    pool: &PgPool,
+    library_id: LibraryId,
+    series_id: SeriesID,
+) -> Result<(bool, u64)> {
+    let (finalized, version): (bool, i64) = sqlx::query_as(
+        r#"
+        SELECT finalized, version
+        FROM series_bundle_versioning
+        WHERE library_id = $1 AND series_id = $2
+        "#,
+    )
+    .bind(library_id.to_uuid())
+    .bind(series_id.to_uuid())
+    .fetch_one(pool)
+    .await
+    .context("fetch series bundle versioning row")?;
+
+    Ok((finalized, version as u64))
+}
+
+async fn publish_scan_event(state: &AppState, event: ScanEvent) -> Result<()> {
+    state
+        .scan_control()
+        .orchestrator()
+        .runtime()
+        .events()
+        .publish_scan_event(event)
+        .await
+        .context("publish scan event")
+}
+
+fn finalized_series_bundle_count(
+    state: &AppState,
+    library_id: LibraryId,
+    series_id: SeriesID,
+) -> usize {
+    state
+        .scan_control()
+        .media_event_history_since_sequence(0)
+        .into_iter()
+        .filter(|frame| {
+            matches!(
+                &frame.event,
+                MediaEvent::SeriesBundleFinalized {
+                    library_id: event_library_id,
+                    series_id: event_series_id,
+                } if *event_library_id == library_id && *event_series_id == series_id
+            )
+        })
+        .count()
+}
+
+async fn assert_no_series_bundle_finalized(
+    state: &AppState,
+    library_id: LibraryId,
+    series_id: SeriesID,
+    context: &str,
+) {
+    tokio::time::sleep(Duration::from_millis(75)).await;
+    assert_eq!(
+        finalized_series_bundle_count(state, library_id, series_id),
+        0,
+        "series bundle finalized too early after {context}"
+    );
+}
+
+async fn wait_for_one_series_bundle_finalized(
+    state: &AppState,
+    library_id: LibraryId,
+    series_id: SeriesID,
+) {
+    for _ in 0..100 {
+        let count = finalized_series_bundle_count(state, library_id, series_id);
+        assert!(count <= 1, "duplicate finalization events observed");
+        if count == 1 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    panic!("timed out waiting for SeriesBundleFinalized");
+}
+
+fn media_discovered_event(
+    library_id: LibraryId,
+    series_root: &SeriesRootPath,
+    season_context: &SeasonFolderScanContext,
+    episode_id: EpisodeID,
+    episode_path: &str,
+) -> ScanEvent {
+    ScanEvent::MediaFileDiscovered(Box::new(MediaFileDiscovered {
+        library_id,
+        path_norm: episode_path.to_string(),
+        fingerprint: MediaFingerprint::default(),
+        classified_as: MediaKindHint::Episode,
+        media_id: MediaID::Episode(episode_id),
+        variant: VideoMediaType::Episode,
+        node: ScanNodeKind::EpisodeFile,
+        hierarchy: AnalyzeScanHierarchy::Episode(EpisodeScanHierarchy {
+            series_root_path: series_root.clone(),
+            series: SeriesLink::Hint(SeriesHint {
+                title: "Finalized Contract Series".to_string(),
+                slug: Some("finalized-contract".to_string()),
+                year: None,
+                region: None,
+            }),
+            season: SeasonLink::Number(season_context.season_number),
+            episode: EpisodeLink::Hint(EpisodeHint {
+                number: 1,
+                title: Some("Pilot".to_string()),
+            }),
+        }),
+        context: FolderScanContext::Season(season_context.clone()),
+        scan_reason: ScanReason::BulkSeed,
+    }))
+}
+
+fn folder_completed_event(
+    context: FolderScanContext,
+    discovered_files: usize,
+    enqueued_subfolders: usize,
+    listing_hash: &str,
+) -> ScanEvent {
+    ScanEvent::FolderScanCompleted(FolderScanSummary {
+        context,
+        discovered_files,
+        enqueued_subfolders,
+        listing_hash: listing_hash.to_string(),
+        outcome: FolderScanOutcome::Changed,
+        completed_at: Utc::now(),
+    })
+}
+
+fn indexed_series_event(
+    library_id: LibraryId,
+    series_root: &SeriesRootPath,
+    series_id: SeriesID,
+) -> ScanEvent {
+    ScanEvent::Indexed(Box::new(IndexingOutcome {
+        library_id,
+        path_norm: series_root.as_str().to_string(),
+        media_id: MediaID::Series(series_id),
+        hierarchy: AnalyzeScanHierarchy::Series(SeriesScanHierarchy {
+            series_root_path: series_root.clone(),
+            series: SeriesLink::Resolved(SeriesRef {
+                id: series_id,
+                slug: Some("finalized-contract".to_string()),
+                title: Some("Finalized Contract Series".to_string()),
+            }),
+        }),
+        indexed_at: Utc::now(),
+        upserted: true,
+        media: None,
+        change: IndexingChange::Created,
+    }))
+}
+
+fn indexed_season_event(
+    library_id: LibraryId,
+    series_root: &SeriesRootPath,
+    season_id: SeasonID,
+    series_id: SeriesID,
+    season_number: u16,
+    season_path: &SeasonFolderPath,
+) -> ScanEvent {
+    ScanEvent::Indexed(Box::new(IndexingOutcome {
+        library_id,
+        path_norm: season_path.as_str().to_string(),
+        media_id: MediaID::Season(season_id),
+        hierarchy: AnalyzeScanHierarchy::Season(SeasonScanHierarchy {
+            series_root_path: series_root.clone(),
+            series: SeriesLink::Resolved(SeriesRef {
+                id: series_id,
+                slug: Some("finalized-contract".to_string()),
+                title: Some("Finalized Contract Series".to_string()),
+            }),
+            season: SeasonLink::Resolved(SeasonRef {
+                id: season_id,
+                number: Some(season_number),
+            }),
+        }),
+        indexed_at: Utc::now(),
+        upserted: true,
+        media: None,
+        change: IndexingChange::Created,
+    }))
+}
+
+fn indexed_episode_event(
+    library_id: LibraryId,
+    series_root: &SeriesRootPath,
+    season_id: SeasonID,
+    series_id: SeriesID,
+    episode_id: EpisodeID,
+    season_number: u16,
+    episode_path: &str,
+) -> ScanEvent {
+    ScanEvent::Indexed(Box::new(IndexingOutcome {
+        library_id,
+        path_norm: episode_path.to_string(),
+        media_id: MediaID::Episode(episode_id),
+        hierarchy: AnalyzeScanHierarchy::Episode(EpisodeScanHierarchy {
+            series_root_path: series_root.clone(),
+            series: SeriesLink::Resolved(SeriesRef {
+                id: series_id,
+                slug: Some("finalized-contract".to_string()),
+                title: Some("Finalized Contract Series".to_string()),
+            }),
+            season: SeasonLink::Resolved(SeasonRef {
+                id: season_id,
+                number: Some(season_number),
+            }),
+            episode: EpisodeLink::Resolved(EpisodeRef {
+                id: episode_id,
+                number: Some(1),
+                title: Some("Pilot".to_string()),
+            }),
+        }),
+        indexed_at: Utc::now(),
+        upserted: true,
+        media: None,
+        change: IndexingChange::Created,
+    }))
+}
+
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn libraries_negotiate_json_rkyv_and_flatbuffers(
     pool: PgPool,
@@ -1119,6 +1489,390 @@ async fn series_bundles_support_flatbuffers_and_preserve_rkyv(
     assert_eq!(rkyv_bundle.series_id, series_id);
     assert_eq!(rkyv_bundle.seasons.len(), 1);
     assert_eq!(rkyv_bundle.episodes.len(), 1);
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn series_bundle_finalization_emits_once_and_feeds_sync_fetch(
+    pool: PgPool,
+) -> Result<()> {
+    let (server, state, _tempdir) = build_server(pool.clone()).await?;
+    let token = login_test_user(&server, "media_fb_series_finalize").await?;
+    let library_id = create_library(
+        &state,
+        make_library("Finalization", LibraryType::Series),
+    )
+    .await?;
+    let series_id = SeriesID(Uuid::now_v7());
+    let season_id = SeasonID(Uuid::now_v7());
+    let episode_id = EpisodeID(Uuid::now_v7());
+    let series_root = SeriesRootPath::try_new(
+        "/test/Finalization/Finalized Contract Series",
+    )?;
+    let (season_path, season_number) =
+        SeasonFolderPath::try_new_under_series_root(
+            &series_root,
+            "/test/Finalization/Finalized Contract Series/Season 1",
+        )?;
+    let episode_path = format!("{}/S01E01.mkv", season_path.as_str());
+    let series_context = SeriesFolderScanContext {
+        library_id,
+        series_root_path: series_root.clone(),
+    };
+    let season_context = SeasonFolderScanContext {
+        library_id,
+        series_root_path: series_root.clone(),
+        season_folder_path: season_path.clone(),
+        season_number,
+    };
+
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    assert_eq!(versioning_row_count(&pool, library_id).await?, 0);
+
+    publish_scan_event(
+        &state,
+        ScanEvent::FolderDiscovered {
+            context: Box::new(FolderScanContext::Series(
+                series_context.clone(),
+            )),
+            reason: ScanReason::BulkSeed,
+        },
+    )
+    .await?;
+    assert_no_series_bundle_finalized(
+        &state,
+        library_id,
+        series_id,
+        "series root discovery",
+    )
+    .await;
+
+    publish_scan_event(
+        &state,
+        ScanEvent::FolderDiscovered {
+            context: Box::new(FolderScanContext::Season(
+                season_context.clone(),
+            )),
+            reason: ScanReason::BulkSeed,
+        },
+    )
+    .await?;
+    assert_no_series_bundle_finalized(
+        &state,
+        library_id,
+        series_id,
+        "season discovery",
+    )
+    .await;
+
+    publish_scan_event(
+        &state,
+        media_discovered_event(
+            library_id,
+            &series_root,
+            &season_context,
+            episode_id,
+            &episode_path,
+        ),
+    )
+    .await?;
+    assert_no_series_bundle_finalized(
+        &state,
+        library_id,
+        series_id,
+        "episode discovery",
+    )
+    .await;
+
+    publish_scan_event(
+        &state,
+        folder_completed_event(
+            FolderScanContext::Season(season_context.clone()),
+            1,
+            0,
+            "season-listing-v1",
+        ),
+    )
+    .await?;
+    assert_no_series_bundle_finalized(
+        &state,
+        library_id,
+        series_id,
+        "season completion before root completion",
+    )
+    .await;
+
+    publish_scan_event(
+        &state,
+        folder_completed_event(
+            FolderScanContext::Series(series_context.clone()),
+            0,
+            1,
+            "series-listing-v1",
+        ),
+    )
+    .await?;
+    assert_no_series_bundle_finalized(
+        &state,
+        library_id,
+        series_id,
+        "root completion before index readiness",
+    )
+    .await;
+
+    publish_scan_event(
+        &state,
+        indexed_series_event(library_id, &series_root, series_id),
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        indexed_season_event(
+            library_id,
+            &series_root,
+            season_id,
+            series_id,
+            season_number,
+            &season_path,
+        ),
+    )
+    .await?;
+    assert_no_series_bundle_finalized(
+        &state,
+        library_id,
+        series_id,
+        "series and season indexing before episode indexing",
+    )
+    .await;
+
+    publish_scan_event(
+        &state,
+        indexed_episode_event(
+            library_id,
+            &series_root,
+            season_id,
+            series_id,
+            episode_id,
+            season_number,
+            &episode_path,
+        ),
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        finalized_series_bundle_count(&state, library_id, series_id),
+        0,
+        "finalization must wait for DB-hydratable series, season, and episode rows"
+    );
+    assert_eq!(versioning_row_count(&pool, library_id).await?, 0);
+
+    seed_series_records(
+        &state,
+        &pool,
+        library_id,
+        series_id,
+        season_id,
+        episode_id,
+        &episode_path,
+    )
+    .await?;
+
+    // Replay the completed scan/index contract after DB readiness. This keeps
+    // the assertion deterministic even if the background aggregator subscribed
+    // after one of the intentionally pre-DB events above.
+    publish_scan_event(
+        &state,
+        ScanEvent::FolderDiscovered {
+            context: Box::new(FolderScanContext::Series(
+                series_context.clone(),
+            )),
+            reason: ScanReason::BulkSeed,
+        },
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        ScanEvent::FolderDiscovered {
+            context: Box::new(FolderScanContext::Season(
+                season_context.clone(),
+            )),
+            reason: ScanReason::BulkSeed,
+        },
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        media_discovered_event(
+            library_id,
+            &series_root,
+            &season_context,
+            episode_id,
+            &episode_path,
+        ),
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        folder_completed_event(
+            FolderScanContext::Season(season_context.clone()),
+            1,
+            0,
+            "season-listing-v1-repeat",
+        ),
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        folder_completed_event(
+            FolderScanContext::Series(series_context.clone()),
+            0,
+            1,
+            "series-listing-v1-repeat",
+        ),
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        indexed_series_event(library_id, &series_root, series_id),
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        indexed_season_event(
+            library_id,
+            &series_root,
+            season_id,
+            series_id,
+            season_number,
+            &season_path,
+        ),
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        indexed_episode_event(
+            library_id,
+            &series_root,
+            season_id,
+            series_id,
+            episode_id,
+            season_number,
+            &episode_path,
+        ),
+    )
+    .await?;
+    wait_for_one_series_bundle_finalized(&state, library_id, series_id).await;
+
+    let (finalized, version) =
+        series_bundle_version_row(&pool, library_id, series_id).await?;
+    assert!(finalized);
+    assert!(version >= 1);
+    assert_eq!(versioning_row_count(&pool, library_id).await?, 1);
+
+    publish_scan_event(
+        &state,
+        folder_completed_event(
+            FolderScanContext::Season(season_context.clone()),
+            1,
+            0,
+            "season-listing-v1-repeat",
+        ),
+    )
+    .await?;
+    publish_scan_event(
+        &state,
+        indexed_episode_event(
+            library_id,
+            &series_root,
+            season_id,
+            series_id,
+            episode_id,
+            season_number,
+            &episode_path,
+        ),
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        finalized_series_bundle_count(&state, library_id, series_id),
+        1,
+        "completion/index repeats must not emit duplicate finalizations"
+    );
+    assert_eq!(versioning_row_count(&pool, library_id).await?, 1);
+    assert_eq!(
+        series_bundle_version_row(&pool, library_id, series_id).await?,
+        (true, version),
+        "idempotent events must not alter stable bundle version rows"
+    );
+
+    let sync =
+        post_series_bundle_sync_flatbuffers(&server, &token, library_id, &[])
+            .await?;
+    assert_eq!(sync.stale_series_ids, vec![series_id.to_uuid()]);
+    assert!(sync.deleted_series_ids.is_empty());
+    assert_eq!(
+        sync.server_versions,
+        vec![batch_sync::SeriesBundleVersion {
+            series_id: series_id.to_uuid(),
+            version,
+        }]
+    );
+
+    let fetch_path = replace_param(
+        v1::libraries::series_bundles::FETCH,
+        "{id}",
+        library_id.to_uuid().to_string(),
+    );
+    let fetch = server
+        .post(&fetch_path)
+        .add_header("Authorization", bearer(&token))
+        .add_header("Accept", FLATBUFFERS_MIME)
+        .content_type(FLATBUFFERS_MIME)
+        .bytes(Bytes::from(
+            batch_sync::serialize_series_bundle_fetch_request(&[
+                series_id.to_uuid()
+            ]),
+        ))
+        .await;
+    fetch.assert_status_ok();
+    assert_content_type_starts_with(&fetch, FLATBUFFERS_MIME)?;
+    let response = flatbuffers::root::<fb::library::SeriesBundleFetchResponse>(
+        fetch.as_bytes().as_ref(),
+    )?;
+    let bundles = response.bundles().context("missing bundles")?;
+    assert_eq!(bundles.len(), 1);
+    let bundle = bundles.get(0);
+    assert_eq!(fb_to_uuid(bundle.series_id()), series_id.to_uuid());
+    assert_eq!(bundle.version(), version);
+    let items = bundle.items().context("missing bundle items")?;
+    assert_eq!(items.len(), 3);
+    let series_record = items
+        .get(0)
+        .variant_as_series_reference()
+        .context("missing series record")?;
+    assert_eq!(fb_to_uuid(series_record.id()), series_id.to_uuid());
+    assert_eq!(series_record.title(), "Finalized Contract Series");
+    let season_record = items
+        .get(1)
+        .variant_as_season_reference()
+        .context("missing season record")?;
+    assert_eq!(fb_to_uuid(season_record.id()), season_id.to_uuid());
+    assert_eq!(season_record.season_number(), season_number);
+    let episode_record = items
+        .get(2)
+        .variant_as_episode_reference()
+        .context("missing episode record")?;
+    assert_eq!(fb_to_uuid(episode_record.id()), episode_id.to_uuid());
+    assert_eq!(episode_record.season_number(), season_number);
+    assert_eq!(episode_record.episode_number(), 1);
+
+    assert_eq!(versioning_row_count(&pool, library_id).await?, 1);
+    assert_eq!(
+        series_bundle_version_row(&pool, library_id, series_id).await?,
+        (true, version),
+        "sync/fetch should preserve the version when bundle bytes are unchanged"
+    );
 
     Ok(())
 }

@@ -1551,6 +1551,327 @@ impl QueueService for PostgresQueueService {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::scan::orchestration::{
+        context::{FolderScanContext, MovieFolderScanContext, MovieRootPath},
+        job::FolderScanJob,
+        lease::QueueSelector,
+    };
+    use sqlx::Row;
+    use std::collections::HashMap;
+
+    fn folder_scan_payload(
+        library_id: LibraryId,
+        library_root: &str,
+        folder_path: &str,
+    ) -> JobPayload {
+        JobPayload::FolderScan(FolderScanJob {
+            context: FolderScanContext::Movie(MovieFolderScanContext {
+                library_id,
+                movie_root_path: MovieRootPath::try_new_under_library_root(
+                    library_root,
+                    folder_path,
+                )
+                .expect("folder path is directly under root"),
+            }),
+            scan_reason: ScanReason::UserRequested,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        })
+    }
+
+    async fn seed_library(
+        pool: &PgPool,
+        library_id: LibraryId,
+        library_root: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at)
+            VALUES ($1, $2, $3, 'movies', NOW(), NOW())
+            ON CONFLICT (id) DO NOTHING
+            "#,
+        )
+        .bind(library_id.to_uuid())
+        .bind(format!("Queue dedupe test {library_id}"))
+        .bind(vec![library_root.to_string()])
+        .execute(pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!("seed library failed: {err}"))
+        })?;
+        Ok(())
+    }
+
+    async fn active_dedupe_count(
+        pool: &PgPool,
+        dedupe_key: &str,
+    ) -> Result<i64> {
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM orchestrator_jobs
+            WHERE dedupe_key = $1
+              AND state IN ('ready','deferred','leased')
+            "#,
+        )
+        .bind(dedupe_key)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!(
+                "active dedupe count query failed: {err}"
+            ))
+        })
+    }
+
+    async fn states_for_dedupe(
+        pool: &PgPool,
+        dedupe_key: &str,
+    ) -> Result<HashMap<String, i64>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT state, COUNT(*)::bigint AS count
+            FROM orchestrator_jobs
+            WHERE dedupe_key = $1
+            GROUP BY state
+            "#,
+        )
+        .bind(dedupe_key)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!("dedupe state query failed: {err}"))
+        })?;
+
+        let mut states = HashMap::new();
+        for row in rows {
+            states.insert(row.try_get("state")?, row.try_get("count")?);
+        }
+        Ok(states)
+    }
+
+    #[tokio::test]
+    async fn enqueue_reuses_ready_deferred_and_leased_dedupe_rows() {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping: DATABASE_URL not set");
+                return;
+            }
+        };
+
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping: failed to connect to DATABASE_URL ({err})"
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = crate::MIGRATOR.run(&pool).await {
+            eprintln!("skipping: migrations failed ({err})");
+            return;
+        }
+
+        let queue = PostgresQueueService::new(pool.clone())
+            .await
+            .expect("queue service initializes");
+        let library_id = LibraryId::new();
+        let library_root = format!("/queue-dedupe/{}", library_id.as_uuid());
+        seed_library(&pool, library_id, &library_root)
+            .await
+            .expect("library seeded");
+
+        let ready_payload = folder_scan_payload(
+            library_id,
+            &library_root,
+            &format!("{library_root}/ready-movie"),
+        );
+        let ready = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P1,
+                ready_payload.clone(),
+            ))
+            .await
+            .expect("ready enqueue succeeds");
+        let ready_duplicate = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P0,
+                ready_payload.clone(),
+            ))
+            .await
+            .expect("ready duplicate enqueue succeeds");
+        assert!(ready.accepted);
+        assert!(!ready_duplicate.accepted);
+        assert_eq!(ready_duplicate.job_id, ready.job_id);
+        assert_eq!(ready_duplicate.merged_into, Some(ready.job_id));
+        assert_eq!(
+            active_dedupe_count(&pool, &ready.dedupe_key)
+                .await
+                .expect("ready count query succeeds"),
+            1
+        );
+        assert_eq!(
+            states_for_dedupe(&pool, &ready.dedupe_key)
+                .await
+                .expect("ready states query succeeds")
+                .get("ready")
+                .copied(),
+            Some(1)
+        );
+
+        let ready_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::FolderScan,
+                worker_id: "ready-terminal-worker".to_string(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P0,
+                }),
+            })
+            .await
+            .expect("ready dequeue succeeds")
+            .expect("ready job leased");
+        assert_eq!(ready_lease.job.id, ready.job_id);
+        queue
+            .complete(ready_lease.lease_id)
+            .await
+            .expect("ready job completed");
+        assert_eq!(
+            active_dedupe_count(&pool, &ready.dedupe_key)
+                .await
+                .expect("completed ready count query succeeds"),
+            0,
+            "completed rows should not participate in uq_jobs_dedupe_active"
+        );
+
+        let deferred_payload = folder_scan_payload(
+            library_id,
+            &library_root,
+            &format!("{library_root}/deferred-movie"),
+        );
+        let deferred = queue
+            .enqueue(
+                EnqueueRequest::new(JobPriority::P1, deferred_payload.clone())
+                    .with_dependency(DependencyKey::from(
+                        "series-root:deferred-movie",
+                    )),
+            )
+            .await
+            .expect("deferred enqueue succeeds");
+        let deferred_duplicate = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P0,
+                deferred_payload.clone(),
+            ))
+            .await
+            .expect("deferred duplicate enqueue succeeds");
+        assert!(deferred.accepted);
+        assert!(!deferred_duplicate.accepted);
+        assert_eq!(deferred_duplicate.job_id, deferred.job_id);
+        assert_eq!(deferred_duplicate.merged_into, Some(deferred.job_id));
+        assert_eq!(
+            active_dedupe_count(&pool, &deferred.dedupe_key)
+                .await
+                .expect("deferred count query succeeds"),
+            1
+        );
+        assert_eq!(
+            states_for_dedupe(&pool, &deferred.dedupe_key)
+                .await
+                .expect("deferred states query succeeds")
+                .get("deferred")
+                .copied(),
+            Some(1)
+        );
+
+        let leased_payload = folder_scan_payload(
+            library_id,
+            &library_root,
+            &format!("{library_root}/leased-movie"),
+        );
+        let leased = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P1,
+                leased_payload.clone(),
+            ))
+            .await
+            .expect("leased enqueue succeeds");
+        let lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::FolderScan,
+                worker_id: "leased-worker".to_string(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P1,
+                }),
+            })
+            .await
+            .expect("leased dequeue succeeds")
+            .expect("leased job exists");
+        assert_eq!(lease.job.id, leased.job_id);
+
+        let leased_duplicate = queue
+            .enqueue(EnqueueRequest::new(JobPriority::P0, leased_payload))
+            .await
+            .expect("leased duplicate enqueue succeeds");
+        assert!(!leased_duplicate.accepted);
+        assert_eq!(leased_duplicate.job_id, leased.job_id);
+        assert_eq!(leased_duplicate.merged_into, Some(leased.job_id));
+        assert_eq!(
+            active_dedupe_count(&pool, &leased.dedupe_key)
+                .await
+                .expect("leased count query succeeds"),
+            1
+        );
+        assert_eq!(
+            states_for_dedupe(&pool, &leased.dedupe_key)
+                .await
+                .expect("leased states query succeeds")
+                .get("leased")
+                .copied(),
+            Some(1)
+        );
+
+        queue
+            .complete(lease.lease_id)
+            .await
+            .expect("leased job completed");
+        let reenqueue_after_terminal = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P1,
+                folder_scan_payload(
+                    library_id,
+                    &library_root,
+                    &format!("{library_root}/leased-movie"),
+                ),
+            ))
+            .await
+            .expect("terminal re-enqueue succeeds");
+        assert!(reenqueue_after_terminal.accepted);
+        assert_ne!(reenqueue_after_terminal.job_id, leased.job_id);
+        assert_eq!(
+            active_dedupe_count(&pool, &leased.dedupe_key)
+                .await
+                .expect("terminal count query succeeds"),
+            1
+        );
+
+        sqlx::query("DELETE FROM libraries WHERE id = $1")
+            .bind(library_id.to_uuid())
+            .execute(&pool)
+            .await
+            .expect("cleanup library succeeds");
+    }
+}
+
 /// Postgres-backed scan cursor repository. All methods are stubs for now.
 pub struct PostgresCursorRepository {
     pool: PgPool,

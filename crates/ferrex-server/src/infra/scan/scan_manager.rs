@@ -357,6 +357,14 @@ impl ScanControlPlane {
 
         let mut restored = 0usize;
         for durable in active_runs {
+            let already_active = {
+                let guard = self.inner.active_by_scan_id.read().await;
+                guard.contains_key(&durable.scan_id)
+            };
+            if already_active {
+                continue;
+            }
+
             let run = self.inner.register_durable_run(durable).await;
             run.seed_rehydrated_progress().await;
             restored += 1;
@@ -1313,10 +1321,11 @@ impl ScanRun {
         guard.iter().cloned().collect()
     }
 
-    async fn record_folder_enqueued(
+    async fn record_job_enqueued(
         &self,
         idempotency_key: &str,
         job_id: JobId,
+        kind: JobKind,
         path_key: Option<SubjectKey>,
     ) {
         let event_time = Utc::now();
@@ -1340,7 +1349,8 @@ impl ScanRun {
                     idempotency = idempotency_key,
                     stale_terminal,
                     phase = ?state.phase,
-                    "record_folder_enqueued"
+                    kind = ?kind,
+                    "record_job_enqueued"
                 );
 
                 if stale_terminal {
@@ -1470,10 +1480,11 @@ impl ScanRun {
         false
     }
 
-    async fn record_folder_completed(
+    async fn record_job_completed(
         &self,
         idempotency_key: &str,
         job_id: JobId,
+        kind: JobKind,
         path_key: Option<SubjectKey>,
     ) {
         let event_time = Utc::now();
@@ -1490,16 +1501,22 @@ impl ScanRun {
                     %job_id,
                     idempotency = idempotency_key,
                     phase = ?state.phase,
-                    "record_folder_completed"
+                    kind = ?kind,
+                    "record_job_completed"
                 );
                 let mut frames = Vec::new();
-                let target_status = path
-                    .as_ref()
-                    .and_then(subject_key_path)
-                    .and_then(|path| state.folder_outcomes_by_path.get(path))
-                    .copied()
-                    .map(ScanRunState::status_for_folder_outcome)
-                    .unwrap_or(ScanItemStatus::Completed);
+                let target_status = if kind == JobKind::FolderScan {
+                    path.as_ref()
+                        .and_then(subject_key_path)
+                        .and_then(|path| {
+                            state.folder_outcomes_by_path.get(path)
+                        })
+                        .copied()
+                        .map(ScanRunState::status_for_folder_outcome)
+                        .unwrap_or(ScanItemStatus::Completed)
+                } else {
+                    ScanItemStatus::Completed
+                };
                 let changed = state.update_item_status(
                     idempotency_key,
                     Some(job_id),
@@ -1540,7 +1557,7 @@ impl ScanRun {
         // overwriting listing_hash with a placeholder and breaking incremental diffs.
     }
 
-    async fn record_folder_lease_renewed(
+    async fn record_job_lease_renewed(
         &self,
         idempotency_key: &str,
         job_id: JobId,
@@ -1569,7 +1586,7 @@ impl ScanRun {
                 %job_id,
                 idempotency = idempotency_key,
                 status = ?item.status,
-                "record_folder_lease_renewed"
+                "record_job_lease_renewed"
             );
             if item.last_job_id.is_none() {
                 item.last_job_id = Some(job_id);
@@ -1585,10 +1602,11 @@ impl ScanRun {
         }
     }
 
-    async fn record_folder_failure(
+    async fn record_job_failure(
         &self,
         idempotency_key: &str,
         job_id: JobId,
+        kind: JobKind,
         error: Option<String>,
         path_key: Option<SubjectKey>,
         retryable: bool,
@@ -1613,7 +1631,8 @@ impl ScanRun {
                     %job_id,
                     idempotency = idempotency_key,
                     retryable,
-                    "record_folder_failure"
+                    kind = ?kind,
+                    "record_job_failure"
                 );
 
                 let mut frames = Vec::new();
@@ -1656,10 +1675,11 @@ impl ScanRun {
         self.emit_frames(frames).await;
     }
 
-    async fn record_folder_dead_lettered(
+    async fn record_job_dead_lettered(
         &self,
         idempotency_key: &str,
         job_id: JobId,
+        kind: JobKind,
         error: Option<String>,
         path_key: Option<SubjectKey>,
     ) {
@@ -1686,7 +1706,8 @@ impl ScanRun {
                     %job_id,
                     idempotency = idempotency_key,
                     changed,
-                    "record_folder_dead_lettered"
+                    kind = ?kind,
+                    "record_job_dead_lettered"
                 );
                 if changed {
                     state.current_path = path
@@ -2908,6 +2929,147 @@ mod tests {
     }
 
     #[test]
+    fn downstream_work_blocks_completion_after_folders_finish() {
+        let now = Utc::now();
+        let mut state = test_state();
+        let folder_path = SubjectKey::path("/library/Movie".to_string()).ok();
+        let media_path =
+            SubjectKey::path("/library/Movie/feature.mkv".to_string()).ok();
+
+        state.handle_state_event(ScanStateEvent::RunStarted, now);
+        state.update_item_status(
+            "folder-job",
+            Some(JobId::new()),
+            ScanItemStatus::InProgress,
+            now + ChronoDuration::milliseconds(1),
+            folder_path.clone(),
+            None,
+        );
+        state.handle_state_event(
+            ScanStateEvent::NewItemFound,
+            now + ChronoDuration::milliseconds(1),
+        );
+        state.update_item_status(
+            "index-job",
+            Some(JobId::new()),
+            ScanItemStatus::InProgress,
+            now + ChronoDuration::milliseconds(2),
+            media_path.clone(),
+            None,
+        );
+        state.handle_state_event(
+            ScanStateEvent::NewItemFound,
+            now + ChronoDuration::milliseconds(2),
+        );
+
+        state.update_item_status(
+            "folder-job",
+            Some(JobId::new()),
+            ScanItemStatus::Completed,
+            now + ChronoDuration::milliseconds(3),
+            folder_path,
+            None,
+        );
+
+        assert_eq!(state.total_items, 2);
+        assert_eq!(state.completed_items, 1);
+        assert!(!state.can_enter_quiescing());
+        assert!(
+            state
+                .handle_state_event(
+                    ScanStateEvent::AllItemsProcessed,
+                    now + ChronoDuration::milliseconds(4),
+                )
+                .is_none(),
+            "folder completion alone must not quiesce while downstream work is active"
+        );
+        assert_eq!(state.status, ScanLifecycleStatus::Running);
+
+        state.update_item_status(
+            "index-job",
+            Some(JobId::new()),
+            ScanItemStatus::Completed,
+            now + ChronoDuration::milliseconds(5),
+            media_path,
+            None,
+        );
+
+        assert!(state.can_enter_quiescing());
+        let quiescing = state.handle_state_event(
+            ScanStateEvent::AllItemsProcessed,
+            now + ChronoDuration::milliseconds(6),
+        );
+        assert!(matches!(
+            quiescing.map(|frame| frame.event),
+            Some(ScanEventKind::Quiescing)
+        ));
+        let completed = state.handle_state_event(
+            ScanStateEvent::QuiescenceComplete,
+            now + ChronoDuration::milliseconds(7),
+        );
+        assert!(matches!(
+            completed.map(|frame| frame.event),
+            Some(ScanEventKind::Completed)
+        ));
+    }
+
+    #[test]
+    fn retrying_folder_or_downstream_items_block_terminal_completion() {
+        let now = Utc::now();
+        let cases = [
+            ("folder retry", "folder-job", "/library/Movie"),
+            (
+                "downstream retry",
+                "index-job",
+                "/library/Movie/feature.mkv",
+            ),
+        ];
+
+        for (case, retrying_key, retrying_path) in cases {
+            let mut state = test_state();
+            state.phase = ScanPhase::Processing;
+            state.status = ScanLifecycleStatus::Running;
+            state.update_item_status(
+                "completed-peer",
+                Some(JobId::new()),
+                ScanItemStatus::Completed,
+                now,
+                SubjectKey::path("/library/Movie".to_string()).ok(),
+                None,
+            );
+            state.update_item_status(
+                retrying_key,
+                Some(JobId::new()),
+                ScanItemStatus::Retrying,
+                now + ChronoDuration::milliseconds(1),
+                SubjectKey::path(retrying_path.to_string()).ok(),
+                Some("temporary worker failure".to_string()),
+            );
+
+            assert_eq!(state.total_items, 2, "{case}");
+            assert_eq!(state.completed_items, 1, "{case}");
+            assert_eq!(state.retrying_items, 1, "{case}");
+            assert!(!state.can_enter_quiescing(), "{case}");
+            assert!(
+                state
+                    .handle_state_event(
+                        ScanStateEvent::AllItemsProcessed,
+                        now + ChronoDuration::milliseconds(2),
+                    )
+                    .is_none(),
+                "{case} should stay active while retrying"
+            );
+            assert!(
+                !state.outstanding_items_stalled(
+                    ChronoDuration::milliseconds(1),
+                    now + ChronoDuration::seconds(5),
+                ),
+                "{case} should not fail a run while retrying"
+            );
+        }
+    }
+
+    #[test]
     fn folder_failures_keep_retrying_separate_from_needs_attention() {
         let now = Utc::now();
         let mut state = test_state();
@@ -3345,33 +3507,27 @@ impl ScanRunAggregatorInner {
 
         if let Some(run) = run {
             let completed = match event.payload {
-                JobEventPayload::Enqueued { kind, job_id, .. } => {
-                    if kind == JobKind::FolderScan {
-                        run.record_folder_enqueued(
-                            &event.meta.idempotency_key,
-                            job_id,
-                            event.meta.path_key.clone(),
-                        )
-                        .await;
-                    }
+                JobEventPayload::Enqueued { kind, job_id, .. }
+                | JobEventPayload::Dequeued { kind, job_id, .. } => {
+                    run.record_job_enqueued(
+                        &event.meta.idempotency_key,
+                        job_id,
+                        kind,
+                        event.meta.path_key.clone(),
+                    )
+                    .await;
                     false
                 }
                 JobEventPayload::Completed { kind, job_id, .. } => {
-                    if kind == JobKind::FolderScan {
-                        run.record_folder_completed(
-                            &event.meta.idempotency_key,
-                            job_id,
-                            event.meta.path_key.clone(),
-                        )
-                        .await;
-                        run.try_complete(
-                            self.quiescence_chrono,
-                            self.stall_timeout,
-                        )
+                    run.record_job_completed(
+                        &event.meta.idempotency_key,
+                        job_id,
+                        kind,
+                        event.meta.path_key.clone(),
+                    )
+                    .await;
+                    run.try_complete(self.quiescence_chrono, self.stall_timeout)
                         .await
-                    } else {
-                        false
-                    }
                 }
                 JobEventPayload::Failed {
                     kind,
@@ -3379,38 +3535,17 @@ impl ScanRunAggregatorInner {
                     job_id,
                     ..
                 } => {
-                    if kind == JobKind::FolderScan {
-                        run.record_folder_failure(
-                            &event.meta.idempotency_key,
-                            job_id,
-                            None,
-                            event.meta.path_key.clone(),
-                            retryable,
-                        )
-                        .await;
+                    run.record_job_failure(
+                        &event.meta.idempotency_key,
+                        job_id,
+                        kind,
+                        None,
+                        event.meta.path_key.clone(),
+                        retryable,
+                    )
+                    .await;
 
-                        if !retryable {
-                            run.try_complete(
-                                self.quiescence_chrono,
-                                self.stall_timeout,
-                            )
-                            .await
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                }
-                JobEventPayload::DeadLettered { kind, job_id, .. } => {
-                    if kind == JobKind::FolderScan {
-                        run.record_folder_dead_lettered(
-                            &event.meta.idempotency_key,
-                            job_id,
-                            None,
-                            event.meta.path_key.clone(),
-                        )
-                        .await;
+                    if !retryable {
                         run.try_complete(
                             self.quiescence_chrono,
                             self.stall_timeout,
@@ -3420,8 +3555,20 @@ impl ScanRunAggregatorInner {
                         false
                     }
                 }
+                JobEventPayload::DeadLettered { kind, job_id, .. } => {
+                    run.record_job_dead_lettered(
+                        &event.meta.idempotency_key,
+                        job_id,
+                        kind,
+                        None,
+                        event.meta.path_key.clone(),
+                    )
+                    .await;
+                    run.try_complete(self.quiescence_chrono, self.stall_timeout)
+                        .await
+                }
                 JobEventPayload::LeaseRenewed { job_id, .. } => {
-                    run.record_folder_lease_renewed(
+                    run.record_job_lease_renewed(
                         &event.meta.idempotency_key,
                         job_id,
                         event.meta.path_key.clone(),
@@ -3949,9 +4096,10 @@ impl ScanRunAggregatorInner {
 
         for run in targets {
             if let Some(job_id) = job_id {
-                run.record_folder_completed(
+                run.record_job_completed(
                     &event.meta.idempotency_key,
                     job_id,
+                    JobKind::FolderScan,
                     SubjectKey::path(path_owned.clone()).ok(),
                 )
                 .await;
