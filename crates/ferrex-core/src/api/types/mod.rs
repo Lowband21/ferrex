@@ -6,6 +6,7 @@ pub mod admin;
 pub mod demo;
 pub mod discovery;
 pub mod filters;
+pub mod intelligence;
 pub mod library;
 pub mod media;
 pub mod media_repo_sync;
@@ -34,6 +35,7 @@ pub use filters::{
     RATING_DECIMAL_SCALE, RATING_SCALE_FACTOR, RatingValue, ScalarRange,
     rating_value_from_f32, rating_value_to_f32,
 };
+pub use intelligence::*;
 pub use library::{
     BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,
     FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,
@@ -78,6 +80,7 @@ pub mod player {
         discovery_item_from_continue_watching, discovery_media_stable_id,
         release_year_from_date,
     };
+    pub use super::intelligence::*;
     pub use super::library::{
         BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,
         FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,

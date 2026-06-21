@@ -75,6 +75,21 @@ pub mod v1 {
         pub const RESUME: &str = v1_path!("/discovery/resume");
     }
 
+    pub mod intelligence {
+        pub const LIBRARY_OVERVIEW: &str =
+            v1_path!("/intelligence/libraries/overview");
+        pub const CANDIDATE_SEARCH: &str =
+            v1_path!("/intelligence/candidates:search");
+        pub const ARTIFACT_SEARCH: &str =
+            v1_path!("/intelligence/artifacts:search");
+        pub const ITEM_CONTEXT: &str =
+            v1_path!("/intelligence/items/{media_id}/context");
+        pub const RELATED_CONTEXT: &str =
+            v1_path!("/intelligence/items/{media_id}/related");
+        pub const RUN_AUDIT: &str =
+            v1_path!("/intelligence/runs/{run_id}/audit");
+    }
+
     pub mod watch {
         pub const UPDATE_PROGRESS: &str = v1_path!("/watch/progress");
         pub const STATE: &str = v1_path!("/watch/state");
