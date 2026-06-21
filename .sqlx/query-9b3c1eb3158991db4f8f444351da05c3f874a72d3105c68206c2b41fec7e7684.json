@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT watched.series_id AS \"series_id!\"\n            FROM (\n                SELECT s.id AS series_id\n                FROM series s\n                JOIN episode_references er\n                    ON er.series_id = s.id\n                JOIN user_episode_state ues\n                    ON ues.tmdb_series_id = er.tmdb_series_id\n                   AND ues.season_number = er.season_number\n                   AND ues.episode_number = er.episode_number\n                WHERE ues.user_id = $1\n                  AND s.library_id = $2\n                  AND (\n                        ues.is_completed = true\n                     OR (ues.duration > 0 AND (ues.position / ues.duration) >= $3)\n                     OR (\n                            ues.position >= $4\n                        AND ues.duration > 0\n                        AND (ues.position / ues.duration) >= $5\n                        AND (ues.duration - ues.position) >= $6\n                        AND (ues.position / ues.duration) < $3\n                     )\n                  )\n\n                UNION\n\n                SELECT s.id AS series_id\n                FROM series s\n                JOIN episode_references er\n                    ON er.series_id = s.id\n                JOIN user_watch_progress uwp\n                    ON uwp.media_uuid = er.id\n                WHERE uwp.user_id = $1\n                  AND s.library_id = $2\n                  AND uwp.media_type = $7\n                  AND uwp.duration > 0\n                  AND (\n                        (uwp.position / uwp.duration) >= $3\n                     OR (\n                            uwp.position >= $4\n                        AND (uwp.position / uwp.duration) >= $5\n                        AND (uwp.duration - uwp.position) >= $6\n                        AND (uwp.position / uwp.duration) < $3\n                     )\n                  )\n\n                UNION\n\n                SELECT s.id AS series_id\n                FROM series s\n                JOIN episode_references er\n                    ON er.series_id = s.id\n                JOIN user_completed_media ucm\n                    ON ucm.media_uuid = er.id\n                WHERE ucm.user_id = $1\n                  AND s.library_id = $2\n                  AND ucm.media_type = $7\n            ) watched\n            ORDER BY watched.series_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Float4",
+        "Float4",
+        "Float4",
+        "Float4",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9b3c1eb3158991db4f8f444351da05c3f874a72d3105c68206c2b41fec7e7684"
+}

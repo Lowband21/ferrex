@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS(\n                SELECT 1\n                FROM user_episode_state ues\n                JOIN episode_references er\n                    ON er.tmdb_series_id = ues.tmdb_series_id\n                   AND er.season_number = ues.season_number\n                   AND er.episode_number = ues.episode_number\n                JOIN series s\n                    ON s.id = er.series_id\n                WHERE ues.user_id = $1\n                  AND s.library_id = $2\n                  AND er.series_id = $3\n                  AND ues.tmdb_series_id = $4\n                  AND ues.is_completed = true\n            ) AS \"has_completed!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "has_completed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4a43e5141806384e674859abde185192459faccde3953abafc03588e89343bf6"
+}

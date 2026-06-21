@@ -458,6 +458,9 @@ GRANT USAGE ON SCHEMA public TO $app_ident;
 GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA ferrex, public TO $app_ident;
 GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA ferrex, public TO $app_ident;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ferrex, public TO $app_ident;
+-- SQLx prepares static admin-pool probes through the generated app URL.
+-- Keep this grant local to the disposable cluster so pg_reload_conf() can be described.
+GRANT EXECUTE ON FUNCTION pg_catalog.pg_reload_conf() TO $app_ident;
 ALTER DEFAULT PRIVILEGES IN SCHEMA ferrex GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLES TO $app_ident;
 ALTER DEFAULT PRIVILEGES IN SCHEMA ferrex GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $app_ident;
 ALTER DEFAULT PRIVILEGES IN SCHEMA ferrex GRANT EXECUTE ON FUNCTIONS TO $app_ident;

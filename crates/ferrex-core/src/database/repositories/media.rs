@@ -401,14 +401,19 @@ impl PostgresMediaRepository {
         &self,
         uuid: &Uuid,
     ) -> Result<Option<PlaybackMediaSource>> {
-        let row = sqlx::query_as::<_, (Uuid, String, String, i64, bool)>(
+        let row = sqlx::query!(
             r#"
-            SELECT id, file_path, filename, file_size, is_available
+            SELECT
+                id AS "id!",
+                file_path AS "file_path!",
+                filename AS "filename!",
+                file_size AS "file_size!",
+                is_available AS "is_available!"
             FROM media_files
             WHERE id = $1
             "#,
+            *uuid
         )
-        .bind(*uuid)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -417,14 +422,12 @@ impl PostgresMediaRepository {
             ))
         })?;
 
-        Ok(row.map(|(id, path, filename, size, is_available)| {
-            PlaybackMediaSource {
-                id,
-                path: PathBuf::from(path),
-                filename,
-                size: size as u64,
-                is_available,
-            }
+        Ok(row.map(|row| PlaybackMediaSource {
+            id: row.id,
+            path: PathBuf::from(row.file_path),
+            filename: row.filename,
+            size: row.file_size as u64,
+            is_available: row.is_available,
         }))
     }
 

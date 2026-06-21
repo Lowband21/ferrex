@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH inprog AS (\n                SELECT media_uuid, media_type, position, duration, last_watched\n                FROM user_watch_progress\n                WHERE user_id = $1\n                  AND position > 0\n                  AND (duration > 0) AND (position / duration) < $4\n            )\n            SELECT\n                inprog_rows.id AS \"id!\",\n                inprog_rows.position AS \"position!\",\n                inprog_rows.duration AS \"duration!\",\n                inprog_rows.last_watched AS \"last_watched!\",\n                inprog_rows.media_kind AS \"media_kind!\"\n            FROM (\n                SELECT\n                    mr.id AS id,\n                    inprog.position::real AS position,\n                    inprog.duration::real AS duration,\n                    inprog.last_watched::bigint AS last_watched,\n                    0::int4 AS media_kind\n                FROM inprog\n                JOIN movie_references mr ON inprog.media_uuid = mr.id AND inprog.media_type = 0\n\n                UNION ALL\n\n                SELECT\n                    er.id AS id,\n                    inprog.position::real AS position,\n                    inprog.duration::real AS duration,\n                    inprog.last_watched::bigint AS last_watched,\n                    3::int4 AS media_kind\n                FROM inprog\n                JOIN episode_references er ON inprog.media_uuid = er.id AND inprog.media_type = 3\n            ) AS inprog_rows\n            ORDER BY inprog_rows.last_watched DESC\n            LIMIT $2 OFFSET $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "position!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 2,
+        "name": "duration!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_watched!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "media_kind!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Float4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "172d7fe68b31d22e724fee991fb2e34e6f6be54ea8c3d2805a3072c1656eb893"
+}

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                media_uuid AS \"media_uuid!\",\n                position AS \"position!\",\n                duration AS \"duration!\",\n                last_watched AS \"last_watched!\"\n            FROM user_watch_progress\n            WHERE user_id = $1 AND media_type = $2\n            ORDER BY last_watched DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_uuid!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "position!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 2,
+        "name": "duration!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_watched!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "11e3eb5d5bc2f27a5156aacfe7c92adafedc6b8ae5e04d3384ab7c6c1a1a8ae5"
+}

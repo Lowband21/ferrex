@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                tmdb_series_id AS \"tmdb_series_id!\",\n                season_number AS \"season_number!\",\n                episode_number AS \"episode_number!\"\n            FROM episode_references\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tmdb_series_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "season_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_number!",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fc9c5261c61144771d13b60dcbd2200d9936e6add4e1fb0b665af5d5c8ee3579"
+}

@@ -181,6 +181,8 @@ pub async fn apply_admin_tuning(
     params: &AdminTuningParams,
 ) -> Result<()> {
     for statement in build_alter_system_statements(params) {
+        // Dynamic SQLx allowlist: runtime PostgreSQL `ALTER SYSTEM` tuning
+        // utility statements; see docs/sqlx-dynamic-query-allowlist.md.
         sqlx::query(&statement)
             .execute(admin_pool)
             .await
@@ -192,8 +194,8 @@ pub async fn apply_admin_tuning(
             })?;
     }
 
-    sqlx::query("SELECT pg_reload_conf();")
-        .execute(admin_pool)
+    sqlx::query_scalar!(r#"SELECT pg_reload_conf() AS "reloaded!""#)
+        .fetch_one(admin_pool)
         .await
         .context("failed to reload postgres configuration")?;
 
@@ -201,30 +203,30 @@ pub async fn apply_admin_tuning(
 }
 
 pub async fn detect_raw(pool: &PgPool) -> Result<DetectedParams> {
-    let shared_buffers_row: (String,) = sqlx::query_as("SHOW shared_buffers")
-        .fetch_one(pool)
-        .await
-        .context("failed to query shared_buffers")?;
-    let max_connections_row: (String,) = sqlx::query_as("SHOW max_connections")
-        .fetch_one(pool)
-        .await
-        .context("failed to query max_connections")?;
+    let shared_buffers = sqlx::query_scalar!(
+        r#"SELECT current_setting('shared_buffers') AS "shared_buffers!""#
+    )
+    .fetch_one(pool)
+    .await
+    .context("failed to query shared_buffers")?;
+    let max_connections_value = sqlx::query_scalar!(
+        r#"SELECT current_setting('max_connections') AS "max_connections!""#
+    )
+    .fetch_one(pool)
+    .await
+    .context("failed to query max_connections")?;
 
-    let shared_buffers_bytes = parse_pg_memory_size(&shared_buffers_row.0)
+    let shared_buffers_bytes = parse_pg_memory_size(&shared_buffers)
         .with_context(|| {
-            format!(
-                "failed parsing shared_buffers value '{}'",
-                shared_buffers_row.0
-            )
+            format!("failed parsing shared_buffers value '{}'", shared_buffers)
         })?;
-    let max_connections = max_connections_row
-        .0
+    let max_connections = max_connections_value
         .trim()
         .parse::<u32>()
         .with_context(|| {
             format!(
                 "failed parsing max_connections value '{}'",
-                max_connections_row.0
+                max_connections_value
             )
         })?;
 

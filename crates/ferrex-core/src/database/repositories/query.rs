@@ -931,7 +931,8 @@ impl QueryRepository for PostgresQueryRepository {
         user_id: Uuid,
         query: &MediaQuery,
     ) -> Result<Vec<MediaWithStatus>> {
-        let rows = sqlx::query_as::<_, InProgressRow>(
+        let rows = sqlx::query_as!(
+            InProgressRow,
             r#"
             WITH inprog AS (
                 SELECT media_uuid, media_type, position, duration, last_watched
@@ -940,37 +941,41 @@ impl QueryRepository for PostgresQueryRepository {
                   AND position > 0
                   AND (duration > 0) AND (position / duration) < $4
             )
-            SELECT * FROM (
+            SELECT
+                inprog_rows.id AS "id!",
+                inprog_rows.position AS "position!",
+                inprog_rows.duration AS "duration!",
+                inprog_rows.last_watched AS "last_watched!",
+                inprog_rows.media_kind AS "media_kind!"
+            FROM (
                 SELECT
                     mr.id AS id,
                     inprog.position::real AS position,
                     inprog.duration::real AS duration,
                     inprog.last_watched::bigint AS last_watched,
-                    0::int4                  AS media_kind
+                    0::int4 AS media_kind
                 FROM inprog
                 JOIN movie_references mr ON inprog.media_uuid = mr.id AND inprog.media_type = 0
 
                 UNION ALL
 
                 SELECT
-                    er.id              AS id,
+                    er.id AS id,
                     inprog.position::real AS position,
                     inprog.duration::real AS duration,
                     inprog.last_watched::bigint AS last_watched,
-                    3::int4                  AS media_kind
+                    3::int4 AS media_kind
                 FROM inprog
                 JOIN episode_references er ON inprog.media_uuid = er.id AND inprog.media_type = 3
             ) AS inprog_rows
             ORDER BY inprog_rows.last_watched DESC
             LIMIT $2 OFFSET $3
             "#,
+            user_id,
+            query.pagination.limit as i64,
+            query.pagination.offset as i64,
+            WatchResumePolicy::from_env().completion_threshold
         )
-        .bind(user_id)
-        .bind(query.pagination.limit as i64)
-        .bind(query.pagination.offset as i64)
-        .bind(f64::from(
-            WatchResumePolicy::from_env().completion_threshold,
-        ))
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                tmdb_series_id AS \"tmdb_series_id!\",\n                MAX(last_watched) AS \"last_watched!\"\n            FROM user_episode_state\n            WHERE user_id = $1\n            GROUP BY tmdb_series_id\n            ORDER BY MAX(last_watched) DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tmdb_series_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "last_watched!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "f48c74a24ffe8ebd4f8b41beca0dc24b92bb2ecd8c952c81e905eb307f60bfd3"
+}

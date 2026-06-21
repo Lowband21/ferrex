@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                s.id AS \"series_id!\",\n                er.tmdb_series_id AS \"tmdb_series_id!\",\n                MAX(ues.last_watched) FILTER (\n                    WHERE ues.is_completed = true\n                       OR (ues.duration > 0 AND (ues.position / ues.duration) >= $6)\n                       OR (\n                              ues.position >= $3\n                          AND ues.duration > 0\n                          AND (ues.position / ues.duration) >= $4\n                          AND (ues.duration - ues.position) >= $5\n                          AND (ues.position / ues.duration) < $6\n                       )\n                ) AS \"last_watched!\",\n                COALESCE(sm.name, s.title) AS \"title!\"\n            FROM user_episode_state ues\n            JOIN episode_references er\n                ON er.tmdb_series_id = ues.tmdb_series_id\n               AND er.season_number = ues.season_number\n               AND er.episode_number = ues.episode_number\n            JOIN series s\n                ON s.id = er.series_id\n            LEFT JOIN series_metadata sm\n                ON sm.series_id = s.id\n            WHERE ues.user_id = $1\n              AND s.library_id = $2\n            GROUP BY s.id, er.tmdb_series_id, COALESCE(sm.name, s.title)\n            HAVING MAX(ues.last_watched) FILTER (\n                    WHERE ues.is_completed = true\n                       OR (ues.duration > 0 AND (ues.position / ues.duration) >= $6)\n                       OR (\n                              ues.position >= $3\n                          AND ues.duration > 0\n                          AND (ues.position / ues.duration) >= $4\n                          AND (ues.duration - ues.position) >= $5\n                          AND (ues.position / ues.duration) < $6\n                       )\n                ) IS NOT NULL\n            ORDER BY \"last_watched!\" DESC,\n                     LOWER(COALESCE(sm.name, s.title)) ASC,\n                     s.id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tmdb_series_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_watched!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "title!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Float4",
+        "Float4",
+        "Float4",
+        "Float4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "fd449b6709cf6cefce3bd26bd4ec11051118772fe87cae5c6d7723eca51986eb"
+}

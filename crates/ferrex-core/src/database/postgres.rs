@@ -90,6 +90,9 @@ impl PostgresDatabase {
                                 .execute(&mut *conn)
                                 .await;
                         for statement in tuning_statements.iter() {
+                            // Dynamic SQLx allowlist: runtime PostgreSQL
+                            // session tuning `SET` utility statements; see
+                            // docs/sqlx-dynamic-query-allowlist.md.
                             if let Err(e) =
                                 sqlx::query(statement).execute(&mut *conn).await
                             {

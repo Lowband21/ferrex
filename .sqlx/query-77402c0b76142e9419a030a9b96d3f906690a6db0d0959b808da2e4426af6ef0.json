@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                er.id AS \"media_id!\",\n                er.season_number AS \"season_number!\",\n                er.episode_number AS \"episode_number!\",\n                ues.position AS \"position!\",\n                ues.duration AS \"duration!\",\n                COALESCE(sm.name, s.title) AS \"title!\",\n                sm.primary_poster_image_id AS \"poster_iid?\"\n            FROM user_episode_state ues\n            JOIN episode_references er\n                ON er.tmdb_series_id = ues.tmdb_series_id\n               AND er.season_number = ues.season_number\n               AND er.episode_number = ues.episode_number\n            JOIN series s\n                ON s.id = er.series_id\n            LEFT JOIN series_metadata sm\n                ON sm.series_id = s.id\n            WHERE ues.user_id = $1\n              AND s.library_id = $2\n              AND er.series_id = $3\n              AND ues.tmdb_series_id = $4\n              AND ues.position >= $5\n              AND ues.duration > 0\n              AND (ues.position / ues.duration) >= $6\n              AND (ues.duration - ues.position) >= $7\n              AND ues.is_completed = false\n              AND (ues.position / ues.duration) < $8\n            ORDER BY ues.last_watched DESC, er.discovered_at ASC, er.id ASC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "season_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "position!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 4,
+        "name": "duration!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 5,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "poster_iid?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Float4",
+        "Float4",
+        "Float4",
+        "Float4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "77402c0b76142e9419a030a9b96d3f906690a6db0d0959b808da2e4426af6ef0"
+}
