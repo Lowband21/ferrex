@@ -1,0 +1,34 @@
+# SQLx dynamic-query exception allowlist
+#
+# Enforced by scripts/check-sqlx-dynamic-guard.py. This file is the
+# machine-readable source of truth; docs/sqlx-dynamic-query-allowlist.md is the
+# human-readable companion.
+#
+# Policy: non-test Rust code MUST use compile-checked SQLx macros
+# (`query!`, `query_as!`, `query_scalar!`, `query_file!`, `migrate!`). The only
+# permitted dynamic SQLx APIs (`query`, `query_as`, `query_scalar`, `query_with`,
+# `raw_sql`, `QueryBuilder`) are the reviewed exceptions below, which exist
+# solely for non-preparable PostgreSQL admin/DDL utility statements. Repository
+# business read/write queries are NEVER allowed as exceptions.
+#
+# Each exception records:
+#   path     - repo-relative source file
+#   symbol   - resolved SQLx identifier: query|query_as|query_scalar|query_with|raw_sql|QueryBuilder
+#   reason   - why this cannot be a compile-checked macro
+#   reviewer - who reviewed/approved the exception
+#   scope    - "permanent" (admin/DDL that SQLx cannot prepare) or "temporary"
+#   expires  - ISO date (YYYY-MM-DD); required for scope = "temporary", ignored for "permanent"
+
+[[exceptions]]
+path = "crates/ferrex-core/src/database/postgres.rs"
+symbol = "query"
+reason = "Per-connection `SET ...` tuning statements are runtime-generated from detected/overridden tuning parameters and executed in `after_connect`. PostgreSQL session `SET` utility statements cannot be parameterized as normal prepared SQLx macros."
+reviewer = "Grayson Hieb"
+scope = "permanent"
+
+[[exceptions]]
+path = "crates/ferrex-server/src/infra/postgres_tuning.rs"
+symbol = "query"
+reason = "`ALTER SYSTEM SET ...` is administrative PostgreSQL utility SQL with runtime-selected setting values, executed only on the admin tuning pool. It is not a static, preparable application query and cannot be represented as a SQLx macro."
+reviewer = "Grayson Hieb"
+scope = "permanent"

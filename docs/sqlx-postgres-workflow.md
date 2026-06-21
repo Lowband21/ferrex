@@ -46,6 +46,39 @@ From the repository root:
 
 Equivalent `just` recipes are available as `just sqlx-db-start`, `just sqlx-db-status`, `just sqlx-db-migrate`, `just sqlx-db-prepare`, `just sqlx-db-prepare-check`, `just sqlx-db-stop`, `just sqlx-db-reset`, and `just sqlx-db-destroy`.
 
+## Dynamic SQLx policy checks
+
+Non-test repository/business queries must use SQLx compile-checked macros. Dynamic SQLx APIs are reserved for reviewed non-preparable PostgreSQL admin/DDL exceptions listed in `scripts/sqlx-dynamic-allowlist.toml` and described in [`docs/sqlx-dynamic-query-allowlist.md`](sqlx-dynamic-query-allowlist.md).
+
+Run the policy guard after touching Rust database code:
+
+```bash
+just sqlx-dynamic-guard
+# or:
+./scripts/check-sqlx-dynamic-guard.py
+```
+
+Run the complete local SQLx enforcement stack before pushing:
+
+```bash
+just sqlx-enforcement
+```
+
+That composite target runs the dynamic guard and the offline SQLx prepare/cache check.
+
+## Regenerating and checking `.sqlx/` cache
+
+Use the disposable database when query macros or migrations change:
+
+```bash
+nix develop .#server
+./scripts/dev/sqlx-db.sh prepare
+# review .sqlx/ changes, then verify without a live DB:
+./scripts/dev/sqlx-db.sh prepare-check
+```
+
+`prepare` starts the per-worktree cluster, applies migrations, grants local describe privileges, and refreshes checked-in `.sqlx/*.json` metadata. `prepare-check` unsets ambient database variables and runs SQLx in offline mode, so it is safe for CI, hooks, and agents.
+
 ## Using the generated env file
 
 `start`, `migrate`, `prepare`, and `reset` write `.env.sqlx` with safe local values:

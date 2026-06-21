@@ -84,19 +84,29 @@ cargo test -p ferrex-player-app --test ui_end_to_end
 
 ## Database and SQLx
 
-Parts of the codebase use SQLx with offline metadata under `./.sqlx/`. Prefer the disposable per-worktree PostgreSQL workflow in [`docs/sqlx-postgres-workflow.md`](../docs/sqlx-postgres-workflow.md) when preparing or checking SQLx metadata; it uses Nix-provided PostgreSQL with `pg_uuidv7`, Unix sockets, no passwords, and no `.env`/production URL dependency.
+Parts of the codebase use SQLx with offline metadata under `./.sqlx/`. Non-test repository/business queries must use compile-checked SQLx macros; dynamic SQLx APIs are allowed only for reviewed non-preparable admin/DDL exceptions in [`scripts/sqlx-dynamic-allowlist.toml`](../scripts/sqlx-dynamic-allowlist.toml). See [`docs/sqlx-dynamic-query-allowlist.md`](../docs/sqlx-dynamic-query-allowlist.md) for the policy and exception process.
+
+Prefer the disposable per-worktree PostgreSQL workflow in [`docs/sqlx-postgres-workflow.md`](../docs/sqlx-postgres-workflow.md) when preparing or checking SQLx metadata; it uses Nix-provided PostgreSQL with `pg_uuidv7`, Unix sockets, no passwords, and no `.env`/production URL dependency.
 
 ```bash
 nix develop .#server
 ./scripts/dev/sqlx-db.sh start          # or: just sqlx-db-start
 ./scripts/dev/sqlx-db.sh migrate        # or: just sqlx-db-migrate
-./scripts/dev/sqlx-db.sh prepare        # or: just sqlx-db-prepare
-./scripts/dev/sqlx-db.sh prepare-check  # or: just sqlx-db-prepare-check
+./scripts/dev/sqlx-db.sh prepare        # regenerate .sqlx cache (or: just sqlx-db-prepare)
+./scripts/dev/sqlx-db.sh prepare-check  # offline cache check (or: just sqlx-db-prepare-check)
 ./scripts/dev/sqlx-db.sh stop           # or: just sqlx-db-stop
 ./scripts/dev/sqlx-db.sh destroy        # or: just sqlx-db-destroy
 ```
 
 Use `./scripts/dev/sqlx-db.sh reset` to recreate an empty migrated database for the current worktree. The script writes `.env.sqlx` with safe local `DATABASE_URL` and `DATABASE_URL_ADMIN` values for manual commands.
+
+Before pushing database/query changes, run:
+
+```bash
+just sqlx-enforcement
+```
+
+That composite target runs the dynamic SQLx guard and the offline SQLx prepare/cache check.
 
 ## Git Hooks (pre-commit)
 
@@ -111,7 +121,8 @@ We keep fast checks in `pre-commit` and heavier checks in `pre-push`. After enab
 
 - Pre-push (heavier):
   - cargo clippy (workspace, all targets/features)
-  - SQLx offline check (`SQLX_OFFLINE=true cargo sqlx prepare --workspace --check`)
+  - SQLx dynamic-query guard (`./scripts/check-sqlx-dynamic-guard.py`)
+  - SQLx offline prepare/cache check (`./scripts/dev/sqlx-db.sh prepare-check`)
   - cargo-deny (per `deny.toml`)
   - hadolint (Dockerfiles)
 

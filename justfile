@@ -466,6 +466,20 @@ run-server-demo:
 
 # sqlx
 [no-cd]
+sqlx-dynamic-guard:
+    @echo "Checking for dynamic SQLx calls outside approved admin/DDL exceptions..."
+    ./scripts/check-sqlx-dynamic-guard.py
+
+[no-cd]
+sqlx-dynamic-guard-self-test:
+    @echo "Running SQLx dynamic guard fixture tests..."
+    ./scripts/check-sqlx-dynamic-guard.py --self-test
+
+[no-cd]
+sqlx-enforcement: sqlx-dynamic-guard sqlx-db-prepare-check
+    @echo "✅ SQLx dynamic guard and offline prepare check passed."
+
+[no-cd]
 sqlx-db *args:
     ./scripts/dev/sqlx-db.sh {{ args }}
 
@@ -500,14 +514,6 @@ sqlx-db-reset:
 [no-cd]
 sqlx-db-destroy:
     ./scripts/dev/sqlx-db.sh destroy
-
-[no-cd]
-sqlx-dynamic-guard:
-    python3 scripts/sqlx_dynamic_guard.py
-
-[no-cd]
-sqlx-dynamic-guard-test:
-    python3 -m unittest scripts/sqlx_dynamic_guard_test.py
 
 [no-cd]
 prepare $SQLX_OFFLINE="false":

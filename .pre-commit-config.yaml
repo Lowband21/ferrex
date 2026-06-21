@@ -163,15 +163,7 @@ repos:
         always_run: true
 
       - id: sqlx-dynamic-guard
-        name: SQLx dynamic API guard
-        entry: python3 scripts/sqlx_dynamic_guard.py
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-        always_run: true
-
-      - id: sqlx-prepare-check
-        name: sqlx prepare --check (offline)
+        name: SQLx dynamic-query guard (approved admin/DDL exceptions only)
         language: system
         pass_filenames: false
         stages: [pre-push]
@@ -179,7 +171,18 @@ repos:
         entry: bash
         args:
           - -c
-          - SQLX_OFFLINE=true cargo sqlx prepare --workspace --check
+          - |
+            set -euo pipefail
+            echo "Checking for dynamic SQLx calls outside approved admin/DDL exceptions..."
+            ./scripts/check-sqlx-dynamic-guard.py
+
+      - id: sqlx-prepare-check
+        name: SQLx prepare --check (offline cache)
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
+        entry: ./scripts/dev/sqlx-db.sh prepare-check
 
       - id: cargo-deny
         name: cargo deny check
