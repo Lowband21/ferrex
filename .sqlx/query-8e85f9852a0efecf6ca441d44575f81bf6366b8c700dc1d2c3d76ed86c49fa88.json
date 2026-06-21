@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH available_movie_positions AS (\n                SELECT msp.*,\n                       (ROW_NUMBER() OVER (\n                           PARTITION BY msp.library_id\n                           ORDER BY msp.title_pos, msp.movie_id\n                       ) - 1)::INT4 AS compact_title_idx\n                  FROM movie_sort_positions msp\n                  JOIN movie_references mr\n                    ON mr.id = msp.movie_id\n                   AND mr.library_id = msp.library_id\n                  JOIN media_files mf\n                    ON mf.id = mr.file_id\n                   AND mf.library_id = mr.library_id\n                 WHERE mf.is_available = TRUE\n                   AND msp.library_id = $1\n            )\n            SELECT msp.compact_title_idx AS \"idx!\"\n              FROM available_movie_positions msp\n              LEFT JOIN movie_metadata mm\n                ON mm.movie_id = msp.movie_id\n               AND mm.library_id = msp.library_id\n             ORDER BY CASE WHEN COALESCE(mm.poster_path, '') = '' THEN 1 ELSE 0 END,\n               CASE WHEN $4::int2 = 0 THEN msp.title_pos END ASC,\n               CASE WHEN $4::int2 = 1 THEN msp.title_pos_desc END ASC,\n               CASE WHEN $4::int2 = 2 THEN msp.date_added_pos END ASC,\n               CASE WHEN $4::int2 = 3 THEN msp.date_added_pos_desc END ASC,\n               CASE WHEN $4::int2 = 4 THEN msp.created_at_pos END ASC,\n               CASE WHEN $4::int2 = 5 THEN msp.created_at_pos_desc END ASC,\n               CASE WHEN $4::int2 = 6 THEN msp.release_date_pos END ASC,\n               CASE WHEN $4::int2 = 7 THEN msp.release_date_pos_desc END ASC,\n               CASE WHEN $4::int2 = 8 THEN msp.rating_pos END ASC,\n               CASE WHEN $4::int2 = 9 THEN msp.rating_pos_desc END ASC,\n               CASE WHEN $4::int2 = 10 THEN msp.runtime_pos END ASC,\n               CASE WHEN $4::int2 = 11 THEN msp.runtime_pos_desc END ASC,\n               CASE WHEN $4::int2 = 12 THEN msp.popularity_pos END ASC,\n               CASE WHEN $4::int2 = 13 THEN msp.popularity_pos_desc END ASC,\n               CASE WHEN $4::int2 = 14 THEN msp.bitrate_pos END ASC,\n               CASE WHEN $4::int2 = 15 THEN msp.bitrate_pos_desc END ASC,\n               CASE WHEN $4::int2 = 16 THEN msp.file_size_pos END ASC,\n               CASE WHEN $4::int2 = 17 THEN msp.file_size_pos_desc END ASC,\n               CASE WHEN $4::int2 = 18 THEN msp.content_rating_pos END ASC,\n               CASE WHEN $4::int2 = 19 THEN msp.content_rating_pos_desc END ASC,\n               CASE WHEN $4::int2 = 20 THEN msp.resolution_pos END ASC,\n               CASE WHEN $4::int2 = 21 THEN msp.resolution_pos_desc END ASC\n             OFFSET $2::bigint\n             LIMIT $3::bigint\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "idx!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8e85f9852a0efecf6ca441d44575f81bf6366b8c700dc1d2c3d76ed86c49fa88"
+}

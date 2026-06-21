@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH target_prefixes AS (\n                SELECT root,\n                       root || '/%' AS child_pattern\n                FROM UNNEST($3::text[]) AS root\n            )\n            UPDATE media_files AS mf\n            SET is_available = FALSE,\n                tombstoned_at = COALESCE(tombstoned_at, NOW()),\n                tombstone_reason = $2,\n                updated_at = NOW()\n            FROM target_prefixes AS p\n            WHERE mf.library_id = $1\n              AND mf.is_available = TRUE\n              AND (mf.file_path = p.root OR mf.file_path LIKE p.child_pattern)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ba892e937bf491e2232d6e434d5468504fe842517591d94403319152b929a21e"
+}

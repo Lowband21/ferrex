@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id AS \"id!\" FROM episode_references\n            WHERE tmdb_series_id = $1 AND season_number = $2 AND episode_number = $3\n            ORDER BY discovered_at ASC, id ASC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7e7fe93b50b6ecb14d3621d55163b7e840134e9e70a5e1069e2b8e14cf2b4cf6"
+}

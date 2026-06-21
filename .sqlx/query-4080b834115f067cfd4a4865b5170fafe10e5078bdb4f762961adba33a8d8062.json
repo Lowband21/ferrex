@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(parsed_info->>'media_type', 'unknown') AS \"media_type!\",\n                   COUNT(*)::bigint AS \"count!\"\n            FROM media_files\n            WHERE is_available = TRUE\n              AND ($1::uuid IS NULL OR library_id = $1)\n              AND ($2::text IS NULL OR file_path LIKE $2)\n              AND (cardinality($3::text[]) = 0 OR LOWER(split_part(filename, '.', -1)) = ANY($3))\n              AND ($4::bigint IS NULL OR file_size >= $4)\n              AND ($5::bigint IS NULL OR file_size <= $5)\n              AND ($6::timestamptz IS NULL OR discovered_at >= $6)\n              AND ($7::timestamptz IS NULL OR discovered_at <= $7)\n              AND ($8::timestamptz IS NULL OR created_at >= $8)\n              AND ($9::timestamptz IS NULL OR created_at <= $9)\n            GROUP BY COALESCE(parsed_info->>'media_type', 'unknown')\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "TextArray",
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "4080b834115f067cfd4a4865b5170fafe10e5078bdb4f762961adba33a8d8062"
+}

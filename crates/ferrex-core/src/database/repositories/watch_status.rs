@@ -15,7 +15,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::Utc;
 use ferrex_model::{LibraryId, VideoMediaType};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use tracing::info;
 use uuid::Uuid;
@@ -67,14 +67,16 @@ impl PostgresWatchStatusRepository {
         &self,
         progress: &UpdateProgressRequest,
     ) -> Result<UpdateProgressRequest> {
-        let Some(row) = sqlx::query(
+        let Some(row) = sqlx::query!(
             r#"
-            SELECT media_id, media_type::text AS media_type
+            SELECT
+                media_id AS "media_id!",
+                media_type::text AS "media_type!"
             FROM media_files
             WHERE id = $1
             "#,
+            progress.media_id
         )
-        .bind(progress.media_id)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -87,17 +89,8 @@ impl PostgresWatchStatusRepository {
             return Ok(progress.clone());
         };
 
-        let logical_media_id =
-            row.try_get::<Uuid, _>("media_id").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode logical watch media id: {}",
-                    e
-                ))
-            })?;
-        let resolved_media_type = row
-            .try_get::<String, _>("media_type")
-            .ok()
-            .and_then(|value| Self::parse_media_type_label(&value))
+        let logical_media_id = row.media_id;
+        let resolved_media_type = Self::parse_media_type_label(&row.media_type)
             .ok_or_else(|| {
                 MediaError::Internal(
                     "Resolved media file had an unsupported media_type"
@@ -163,12 +156,12 @@ impl PostgresWatchStatusRepository {
         &self,
         media_id: Uuid,
     ) -> Result<Option<(Uuid, String, Option<Uuid>)>> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             SELECT
-                mr.id AS logical_media_id,
-                mr.title AS title,
-                mm.primary_poster_image_id AS poster_iid
+                mr.id AS "logical_media_id!",
+                mr.title AS "title!",
+                mm.primary_poster_image_id AS "poster_iid?"
             FROM movie_references mr
             LEFT JOIN movie_metadata mm
                 ON mm.movie_id = mr.id
@@ -177,9 +170,9 @@ impl PostgresWatchStatusRepository {
             UNION ALL
 
             SELECT
-                mr.id AS logical_media_id,
-                mr.title AS title,
-                mm.primary_poster_image_id AS poster_iid
+                mr.id AS "logical_media_id!",
+                mr.title AS "title!",
+                mm.primary_poster_image_id AS "poster_iid?"
             FROM media_files mf
             JOIN movie_references mr
                 ON mr.id = mf.media_id
@@ -188,8 +181,8 @@ impl PostgresWatchStatusRepository {
             WHERE mf.id = $1 AND mf.media_type = 'movie'
             LIMIT 1
             "#,
+            media_id
         )
-        .bind(media_id)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -199,29 +192,7 @@ impl PostgresWatchStatusRepository {
             ))
         })?;
 
-        row.map(|row| {
-            Ok((
-                row.try_get::<Uuid, _>("logical_media_id").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode movie logical id: {}",
-                        e
-                    ))
-                })?,
-                row.try_get::<String, _>("title").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode movie title: {}",
-                        e
-                    ))
-                })?,
-                row.try_get::<Option<Uuid>, _>("poster_iid").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode movie poster iid: {}",
-                        e
-                    ))
-                })?,
-            ))
-        })
-        .transpose()
+        Ok(row.map(|row| (row.logical_media_id, row.title, row.poster_iid)))
     }
 
     async fn build_series_continue_watching_item(
@@ -231,17 +202,17 @@ impl PostgresWatchStatusRepository {
         last_watched: i64,
     ) -> Result<Option<ContinueWatchingItem>> {
         let policy = Self::watch_policy();
-        if let Some(row) = sqlx::query(
+        if let Some(row) = sqlx::query!(
             r#"
             SELECT
-                er.id AS media_id,
-                er.series_id AS card_media_id,
-                ues.season_number,
-                ues.episode_number,
-                ues.position,
-                ues.duration,
-                COALESCE(sm.name, s.title) AS title,
-                sm.primary_poster_image_id AS poster_iid
+                er.id AS "media_id!",
+                er.series_id AS "card_media_id!",
+                ues.season_number AS "season_number!",
+                ues.episode_number AS "episode_number!",
+                ues.position AS "position!",
+                ues.duration AS "duration!",
+                COALESCE(sm.name, s.title) AS "title!",
+                sm.primary_poster_image_id AS "poster_iid?"
             FROM user_episode_state ues
             JOIN episode_references er
                 ON er.tmdb_series_id = ues.tmdb_series_id
@@ -262,13 +233,13 @@ impl PostgresWatchStatusRepository {
             ORDER BY ues.last_watched DESC, er.discovered_at ASC, er.id ASC
             LIMIT 1
             "#,
+            user_id,
+            tmdb_series_id as i64,
+            policy.resume_min_position_seconds,
+            policy.resume_min_progress_ratio,
+            policy.resume_min_remaining_seconds,
+            policy.completion_threshold
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
-        .bind(policy.resume_min_position_seconds)
-        .bind(policy.resume_min_progress_ratio)
-        .bind(policy.resume_min_remaining_seconds)
-        .bind(policy.completion_threshold)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -277,58 +248,14 @@ impl PostgresWatchStatusRepository {
                 e
             ))
         })? {
-            let media_id = row.try_get::<Uuid, _>("media_id").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode series resume media id: {}",
-                    e
-                ))
-            })?;
-            let card_media_id =
-                row.try_get::<Uuid, _>("card_media_id").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode series card media id: {}",
-                        e
-                    ))
-                })?;
-            let season_number =
-                row.try_get::<i16, _>("season_number").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode series resume season: {}",
-                        e
-                    ))
-                })? as u16;
-            let episode_number =
-                row.try_get::<i16, _>("episode_number").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode series resume episode: {}",
-                        e
-                    ))
-                })? as u16;
-            let position = row.try_get::<f32, _>("position").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode series resume position: {}",
-                    e
-                ))
-            })?;
-            let duration = row.try_get::<f32, _>("duration").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode series resume duration: {}",
-                    e
-                ))
-            })?;
-            let title = row.try_get::<String, _>("title").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode series resume title: {}",
-                    e
-                ))
-            })?;
-            let poster_iid =
-                row.try_get::<Option<Uuid>, _>("poster_iid").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode series poster iid: {}",
-                        e
-                    ))
-                })?;
+            let media_id = row.media_id;
+            let card_media_id = row.card_media_id;
+            let season_number = row.season_number as u16;
+            let episode_number = row.episode_number as u16;
+            let position = row.position;
+            let duration = row.duration;
+            let title = row.title;
+            let poster_iid = row.poster_iid;
             let key = EpisodeKey {
                 tmdb_series_id,
                 season_number,
@@ -354,7 +281,7 @@ impl PostgresWatchStatusRepository {
             }));
         }
 
-        let has_completed = sqlx::query_scalar::<_, bool>(
+        let has_completed = sqlx::query_scalar!(
             r#"
             SELECT EXISTS(
                 SELECT 1
@@ -362,11 +289,11 @@ impl PostgresWatchStatusRepository {
                 WHERE user_id = $1
                   AND tmdb_series_id = $2
                   AND is_completed = true
-            )
+            ) AS "has_completed!"
             "#,
+            user_id,
+            tmdb_series_id as i64
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
         .fetch_one(self.pool())
         .await
         .map_err(|e| {
@@ -380,15 +307,15 @@ impl PostgresWatchStatusRepository {
             return Ok(None);
         }
 
-        let next_row = sqlx::query(
+        let next_row = sqlx::query!(
             r#"
             SELECT
-                er.id AS media_id,
-                er.series_id AS card_media_id,
-                er.season_number,
-                er.episode_number,
-                COALESCE(sm.name, s.title) AS title,
-                sm.primary_poster_image_id AS poster_iid
+                er.id AS "media_id!",
+                er.series_id AS "card_media_id!",
+                er.season_number AS "season_number!",
+                er.episode_number AS "episode_number!",
+                COALESCE(sm.name, s.title) AS "title!",
+                sm.primary_poster_image_id AS "poster_iid?"
             FROM episode_references er
             JOIN series s
                 ON s.id = er.series_id
@@ -407,9 +334,9 @@ impl PostgresWatchStatusRepository {
                      er.id ASC
             LIMIT 1
             "#,
+            user_id,
+            tmdb_series_id as i64
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -423,46 +350,12 @@ impl PostgresWatchStatusRepository {
             return Ok(None);
         };
 
-        let media_id = row.try_get::<Uuid, _>("media_id").map_err(|e| {
-            MediaError::Internal(format!(
-                "Failed to decode next-episode media id: {}",
-                e
-            ))
-        })?;
-        let card_media_id =
-            row.try_get::<Uuid, _>("card_media_id").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode next-episode card media id: {}",
-                    e
-                ))
-            })?;
-        let season_number =
-            row.try_get::<i16, _>("season_number").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode next-episode season: {}",
-                    e
-                ))
-            })? as u16;
-        let episode_number =
-            row.try_get::<i16, _>("episode_number").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode next-episode episode: {}",
-                    e
-                ))
-            })? as u16;
-        let title = row.try_get::<String, _>("title").map_err(|e| {
-            MediaError::Internal(format!(
-                "Failed to decode next-episode title: {}",
-                e
-            ))
-        })?;
-        let poster_iid =
-            row.try_get::<Option<Uuid>, _>("poster_iid").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode next-episode poster iid: {}",
-                    e
-                ))
-            })?;
+        let media_id = row.media_id;
+        let card_media_id = row.card_media_id;
+        let season_number = row.season_number as u16;
+        let episode_number = row.episode_number as u16;
+        let title = row.title;
+        let poster_iid = row.poster_iid;
         let key = EpisodeKey {
             tmdb_series_id,
             season_number,
@@ -504,11 +397,11 @@ impl PostgresWatchStatusRepository {
         library_id: LibraryId,
     ) -> Result<Vec<LibrarySeriesContinueRow>> {
         let policy = Self::watch_policy();
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
             SELECT
-                s.id AS series_id,
-                er.tmdb_series_id AS tmdb_series_id,
+                s.id AS "series_id!",
+                er.tmdb_series_id AS "tmdb_series_id!",
                 MAX(ues.last_watched) FILTER (
                     WHERE ues.is_completed = true
                        OR (ues.duration > 0 AND (ues.position / ues.duration) >= $6)
@@ -519,8 +412,8 @@ impl PostgresWatchStatusRepository {
                           AND (ues.duration - ues.position) >= $5
                           AND (ues.position / ues.duration) < $6
                        )
-                ) AS last_watched,
-                COALESCE(sm.name, s.title) AS title
+                ) AS "last_watched!",
+                COALESCE(sm.name, s.title) AS "title!"
             FROM user_episode_state ues
             JOIN episode_references er
                 ON er.tmdb_series_id = ues.tmdb_series_id
@@ -544,17 +437,17 @@ impl PostgresWatchStatusRepository {
                           AND (ues.position / ues.duration) < $6
                        )
                 ) IS NOT NULL
-            ORDER BY last_watched DESC,
+            ORDER BY "last_watched!" DESC,
                      LOWER(COALESCE(sm.name, s.title)) ASC,
                      s.id ASC
             "#,
+            user_id,
+            library_id.to_uuid(),
+            policy.resume_min_position_seconds,
+            policy.resume_min_progress_ratio,
+            policy.resume_min_remaining_seconds,
+            policy.completion_threshold
         )
-        .bind(user_id)
-        .bind(library_id.to_uuid())
-        .bind(policy.resume_min_position_seconds)
-        .bind(policy.resume_min_progress_ratio)
-        .bind(policy.resume_min_remaining_seconds)
-        .bind(policy.completion_threshold)
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -564,39 +457,14 @@ impl PostgresWatchStatusRepository {
             ))
         })?;
 
-        rows.into_iter()
-            .map(|row| {
-                let series_id =
-                    row.try_get::<Uuid, _>("series_id").map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode library series continue id: {}",
-                            e
-                        ))
-                    })?;
-                let tmdb_series_id = row
-                    .try_get::<i64, _>("tmdb_series_id")
-                    .map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode library series continue TMDB id: {}",
-                            e
-                        ))
-                    })? as u64;
-                let last_watched = row
-                    .try_get::<i64, _>("last_watched")
-                    .map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode library series continue timestamp: {}",
-                            e
-                        ))
-                    })?;
-
-                Ok(LibrarySeriesContinueRow {
-                    series_id,
-                    tmdb_series_id,
-                    last_watched,
-                })
+        Ok(rows
+            .into_iter()
+            .map(|row| LibrarySeriesContinueRow {
+                series_id: row.series_id,
+                tmdb_series_id: row.tmdb_series_id as u64,
+                last_watched: row.last_watched,
             })
-            .collect()
+            .collect())
     }
 
     async fn build_library_series_continue_watching_item(
@@ -606,16 +474,16 @@ impl PostgresWatchStatusRepository {
         candidate: LibrarySeriesContinueRow,
     ) -> Result<Option<SeriesContinueWatchingItem>> {
         let policy = Self::watch_policy();
-        if let Some(row) = sqlx::query(
+        if let Some(row) = sqlx::query!(
             r#"
             SELECT
-                er.id AS media_id,
-                er.season_number,
-                er.episode_number,
-                ues.position,
-                ues.duration,
-                COALESCE(sm.name, s.title) AS title,
-                sm.primary_poster_image_id AS poster_iid
+                er.id AS "media_id!",
+                er.season_number AS "season_number!",
+                er.episode_number AS "episode_number!",
+                ues.position AS "position!",
+                ues.duration AS "duration!",
+                COALESCE(sm.name, s.title) AS "title!",
+                sm.primary_poster_image_id AS "poster_iid?"
             FROM user_episode_state ues
             JOIN episode_references er
                 ON er.tmdb_series_id = ues.tmdb_series_id
@@ -638,15 +506,15 @@ impl PostgresWatchStatusRepository {
             ORDER BY ues.last_watched DESC, er.discovered_at ASC, er.id ASC
             LIMIT 1
             "#,
+            user_id,
+            library_id.to_uuid(),
+            candidate.series_id,
+            candidate.tmdb_series_id as i64,
+            policy.resume_min_position_seconds,
+            policy.resume_min_progress_ratio,
+            policy.resume_min_remaining_seconds,
+            policy.completion_threshold
         )
-        .bind(user_id)
-        .bind(library_id.to_uuid())
-        .bind(candidate.series_id)
-        .bind(candidate.tmdb_series_id as i64)
-        .bind(policy.resume_min_position_seconds)
-        .bind(policy.resume_min_progress_ratio)
-        .bind(policy.resume_min_remaining_seconds)
-        .bind(policy.completion_threshold)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -655,51 +523,13 @@ impl PostgresWatchStatusRepository {
                 e
             ))
         })? {
-            let media_id = row.try_get::<Uuid, _>("media_id").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode library series resume media id: {}",
-                    e
-                ))
-            })?;
-            let season_number =
-                row.try_get::<i16, _>("season_number").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode library series resume season: {}",
-                        e
-                    ))
-                })? as u16;
-            let episode_number =
-                row.try_get::<i16, _>("episode_number").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode library series resume episode: {}",
-                        e
-                    ))
-                })? as u16;
-            let position = row.try_get::<f32, _>("position").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode library series resume position: {}",
-                    e
-                ))
-            })?;
-            let duration = row.try_get::<f32, _>("duration").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode library series resume duration: {}",
-                    e
-                ))
-            })?;
-            let title = row.try_get::<String, _>("title").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode library series resume title: {}",
-                    e
-                ))
-            })?;
-            let poster_iid =
-                row.try_get::<Option<Uuid>, _>("poster_iid").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode library series poster iid: {}",
-                        e
-                    ))
-                })?;
+            let media_id = row.media_id;
+            let season_number = row.season_number as u16;
+            let episode_number = row.episode_number as u16;
+            let position = row.position;
+            let duration = row.duration;
+            let title = row.title;
+            let poster_iid = row.poster_iid;
             let key = EpisodeKey {
                 tmdb_series_id: candidate.tmdb_series_id,
                 season_number,
@@ -724,7 +554,7 @@ impl PostgresWatchStatusRepository {
             }));
         }
 
-        let has_completed = sqlx::query_scalar::<_, bool>(
+        let has_completed = sqlx::query_scalar!(
             r#"
             SELECT EXISTS(
                 SELECT 1
@@ -740,13 +570,13 @@ impl PostgresWatchStatusRepository {
                   AND er.series_id = $3
                   AND ues.tmdb_series_id = $4
                   AND ues.is_completed = true
-            )
+            ) AS "has_completed!"
             "#,
+            user_id,
+            library_id.to_uuid(),
+            candidate.series_id,
+            candidate.tmdb_series_id as i64
         )
-        .bind(user_id)
-        .bind(library_id.to_uuid())
-        .bind(candidate.series_id)
-        .bind(candidate.tmdb_series_id as i64)
         .fetch_one(self.pool())
         .await
         .map_err(|e| {
@@ -760,14 +590,14 @@ impl PostgresWatchStatusRepository {
             return Ok(None);
         }
 
-        let next_row = sqlx::query(
+        let next_row = sqlx::query!(
             r#"
             SELECT
-                er.id AS media_id,
-                er.season_number,
-                er.episode_number,
-                COALESCE(sm.name, s.title) AS title,
-                sm.primary_poster_image_id AS poster_iid
+                er.id AS "media_id!",
+                er.season_number AS "season_number!",
+                er.episode_number AS "episode_number!",
+                COALESCE(sm.name, s.title) AS "title!",
+                sm.primary_poster_image_id AS "poster_iid?"
             FROM episode_references er
             JOIN series s
                 ON s.id = er.series_id
@@ -788,11 +618,11 @@ impl PostgresWatchStatusRepository {
                      er.id ASC
             LIMIT 1
             "#,
+            user_id,
+            library_id.to_uuid(),
+            candidate.series_id,
+            candidate.tmdb_series_id as i64
         )
-        .bind(user_id)
-        .bind(library_id.to_uuid())
-        .bind(candidate.series_id)
-        .bind(candidate.tmdb_series_id as i64)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -806,39 +636,11 @@ impl PostgresWatchStatusRepository {
             return Ok(None);
         };
 
-        let media_id = row.try_get::<Uuid, _>("media_id").map_err(|e| {
-            MediaError::Internal(format!(
-                "Failed to decode library next-episode media id: {}",
-                e
-            ))
-        })?;
-        let season_number =
-            row.try_get::<i16, _>("season_number").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode library next-episode season: {}",
-                    e
-                ))
-            })? as u16;
-        let episode_number =
-            row.try_get::<i16, _>("episode_number").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode library next-episode episode: {}",
-                    e
-                ))
-            })? as u16;
-        let title = row.try_get::<String, _>("title").map_err(|e| {
-            MediaError::Internal(format!(
-                "Failed to decode library next-episode title: {}",
-                e
-            ))
-        })?;
-        let poster_iid =
-            row.try_get::<Option<Uuid>, _>("poster_iid").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode library next-episode poster iid: {}",
-                    e
-                ))
-            })?;
+        let media_id = row.media_id;
+        let season_number = row.season_number as u16;
+        let episode_number = row.episode_number as u16;
+        let title = row.title;
+        let poster_iid = row.poster_iid;
         let key = EpisodeKey {
             tmdb_series_id: candidate.tmdb_series_id,
             season_number,
@@ -903,7 +705,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })?;
 
         if progress.position <= 0.0 {
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 DELETE FROM user_watch_progress
                 WHERE user_id = $1
@@ -914,9 +716,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                       )
                   )
                 "#,
+                user_id,
+                progress.media_id
             )
-            .bind(user_id)
-            .bind(progress.media_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
@@ -987,7 +789,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                 .map_err(|e| MediaError::Internal(format!("Failed to mark as completed: {}", e)))?;
 
             // Remove from in-progress, including stale legacy playback-id rows.
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 DELETE FROM user_watch_progress
                 WHERE user_id = $1
@@ -998,9 +800,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                       )
                   )
                 "#,
+                user_id,
+                progress.media_id
             )
-            .bind(user_id)
-            .bind(progress.media_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
@@ -1012,7 +814,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         } else {
             // A below-threshold update represents active progress, so remove any
             // completed state for the same logical media or stale playback ids.
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 DELETE FROM user_completed_media
                 WHERE user_id = $1
@@ -1023,9 +825,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                       )
                   )
                 "#,
+                user_id,
+                progress.media_id
             )
-            .bind(user_id)
-            .bind(progress.media_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
@@ -1154,16 +956,20 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         user_id: Uuid,
         limit: usize,
     ) -> Result<Vec<ContinueWatchingItem>> {
-        let movie_rows = sqlx::query(
+        let movie_rows = sqlx::query!(
             r#"
-            SELECT media_uuid, position, duration, last_watched
+            SELECT
+                media_uuid AS "media_uuid!",
+                position AS "position!",
+                duration AS "duration!",
+                last_watched AS "last_watched!"
             FROM user_watch_progress
             WHERE user_id = $1 AND media_type = $2
             ORDER BY last_watched DESC
             "#,
+            user_id,
+            VideoMediaType::Movie as i16
         )
-        .bind(user_id)
-        .bind(VideoMediaType::Movie as i16)
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -1175,32 +981,10 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
 
         let mut items = Vec::new();
         for row in movie_rows {
-            let media_id =
-                row.try_get::<Uuid, _>("media_uuid").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode continue-watching movie id: {}",
-                        e
-                    ))
-                })?;
-            let position = row.try_get::<f32, _>("position").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode continue-watching movie position: {}",
-                    e
-                ))
-            })?;
-            let duration = row.try_get::<f32, _>("duration").map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode continue-watching movie duration: {}",
-                    e
-                ))
-            })?;
-            let last_watched =
-                row.try_get::<i64, _>("last_watched").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode continue-watching movie timestamp: {}",
-                        e
-                    ))
-                })?;
+            let media_id = row.media_uuid;
+            let position = row.position;
+            let duration = row.duration;
+            let last_watched = row.last_watched;
 
             if !Self::is_resume_eligible(position, duration) {
                 continue;
@@ -1230,16 +1014,18 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             });
         }
 
-        let series_rows = sqlx::query(
+        let series_rows = sqlx::query!(
             r#"
-            SELECT tmdb_series_id, MAX(last_watched) AS last_watched
+            SELECT
+                tmdb_series_id AS "tmdb_series_id!",
+                MAX(last_watched) AS "last_watched!"
             FROM user_episode_state
             WHERE user_id = $1
             GROUP BY tmdb_series_id
             ORDER BY MAX(last_watched) DESC
             "#,
+            user_id
         )
-        .bind(user_id)
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -1250,20 +1036,8 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })?;
 
         for row in series_rows {
-            let tmdb_series_id =
-                row.try_get::<i64, _>("tmdb_series_id").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode continue-watching series id: {}",
-                        e
-                    ))
-                })? as u64;
-            let last_watched =
-                row.try_get::<i64, _>("last_watched").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode continue-watching series timestamp: {}",
-                        e
-                    ))
-                })?;
+            let tmdb_series_id = row.tmdb_series_id as u64;
+            let last_watched = row.last_watched;
 
             if let Some(item) = self
                 .build_series_continue_watching_item(
@@ -1321,9 +1095,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         library_id: LibraryId,
     ) -> Result<Vec<Uuid>> {
         let policy = Self::watch_policy();
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT DISTINCT watched.series_id
+            SELECT DISTINCT watched.series_id AS "series_id!"
             FROM (
                 SELECT s.id AS series_id
                 FROM series s
@@ -1383,14 +1157,14 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ) watched
             ORDER BY watched.series_id
             "#,
+            user_id,
+            library_id.to_uuid(),
+            policy.completion_threshold,
+            policy.resume_min_position_seconds,
+            policy.resume_min_progress_ratio,
+            policy.resume_min_remaining_seconds,
+            VideoMediaType::Episode as i16
         )
-        .bind(user_id)
-        .bind(library_id.to_uuid())
-        .bind(policy.completion_threshold)
-        .bind(policy.resume_min_position_seconds)
-        .bind(policy.resume_min_progress_ratio)
-        .bind(policy.resume_min_remaining_seconds)
-        .bind(VideoMediaType::Episode as i16)
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -1400,16 +1174,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        rows.into_iter()
-            .map(|row| {
-                row.try_get::<Uuid, _>("series_id").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode watched series id: {}",
-                        e
-                    ))
-                })
-            })
-            .collect()
+        Ok(rows.into_iter().map(|row| row.series_id).collect())
     }
 
     async fn clear_watch_progress(
@@ -1424,7 +1189,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })?;
 
         // Remove progress rows for the logical media id and stale playback ids.
-        let progress_result = sqlx::query(
+        let progress_result = sqlx::query!(
             r#"
             DELETE FROM user_watch_progress
             WHERE user_id = $1
@@ -1435,9 +1200,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   )
               )
             "#,
+            user_id,
+            *media_id,
         )
-        .bind(user_id)
-        .bind(*media_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1448,7 +1213,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })?;
 
         // Remove completed rows for the logical media id and stale playback ids.
-        let completed_result = sqlx::query(
+        let completed_result = sqlx::query!(
             r#"
             DELETE FROM user_completed_media
             WHERE user_id = $1
@@ -1459,9 +1224,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   )
               )
             "#,
+            user_id,
+            *media_id,
         )
-        .bind(user_id)
-        .bind(*media_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1472,7 +1237,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })?;
 
         if let Some(key) = episode_key {
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 DELETE FROM user_episode_state
                 WHERE user_id = $1
@@ -1480,11 +1245,11 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   AND season_number = $3
                   AND episode_number = $4
                 "#,
+                user_id,
+                key.tmdb_series_id as i64,
+                key.season_number as i16,
+                key.episode_number as i16,
             )
-            .bind(user_id)
-            .bind(key.tmdb_series_id as i64)
-            .bind(key.season_number as i16)
-            .bind(key.episode_number as i16)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
@@ -1563,7 +1328,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             MediaError::Internal(format!("Failed to start transaction: {}", e))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_watch_progress
             WHERE user_id = $1
@@ -1574,9 +1339,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   )
               )
             "#,
+            user_id,
+            media_id,
         )
-        .bind(user_id)
-        .bind(media_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1586,7 +1351,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_completed_media
             WHERE user_id = $1
@@ -1594,9 +1359,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   SELECT id FROM media_files WHERE media_id = $2
               )
             "#,
+            user_id,
+            media_id,
         )
-        .bind(user_id)
-        .bind(media_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1606,7 +1371,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO user_completed_media (user_id, media_uuid, media_type, completed_at)
             VALUES ($1, $2, $3, $4)
@@ -1615,11 +1380,11 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                 media_type = EXCLUDED.media_type,
                 completed_at = GREATEST(user_completed_media.completed_at, EXCLUDED.completed_at)
             "#,
+            user_id,
+            media_id,
+            media_type as i16,
+            now,
         )
-        .bind(user_id)
-        .bind(media_id)
-        .bind(media_type as i16)
-        .bind(now)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1630,7 +1395,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })?;
 
         if let Some(key) = episode_key {
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 INSERT INTO user_episode_state (
                     user_id, tmdb_series_id, season_number, episode_number,
@@ -1644,13 +1409,13 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                     is_completed = true,
                     last_media_uuid = COALESCE(EXCLUDED.last_media_uuid, user_episode_state.last_media_uuid)
                 "#,
+                user_id,
+                key.tmdb_series_id as i64,
+                key.season_number as i16,
+                key.episode_number as i16,
+                now,
+                last_media_uuid.or(Some(media_id)),
             )
-            .bind(user_id)
-            .bind(key.tmdb_series_id as i64)
-            .bind(key.season_number as i16)
-            .bind(key.episode_number as i16)
-            .bind(now)
-            .bind(last_media_uuid.or(Some(media_id)))
             .execute(&mut *tx)
             .await
             .map_err(|e| {
@@ -1683,7 +1448,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             MediaError::Internal(format!("Failed to start transaction: {}", e))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_watch_progress
             WHERE user_id = $1
@@ -1694,9 +1459,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   )
               )
             "#,
+            user_id,
+            media_id,
         )
-        .bind(user_id)
-        .bind(media_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1706,7 +1471,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_completed_media
             WHERE user_id = $1
@@ -1717,9 +1482,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   )
               )
             "#,
+            user_id,
+            media_id,
         )
-        .bind(user_id)
-        .bind(media_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1730,16 +1495,16 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })?;
 
         if let Some(key) = episode_key {
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 DELETE FROM user_episode_state
                 WHERE user_id = $1 AND tmdb_series_id = $2 AND season_number = $3 AND episode_number = $4
                 "#,
+                user_id,
+                key.tmdb_series_id as i64,
+                key.season_number as i16,
+                key.episode_number as i16,
             )
-            .bind(user_id)
-            .bind(key.tmdb_series_id as i64)
-            .bind(key.season_number as i16)
-            .bind(key.episode_number as i16)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
@@ -1767,7 +1532,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             MediaError::Internal(format!("Failed to start transaction: {}", e))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_watch_progress
             WHERE user_id = $1
@@ -1783,9 +1548,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   )
               )
             "#,
+            user_id,
+            tmdb_series_id as i64,
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1795,7 +1560,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_completed_media
             WHERE user_id = $1
@@ -1806,9 +1571,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   WHERE er.tmdb_series_id = $2
               )
             "#,
+            user_id,
+            tmdb_series_id as i64,
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1818,7 +1583,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO user_completed_media (user_id, media_uuid, media_type, completed_at)
             SELECT $1, er.id, $3, $4
@@ -1829,11 +1594,11 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                 media_type = EXCLUDED.media_type,
                 completed_at = GREATEST(user_completed_media.completed_at, EXCLUDED.completed_at)
             "#,
+            user_id,
+            tmdb_series_id as i64,
+            VideoMediaType::Episode as i16,
+            now,
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
-        .bind(VideoMediaType::Episode as i16)
-        .bind(now)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1843,7 +1608,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO user_episode_state (
                 user_id, tmdb_series_id, season_number, episode_number,
@@ -1869,10 +1634,10 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                 is_completed = true,
                 last_media_uuid = COALESCE(EXCLUDED.last_media_uuid, user_episode_state.last_media_uuid)
             "#,
+            user_id,
+            tmdb_series_id as i64,
+            now,
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
-        .bind(now)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1898,14 +1663,14 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             MediaError::Internal(format!("Failed to start transaction: {}", e))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_episode_state
             WHERE user_id = $1 AND tmdb_series_id = $2
             "#,
+            user_id,
+            tmdb_series_id as i64,
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1915,7 +1680,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_watch_progress
             WHERE user_id = $1
@@ -1931,9 +1696,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   )
               )
             "#,
+            user_id,
+            tmdb_series_id as i64,
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1943,7 +1708,7 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ))
         })?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM user_completed_media
             WHERE user_id = $1
@@ -1959,9 +1724,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                   )
               )
             "#,
+            user_id,
+            tmdb_series_id as i64,
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -2299,9 +2064,12 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         let policy = Self::watch_policy();
 
         // Prefer latest resume-eligible in-progress episode.
-        if let Some(row) = sqlx::query(
+        if let Some(row) = sqlx::query!(
             r#"
-            SELECT season_number, episode_number, last_media_uuid
+            SELECT
+                season_number AS "season_number!",
+                episode_number AS "episode_number!",
+                last_media_uuid
             FROM user_episode_state
             WHERE user_id = $1
               AND tmdb_series_id = $2
@@ -2314,13 +2082,13 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             ORDER BY last_watched DESC
             LIMIT 1
             "#,
+            user_id,
+            tmdb_series_id as i64,
+            policy.resume_min_position_seconds,
+            policy.resume_min_progress_ratio,
+            policy.resume_min_remaining_seconds,
+            policy.completion_threshold
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
-        .bind(policy.resume_min_position_seconds)
-        .bind(policy.resume_min_progress_ratio)
-        .bind(policy.resume_min_remaining_seconds)
-        .bind(policy.completion_threshold)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -2331,31 +2099,10 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })? {
             let key = EpisodeKey {
                 tmdb_series_id,
-                season_number: row.try_get::<i16, _>("season_number").map_err(
-                    |e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode next-episode season: {}",
-                            e
-                        ))
-                    },
-                )? as u16,
-                episode_number: row
-                    .try_get::<i16, _>("episode_number")
-                    .map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode next-episode episode: {}",
-                            e
-                        ))
-                    })? as u16,
+                season_number: row.season_number as u16,
+                episode_number: row.episode_number as u16,
             };
-            let playable_media_id = if let Some(id) = row
-                .try_get::<Option<Uuid>, _>("last_media_uuid")
-                .map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Failed to decode next-episode playback id: {}",
-                        e
-                    ))
-                })? {
+            let playable_media_id = if let Some(id) = row.last_media_uuid {
                 Some(id)
             } else {
                 self.lookup_playable_episode(&key).await?
@@ -2368,9 +2115,11 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         }
 
         // Else first unwatched from the known playable catalog.
-        if let Some(row) = sqlx::query(
+        if let Some(row) = sqlx::query!(
             r#"
-            SELECT er.season_number, er.episode_number
+            SELECT
+                er.season_number AS "season_number!",
+                er.episode_number AS "episode_number!"
             FROM episode_references er
             LEFT JOIN user_episode_state ues
                 ON ues.user_id = $1
@@ -2385,9 +2134,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
                      er.id ASC
             LIMIT 1
             "#,
+            user_id,
+            tmdb_series_id as i64
         )
-        .bind(user_id)
-        .bind(tmdb_series_id as i64)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -2398,22 +2147,8 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         })? {
             let key = EpisodeKey {
                 tmdb_series_id,
-                season_number: row.try_get::<i16, _>("season_number").map_err(
-                    |e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode first-unwatched season: {}",
-                            e
-                        ))
-                    },
-                )? as u16,
-                episode_number: row
-                    .try_get::<i16, _>("episode_number")
-                    .map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode first-unwatched episode: {}",
-                            e
-                        ))
-                    })? as u16,
+                season_number: row.season_number as u16,
+                episode_number: row.episode_number as u16,
             };
             let playable_media_id = self.lookup_playable_episode(&key).await?;
             return Ok(Some(NextEpisode {
@@ -2480,14 +2215,17 @@ impl PostgresWatchStatusRepository {
         &self,
         media_id: Uuid,
     ) -> Result<Option<EpisodeKey>> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
-            SELECT tmdb_series_id, season_number, episode_number
+            SELECT
+                tmdb_series_id AS "tmdb_series_id!",
+                season_number AS "season_number!",
+                episode_number AS "episode_number!"
             FROM episode_references
             WHERE id = $1
             "#,
+            media_id
         )
-        .bind(media_id)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -2497,52 +2235,28 @@ impl PostgresWatchStatusRepository {
             ))
         })?;
 
-        row.map(|row| {
-            Ok(EpisodeKey {
-                tmdb_series_id: row
-                    .try_get::<i64, _>("tmdb_series_id")
-                    .map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode tmdb_series_id for {}: {}",
-                            media_id, e
-                        ))
-                    })? as u64,
-                season_number: row.try_get::<i16, _>("season_number").map_err(
-                    |e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode season_number for {}: {}",
-                            media_id, e
-                        ))
-                    },
-                )? as u16,
-                episode_number: row
-                    .try_get::<i16, _>("episode_number")
-                    .map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode episode_number for {}: {}",
-                            media_id, e
-                        ))
-                    })? as u16,
-            })
-        })
-        .transpose()
+        Ok(row.map(|row| EpisodeKey {
+            tmdb_series_id: row.tmdb_series_id as u64,
+            season_number: row.season_number as u16,
+            episode_number: row.episode_number as u16,
+        }))
     }
 
     async fn lookup_playable_episode(
         &self,
         key: &EpisodeKey,
     ) -> Result<Option<Uuid>> {
-        let row = sqlx::query(
+        let row = sqlx::query_scalar!(
             r#"
-            SELECT id FROM episode_references
+            SELECT id AS "id!" FROM episode_references
             WHERE tmdb_series_id = $1 AND season_number = $2 AND episode_number = $3
             ORDER BY discovered_at ASC, id ASC
             LIMIT 1
             "#,
+            key.tmdb_series_id as i64,
+            key.season_number as i16,
+            key.episode_number as i16
         )
-        .bind(key.tmdb_series_id as i64)
-        .bind(key.season_number as i16)
-        .bind(key.episode_number as i16)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -2552,14 +2266,7 @@ impl PostgresWatchStatusRepository {
             ))
         })?;
 
-        row.map(|row| row.try_get::<Uuid, _>("id"))
-            .transpose()
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to decode playable episode id: {}",
-                    e
-                ))
-            })
+        Ok(row)
     }
 }
 

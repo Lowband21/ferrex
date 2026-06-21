@@ -801,7 +801,10 @@ async fn check_database(url: &str) -> Result<()> {
         }
     };
 
-    if let Err(err) = sqlx::query("SELECT 1").execute(&pool).await {
+    if let Err(err) = sqlx::query_scalar!(r#"SELECT 1 AS "ok!""#)
+        .fetch_one(&pool)
+        .await
+    {
         return Err(anyhow!("failed to execute test query: {err}"));
     }
 

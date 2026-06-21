@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH target_prefixes AS (\n                SELECT root,\n                       root || $3::text || '%' AS child_pattern\n                FROM UNNEST($2::text[]) AS root\n            )\n            DELETE FROM media_files AS mf\n            USING target_prefixes AS p\n            WHERE mf.library_id = $1\n              AND (mf.file_path = p.root OR mf.file_path LIKE p.child_pattern)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d0a82f8866a31816da5c3f65fd0bb860ab9e469db07ce57823acc21ccdc64c12"
+}

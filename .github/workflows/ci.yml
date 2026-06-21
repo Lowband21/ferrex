@@ -18,6 +18,57 @@ env:
   SQLX_OFFLINE: "true"
 
 jobs:
+  sqlx-enforcement:
+    name: SQLx enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libglib2.0-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavdevice-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libswresample-dev
+
+      - uses: moonrepo/setup-rust@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_BINSTALL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_BINSTALL_DISABLE_TELEMETRY: "true"
+        with:
+          components: rustfmt
+          bins: sqlx-cli@0.8.6
+
+      - name: Cache Rust/Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: sqlx-enforcement-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '.sqlx/*.json') }}
+          restore-keys: |
+            sqlx-enforcement-${{ runner.os }}-
+
+      - name: SQLx dynamic-query guard self-test
+        run: ./scripts/check-sqlx-dynamic-guard.py --self-test
+
+      - name: SQLx dynamic-query guard
+        run: ./scripts/check-sqlx-dynamic-guard.py
+
+      - name: SQLx prepare --check (offline cache)
+        run: ./scripts/dev/sqlx-db.sh prepare-check
+
   build:
     name: Build
     strategy:

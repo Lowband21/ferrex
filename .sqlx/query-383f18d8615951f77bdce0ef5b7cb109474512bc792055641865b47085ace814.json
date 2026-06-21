@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                er.id AS \"media_id!\",\n                er.season_number AS \"season_number!\",\n                er.episode_number AS \"episode_number!\",\n                COALESCE(sm.name, s.title) AS \"title!\",\n                sm.primary_poster_image_id AS \"poster_iid?\"\n            FROM episode_references er\n            JOIN series s\n                ON s.id = er.series_id\n            LEFT JOIN series_metadata sm\n                ON sm.series_id = s.id\n            LEFT JOIN user_episode_state ues\n                ON ues.user_id = $1\n               AND ues.tmdb_series_id = er.tmdb_series_id\n               AND ues.season_number = er.season_number\n               AND ues.episode_number = er.episode_number\n            WHERE s.library_id = $2\n              AND er.series_id = $3\n              AND er.tmdb_series_id = $4\n              AND (ues.is_completed IS NULL OR ues.is_completed = false)\n            ORDER BY er.season_number ASC,\n                     er.episode_number ASC,\n                     er.discovered_at ASC,\n                     er.id ASC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "season_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "poster_iid?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "383f18d8615951f77bdce0ef5b7cb109474512bc792055641865b47085ace814"
+}

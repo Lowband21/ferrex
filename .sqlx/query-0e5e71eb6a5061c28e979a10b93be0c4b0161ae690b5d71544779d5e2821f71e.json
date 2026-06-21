@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM user_completed_media\n            WHERE user_id = $1\n              AND media_uuid IN (\n                  SELECT id FROM media_files WHERE media_id = $2\n              )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0e5e71eb6a5061c28e979a10b93be0c4b0161ae690b5d71544779d5e2821f71e"
+}

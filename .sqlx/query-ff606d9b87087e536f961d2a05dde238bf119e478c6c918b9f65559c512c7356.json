@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT mr.id AS \"id!\", mr.title AS \"title!\"\n                FROM movie_references mr\n                WHERE (cardinality($1::uuid[]) = 0 OR mr.library_id = ANY($1))\n                  AND (\n                    mr.title ILIKE $2 ESCAPE E'\\\\'\n                    OR similarity(mr.title, $3) > $4::real\n                    OR ($5::text IS NOT NULL AND LOWER(mr.title) ~ $5)\n                    OR ($6::text IS NOT NULL AND LOWER(mr.title) LIKE $6)\n                  )\n                ORDER BY\n                  CASE\n                    WHEN LOWER(mr.title) = LOWER($3) THEN 0\n                    WHEN LOWER(mr.title) LIKE LOWER($7) ESCAPE E'\\\\' THEN 1\n                    WHEN mr.title ILIKE $2 ESCAPE E'\\\\' THEN 2\n                    ELSE 3\n                  END,\n                  similarity(mr.title, $3) DESC,\n                  LENGTH(mr.title) ASC,\n                  LOWER(mr.title) ASC\n                LIMIT $8\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "Text",
+        "Float4",
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ff606d9b87087e536f961d2a05dde238bf119e478c6c918b9f65559c512c7356"
+}

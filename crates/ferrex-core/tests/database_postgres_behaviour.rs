@@ -6,13 +6,29 @@ use anyhow::Result;
 use chrono::{Duration, Utc};
 use ferrex_core::database::postgres::PostgresDatabase;
 use ferrex_core::database::repositories::folder_inventory::PostgresFolderInventoryRepository;
+use ferrex_core::database::repositories::media::PostgresMediaRepository;
+use ferrex_core::database::repositories::query::PostgresQueryRepository;
 use ferrex_core::database::repository_ports::folder_inventory::FolderInventoryRepository;
+use ferrex_core::database::repository_ports::media_files::{
+    MediaFileFilter, MediaFileSort, MediaFileSortField, MediaFilesReadPort,
+    Page,
+};
 use ferrex_core::database::repository_ports::processing_status::ProcessingStatusRepository;
+use ferrex_core::database::repository_ports::query::QueryRepository;
 use ferrex_core::database::traits::{
     FolderProcessingStatus, FolderScanFilters, MediaProcessingStatus,
 };
+use ferrex_core::domain::scan::orchestration::{
+    PostgresCursorRepository, ScanCursor, ScanCursorId, ScanCursorRepository,
+};
+use ferrex_core::player_prelude::{MediaID, MovieID};
+use ferrex_core::query::{
+    MediaQueryBuilder,
+    types::{SortBy, SortOrder},
+};
 use ferrex_core::types::LibraryId;
 use sqlx::PgPool;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 fn fixture_library_id() -> LibraryId {
@@ -21,6 +37,113 @@ fn fixture_library_id() -> LibraryId {
 
 fn fixture_media_file(id: &str) -> Uuid {
     Uuid::parse_str(id).unwrap()
+}
+
+async fn seed_query_movie(
+    pool: &PgPool,
+    library_id: LibraryId,
+    movie_id: Uuid,
+    file_id: Uuid,
+    tmdb_id: i64,
+    title: &str,
+    genre_id: i64,
+    genre: &str,
+) -> Result<()> {
+    let filename = format!("{}.mkv", title.to_ascii_lowercase());
+    let file_path = format!("/fixture/query/{filename}");
+
+    sqlx::query(
+        r#"
+        INSERT INTO media_files (
+            id,
+            library_id,
+            media_id,
+            media_type,
+            file_path,
+            filename,
+            file_size,
+            is_available
+        )
+        VALUES ($1, $2, $3, 'movie', $4, $5, 100, TRUE)
+        "#,
+    )
+    .bind(file_id)
+    .bind(library_id.as_uuid())
+    .bind(movie_id)
+    .bind(file_path)
+    .bind(filename)
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO movie_references (
+            id,
+            library_id,
+            file_id,
+            tmdb_id,
+            title,
+            batch_id
+        )
+        VALUES ($1, $2, $3, $4, $5, 1)
+        "#,
+    )
+    .bind(movie_id)
+    .bind(library_id.as_uuid())
+    .bind(file_id)
+    .bind(tmdb_id)
+    .bind(title)
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO movie_genres (movie_id, library_id, batch_id, genre_id, name)
+        VALUES ($1, $2, 1, $3, $4)
+        "#,
+    )
+    .bind(movie_id)
+    .bind(library_id.as_uuid())
+    .bind(genre_id)
+    .bind(genre)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn seed_folder_inventory_path(
+    pool: &PgPool,
+    library_id: LibraryId,
+    folder_id: Uuid,
+    path: &str,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO folder_inventory (id, library_id, folder_path, folder_type)
+        VALUES ($1, $2, $3, 'movie')
+        "#,
+    )
+    .bind(folder_id)
+    .bind(library_id.as_uuid())
+    .bind(path)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+fn scan_cursor_for_path(library_id: LibraryId, path: &str) -> ScanCursor {
+    let paths = vec![PathBuf::from(path)];
+    ScanCursor {
+        id: ScanCursorId::new(library_id, &paths),
+        folder_path_norm: path.to_owned(),
+        listing_hash: format!("hash:{path}"),
+        entry_count: 1,
+        last_scan_at: Utc::now(),
+        last_modified_at: None,
+        device_id: None,
+    }
 }
 
 fn seed_status(
@@ -278,6 +401,247 @@ async fn folder_inventory_filters_are_bound(pool: PgPool) -> Result<()> {
     .await?;
     assert_eq!(stale.len(), 1);
     assert_eq!(stale[0].folder_path, "/fixture/library/a/pending");
+
+    Ok(())
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(path = "../fixtures", scripts("test_libraries"))
+)]
+async fn query_repository_movie_filters_sorting_and_pagination_are_bound(
+    pool: PgPool,
+) -> Result<()> {
+    let repo = PostgresQueryRepository::new(pool.clone());
+    let library_a = fixture_library_id();
+    let library_b =
+        LibraryId(Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")?);
+    let alpha_movie = Uuid::parse_str("40000000-0000-0000-0000-000000000001")?;
+    let beta_movie = Uuid::parse_str("40000000-0000-0000-0000-000000000002")?;
+    let gamma_movie = Uuid::parse_str("40000000-0000-0000-0000-000000000003")?;
+    let other_library_movie =
+        Uuid::parse_str("40000000-0000-0000-0000-000000000004")?;
+
+    seed_query_movie(
+        &pool,
+        library_a,
+        alpha_movie,
+        Uuid::parse_str("50000000-0000-0000-0000-000000000001")?,
+        20_001,
+        "Alpha Action",
+        1,
+        "Action",
+    )
+    .await?;
+    seed_query_movie(
+        &pool,
+        library_a,
+        beta_movie,
+        Uuid::parse_str("50000000-0000-0000-0000-000000000002")?,
+        20_002,
+        "Beta Action",
+        1,
+        "Action",
+    )
+    .await?;
+    seed_query_movie(
+        &pool,
+        library_a,
+        gamma_movie,
+        Uuid::parse_str("50000000-0000-0000-0000-000000000003")?,
+        20_003,
+        "Gamma Drama",
+        2,
+        "Drama",
+    )
+    .await?;
+    seed_query_movie(
+        &pool,
+        library_b,
+        other_library_movie,
+        Uuid::parse_str("50000000-0000-0000-0000-000000000004")?,
+        20_004,
+        "Zeta Action",
+        1,
+        "Action",
+    )
+    .await?;
+
+    let sorted_action = repo
+        .query_media(
+            &MediaQueryBuilder::new()
+                .movies_only()
+                .in_library(library_a)
+                .genre("Action")
+                .sort_by(SortBy::Title, SortOrder::Descending)
+                .limit(10)
+                .build(),
+        )
+        .await?;
+    let sorted_ids: Vec<_> = sorted_action.iter().map(|row| row.id).collect();
+    assert_eq!(
+        sorted_ids,
+        vec![
+            MediaID::Movie(MovieID(beta_movie)),
+            MediaID::Movie(MovieID(alpha_movie))
+        ]
+    );
+
+    let paged = repo
+        .query_media(
+            &MediaQueryBuilder::new()
+                .movies_only()
+                .in_library(library_a)
+                .genre("Action")
+                .sort_by(SortBy::Title, SortOrder::Descending)
+                .limit(1)
+                .offset(1)
+                .build(),
+        )
+        .await?;
+    assert_eq!(paged.len(), 1);
+    assert_eq!(paged[0].id, MediaID::Movie(MovieID(alpha_movie)));
+
+    Ok(())
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(
+        path = "../fixtures",
+        scripts("test_libraries", "media_processing_base")
+    )
+)]
+async fn media_repository_filters_sorting_pagination_and_stats_are_bound(
+    pool: PgPool,
+) -> Result<()> {
+    let repo = PostgresMediaRepository::new(pool.clone());
+    let library_id = fixture_library_id();
+
+    let filter = MediaFileFilter {
+        library_id: Some(library_id),
+        path_prefix: Some("/fixture/library/a/movie_t".to_owned()),
+        extension_in: vec![".mkv".to_owned()],
+        min_size: Some(2),
+        max_size: Some(3),
+        ..Default::default()
+    };
+
+    let rows = repo
+        .list(
+            filter.clone(),
+            MediaFileSort::descending(MediaFileSortField::FileSize),
+            Page {
+                limit: 1,
+                offset: 0,
+            },
+        )
+        .await?;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].filename, "movie_three.mkv");
+
+    let paged = repo
+        .list(
+            MediaFileFilter {
+                library_id: Some(library_id),
+                extension_in: vec!["mkv".to_owned()],
+                ..Default::default()
+            },
+            MediaFileSort::descending(MediaFileSortField::FileSize),
+            Page {
+                limit: 2,
+                offset: 1,
+            },
+        )
+        .await?;
+    let paged_names: Vec<_> =
+        paged.iter().map(|file| file.filename.as_str()).collect();
+    assert_eq!(paged_names, vec!["movie_two.mkv", "movie_one.mkv"]);
+
+    let stats = repo.stats(filter).await?;
+    assert_eq!(stats.total_files, 2);
+    assert_eq!(stats.total_size, 5);
+
+    Ok(())
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(path = "../fixtures", scripts("test_libraries"))
+)]
+async fn folder_inventory_prefix_deletion_deletes_roots_and_children_only(
+    pool: PgPool,
+) -> Result<()> {
+    let repo = PostgresFolderInventoryRepository::new(pool.clone());
+    let library_id = fixture_library_id();
+
+    for (idx, path) in [
+        "/fixture/library/a/removed",
+        "/fixture/library/a/removed/child",
+        "/fixture/library/a/removed-sibling",
+    ]
+    .iter()
+    .enumerate()
+    {
+        seed_folder_inventory_path(
+            &pool,
+            library_id,
+            Uuid::from_u128(0x60000000000000000000000000000001 + idx as u128),
+            path,
+        )
+        .await?;
+    }
+
+    let deleted = repo
+        .delete_by_path_prefixes(
+            library_id,
+            vec!["/fixture/library/a/removed".to_owned()],
+        )
+        .await?;
+    assert_eq!(deleted, 2);
+
+    let remaining = repo.get_folder_inventory(library_id).await?;
+    let remaining_paths: Vec<_> = remaining
+        .into_iter()
+        .map(|folder| folder.folder_path)
+        .collect();
+    assert_eq!(remaining_paths, vec!["/fixture/library/a/removed-sibling"]);
+
+    Ok(())
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(path = "../fixtures", scripts("test_libraries"))
+)]
+async fn scan_cursor_prefix_deletion_deletes_roots_and_children_only(
+    pool: PgPool,
+) -> Result<()> {
+    let repo = PostgresCursorRepository::new(pool.clone());
+    let library_id = fixture_library_id();
+
+    for path in [
+        "/fixture/library/a/removed",
+        "/fixture/library/a/removed/child",
+        "/fixture/library/a/removed-sibling",
+    ] {
+        repo.upsert(scan_cursor_for_path(library_id, path)).await?;
+    }
+
+    let deleted = repo
+        .delete_by_path_prefixes(
+            library_id,
+            vec!["/fixture/library/a/removed".to_owned()],
+        )
+        .await?;
+    assert_eq!(deleted, 2);
+
+    let remaining = repo.list_by_library(library_id).await?;
+    let remaining_paths: Vec<_> = remaining
+        .into_iter()
+        .map(|cursor| cursor.folder_path_norm)
+        .collect();
+    assert_eq!(remaining_paths, vec!["/fixture/library/a/removed-sibling"]);
 
     Ok(())
 }

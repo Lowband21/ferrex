@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT s.id AS \"id!\", s.title AS \"title!\"\n                FROM series s\n                INNER JOIN series_bundle_versioning sbv\n                  ON sbv.series_id = s.id\n                 AND sbv.library_id = s.library_id\n                WHERE sbv.finalized = true\n                  AND (cardinality($1::uuid[]) = 0 OR s.library_id = ANY($1))\n                  AND (\n                    s.title ILIKE $2 ESCAPE E'\\\\'\n                    OR similarity(s.title, $3) > $4::real\n                    OR ($5::text IS NOT NULL AND LOWER(s.title) ~ $5)\n                    OR ($6::text IS NOT NULL AND LOWER(s.title) LIKE $6)\n                  )\n                ORDER BY\n                  CASE\n                    WHEN LOWER(s.title) = LOWER($3) THEN 0\n                    WHEN LOWER(s.title) LIKE LOWER($7) ESCAPE E'\\\\' THEN 1\n                    WHEN s.title ILIKE $2 ESCAPE E'\\\\' THEN 2\n                    ELSE 3\n                  END,\n                  similarity(s.title, $3) DESC,\n                  LENGTH(s.title) ASC,\n                  LOWER(s.title) ASC\n                LIMIT $8\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "Text",
+        "Float4",
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "de8e56e3426a0df670824bb878e4e3d2b480891909426f8108583226beaf3c56"
+}

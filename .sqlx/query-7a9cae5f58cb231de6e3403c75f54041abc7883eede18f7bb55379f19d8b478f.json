@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pg_reload_conf() AS \"reloaded!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reloaded!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7a9cae5f58cb231de6e3403c75f54041abc7883eede18f7bb55379f19d8b478f"
+}

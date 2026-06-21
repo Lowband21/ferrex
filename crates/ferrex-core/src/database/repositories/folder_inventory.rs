@@ -9,7 +9,7 @@ use crate::database::traits::{
 use crate::error::{MediaError, Result};
 use crate::types::ids::LibraryId;
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Postgres, QueryBuilder};
+use sqlx::PgPool;
 use tracing::info;
 use uuid::Uuid;
 
@@ -25,6 +25,30 @@ impl PostgresFolderInventoryRepository {
 
     fn pool(&self) -> &PgPool {
         &self.pool
+    }
+}
+
+fn folder_processing_status_sql(
+    status: FolderProcessingStatus,
+) -> &'static str {
+    match status {
+        FolderProcessingStatus::Pending => "pending",
+        FolderProcessingStatus::Processing => "processing",
+        FolderProcessingStatus::Completed => "completed",
+        FolderProcessingStatus::Failed => "failed",
+        FolderProcessingStatus::Skipped => "skipped",
+        FolderProcessingStatus::Queued => "queued",
+    }
+}
+
+fn folder_type_sql(folder_type: FolderType) -> &'static str {
+    match folder_type {
+        FolderType::Root => "root",
+        FolderType::Movie => "movie",
+        FolderType::TvShow => "tv_show",
+        FolderType::Season => "season",
+        FolderType::Extra => "extra",
+        FolderType::Unknown => "unknown",
     }
 }
 
@@ -138,7 +162,16 @@ impl PostgresFolderInventoryRepository {
         &self,
         filters: &FolderScanFilters,
     ) -> Result<Vec<FolderInventory>> {
-        let mut builder = QueryBuilder::<Postgres>::new(
+        let library_id = filters.library_id.map(|id| id.to_uuid());
+        let processing_status =
+            filters.processing_status.map(folder_processing_status_sql);
+        let folder_type = filters.folder_type.map(folder_type_sql);
+        let retry_threshold = filters.error_retry_threshold.unwrap_or(3);
+        let limit =
+            filters.max_batch_size.or(filters.limit).unwrap_or(100) as i64;
+
+        let rows = sqlx::query_as!(
+            FolderInventoryRow,
             r#"
             SELECT
                 id, library_id, folder_path, folder_type, parent_folder_id,
@@ -149,83 +182,38 @@ impl PostgresFolderInventoryRepository {
                 file_types, last_modified,
                 metadata, created_at, updated_at
             FROM folder_inventory
-            WHERE 1=1
-            "#,
-        );
-
-        if let Some(library_id) = filters.library_id {
-            builder.push(" AND library_id = ");
-            builder.push_bind(library_id.to_uuid());
-        }
-
-        if let Some(status) = filters.processing_status {
-            let status_str = serde_json::to_string(&status)
-                .unwrap()
-                .trim_matches('"')
-                .to_string();
-            builder.push(" AND processing_status = ");
-            builder.push_bind(status_str);
-        }
-
-        if let Some(folder_type) = filters.folder_type {
-            let type_str = serde_json::to_string(&folder_type)
-                .unwrap()
-                .trim_matches('"')
-                .to_string();
-            builder.push(" AND folder_type = ");
-            builder.push_bind(type_str);
-        }
-
-        if let Some(max_attempts) = filters.max_attempts {
-            builder.push(" AND processing_attempts < ");
-            builder.push_bind(max_attempts);
-        }
-
-        if let Some(stale_hours) = filters.stale_after_hours {
-            builder.push(" AND last_seen_at < NOW() - ");
-            builder.push_bind(format!("{} hours", stale_hours));
-            builder.push("::interval");
-        }
-
-        // Add retry condition - only get folders that are ready for retry
-        builder.push(" AND (next_retry_at IS NULL OR next_retry_at <= NOW())");
-
-        // Add prioritized ordering:
-        // 1. Pending (unscanned) folders first
-        // 2. Failed folders with retry attempts remaining
-        // 3. Everything else by oldest scan time
-        let retry_threshold = filters.error_retry_threshold.unwrap_or(3);
-        builder.push(
-            r#"
+            WHERE ($1::uuid IS NULL OR library_id = $1)
+              AND ($2::text IS NULL OR processing_status = $2)
+              AND ($3::text IS NULL OR folder_type = $3)
+              AND ($4::int4 IS NULL OR processing_attempts < $4)
+              AND ($5::int4 IS NULL OR last_seen_at < NOW() - ($5::int4 * INTERVAL '1 hour'))
+              AND (next_retry_at IS NULL OR next_retry_at <= NOW())
             ORDER BY
                 CASE
                     WHEN processing_status = 'pending' THEN 1
-                    WHEN processing_status = 'failed' AND processing_attempts < "#,
-        );
-        builder.push_bind(retry_threshold);
-        builder.push(
-            r#" THEN 2
+                    WHEN processing_status = 'failed' AND processing_attempts < $6 THEN 2
                     ELSE 3
                 END,
                 processing_attempts ASC,
-                last_seen_at ASC"#,
-        );
-
-        // Apply batch size limit if specified
-        let limit = filters.max_batch_size.or(filters.limit).unwrap_or(100);
-        builder.push(" LIMIT ");
-        builder.push_bind(limit);
-
-        let rows = builder
-            .build_query_as::<FolderInventoryRow>()
-            .fetch_all(self.pool())
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to get folders needing scan: {}",
-                    e
-                ))
-            })?;
+                last_seen_at ASC
+            LIMIT $7
+            "#,
+            library_id,
+            processing_status,
+            folder_type,
+            filters.max_attempts,
+            filters.stale_after_hours,
+            retry_threshold,
+            limit
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to get folders needing scan: {}",
+                e
+            ))
+        })?;
 
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
@@ -239,38 +227,34 @@ impl PostgresFolderInventoryRepository {
             return Ok(0);
         }
 
-        let mut builder = QueryBuilder::<Postgres>::new(
-            "DELETE FROM folder_inventory WHERE library_id = ",
-        );
-        builder.push_bind(library_id.to_uuid());
-        builder.push(" AND (");
+        let roots: Vec<String> = prefixes
+            .iter()
+            .map(|prefix| prefix.trim_end_matches('/').to_owned())
+            .collect();
 
-        for (idx, prefix) in prefixes.iter().enumerate() {
-            if idx > 0 {
-                builder.push(" OR ");
-            }
-
-            let root = prefix.trim_end_matches('/');
-            let mut children_prefix = root.to_string();
-            children_prefix.push('/');
-
-            builder.push("(");
-            builder.push("folder_path = ");
-            builder.push_bind(root);
-            builder.push(" OR folder_path LIKE ");
-            builder.push_bind(format!("{}%", children_prefix));
-            builder.push(")");
-        }
-
-        builder.push(")");
-
-        let result =
-            builder.build().execute(self.pool()).await.map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to delete folder inventory for library {}: {}",
-                    library_id, e
-                ))
-            })?;
+        let result = sqlx::query!(
+            r#"
+            WITH target_prefixes AS (
+                SELECT root,
+                       root || '/%' AS child_pattern
+                FROM UNNEST($2::text[]) AS root
+            )
+            DELETE FROM folder_inventory AS fi
+            USING target_prefixes AS p
+            WHERE fi.library_id = $1
+              AND (fi.folder_path = p.root OR fi.folder_path LIKE p.child_pattern)
+            "#,
+            library_id.to_uuid(),
+            &roots
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to delete folder inventory for library {}: {}",
+                library_id, e
+            ))
+        })?;
 
         Ok(result.rows_affected())
     }

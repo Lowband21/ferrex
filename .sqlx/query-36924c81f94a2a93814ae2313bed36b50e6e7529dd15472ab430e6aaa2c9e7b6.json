@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT current_setting('shared_buffers') AS \"shared_buffers!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "shared_buffers!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "36924c81f94a2a93814ae2313bed36b50e6e7529dd15472ab430e6aaa2c9e7b6"
+}

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH available_movie_positions AS (\n                SELECT msp.movie_id,\n                       msp.library_id,\n                       (ROW_NUMBER() OVER (\n                           PARTITION BY msp.library_id\n                           ORDER BY msp.title_pos, msp.movie_id\n                       ) - 1)::INT4 AS compact_title_idx\n                  FROM movie_sort_positions msp\n                  JOIN movie_references base_mr\n                    ON base_mr.id = msp.movie_id\n                   AND base_mr.library_id = msp.library_id\n                  JOIN media_files base_mf\n                    ON base_mf.id = base_mr.file_id\n                   AND base_mf.library_id = base_mr.library_id\n                 WHERE base_mf.is_available = TRUE\n                   AND msp.library_id = $1\n            )\n            SELECT amp.compact_title_idx AS \"idx!\"\n              FROM movie_references mr\n              JOIN media_files mf\n                ON mr.file_id = mf.id\n               AND mf.library_id = mr.library_id\n              LEFT JOIN movie_metadata mm\n                ON mr.id = mm.movie_id\n               AND mm.library_id = mr.library_id\n              JOIN movie_sort_positions msp\n                ON msp.movie_id = mr.id\n               AND msp.library_id = mr.library_id\n              JOIN available_movie_positions amp\n                ON amp.movie_id = mr.id\n               AND amp.library_id = mr.library_id\n              LEFT JOIN user_watch_progress uwp\n                ON uwp.media_uuid = mr.id\n               AND uwp.media_type = 0\n               AND uwp.user_id = $10\n              LEFT JOIN user_completed_media ucm\n                ON ucm.media_uuid = mr.id\n               AND ucm.media_type = 0\n               AND ucm.user_id = $10\n             WHERE mf.is_available = TRUE\n               AND mr.library_id = $1\n               AND msp.library_id = $1\n               AND (cardinality($2::text[]) = 0 OR EXISTS (\n                    SELECT 1\n                      FROM movie_genres mg\n                     WHERE mg.movie_id = mr.id\n                       AND mg.name = ANY($2)\n               ))\n               AND ($3::int4 IS NULL OR (\n                    mm.release_date IS NOT NULL\n                    AND EXTRACT(YEAR FROM mm.release_date)::INT BETWEEN $3 AND $4\n               ))\n               AND ($5::real IS NULL OR mm.vote_average BETWEEN $5 AND $6)\n               AND ($7::int4 IS NULL OR ((mf.technical_metadata->>'height')::INTEGER) BETWEEN $7 AND $8)\n               AND ($9::text IS NULL OR (mr.title ILIKE $9 OR mm.overview ILIKE $9))\n               AND (\n                    $11::int2 = 0\n                    OR ($11::int2 = 1 AND uwp.media_uuid IS NOT NULL)\n                    OR ($11::int2 = 2 AND ucm.media_uuid IS NOT NULL)\n                    OR ($11::int2 = 3 AND uwp.media_uuid IS NULL AND ucm.media_uuid IS NULL)\n                    OR ($11::int2 = 4 AND GREATEST(COALESCE(uwp.last_watched, 0), COALESCE(ucm.completed_at, 0)) >= $12)\n               )\n             ORDER BY CASE WHEN COALESCE(mm.poster_path, '') = '' THEN 1 ELSE 0 END,\n               CASE WHEN $13::int2 = 0 THEN msp.title_pos END ASC,\n               CASE WHEN $13::int2 = 1 THEN msp.title_pos_desc END ASC,\n               CASE WHEN $13::int2 = 2 THEN msp.date_added_pos END ASC,\n               CASE WHEN $13::int2 = 3 THEN msp.date_added_pos_desc END ASC,\n               CASE WHEN $13::int2 = 4 THEN msp.created_at_pos END ASC,\n               CASE WHEN $13::int2 = 5 THEN msp.created_at_pos_desc END ASC,\n               CASE WHEN $13::int2 = 6 THEN msp.release_date_pos END ASC,\n               CASE WHEN $13::int2 = 7 THEN msp.release_date_pos_desc END ASC,\n               CASE WHEN $13::int2 = 8 THEN msp.rating_pos END ASC,\n               CASE WHEN $13::int2 = 9 THEN msp.rating_pos_desc END ASC,\n               CASE WHEN $13::int2 = 10 THEN msp.runtime_pos END ASC,\n               CASE WHEN $13::int2 = 11 THEN msp.runtime_pos_desc END ASC,\n               CASE WHEN $13::int2 = 12 THEN msp.popularity_pos END ASC,\n               CASE WHEN $13::int2 = 13 THEN msp.popularity_pos_desc END ASC,\n               CASE WHEN $13::int2 = 14 THEN msp.bitrate_pos END ASC,\n               CASE WHEN $13::int2 = 15 THEN msp.bitrate_pos_desc END ASC,\n               CASE WHEN $13::int2 = 16 THEN msp.file_size_pos END ASC,\n               CASE WHEN $13::int2 = 17 THEN msp.file_size_pos_desc END ASC,\n               CASE WHEN $13::int2 = 18 THEN msp.content_rating_pos END ASC,\n               CASE WHEN $13::int2 = 19 THEN msp.content_rating_pos_desc END ASC,\n               CASE WHEN $13::int2 = 20 THEN msp.resolution_pos END ASC,\n               CASE WHEN $13::int2 = 21 THEN msp.resolution_pos_desc END ASC,\n               CASE WHEN $13::int2 = 22 THEN CASE WHEN uwp.duration > 0 THEN (uwp.position::FLOAT8 / NULLIF(uwp.duration::FLOAT8, 0)) ELSE NULL END END ASC NULLS LAST,\n               CASE WHEN $13::int2 = 23 THEN CASE WHEN uwp.duration > 0 THEN (uwp.position::FLOAT8 / NULLIF(uwp.duration::FLOAT8, 0)) ELSE NULL END END DESC NULLS LAST,\n               CASE WHEN $13::int2 = 24 THEN GREATEST(COALESCE(uwp.last_watched, 0), COALESCE(ucm.completed_at, 0)) END ASC NULLS LAST,\n               CASE WHEN $13::int2 = 25 THEN GREATEST(COALESCE(uwp.last_watched, 0), COALESCE(ucm.completed_at, 0)) END DESC NULLS LAST,\n               msp.title_pos ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "idx!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Int4",
+        "Int4",
+        "Float4",
+        "Float4",
+        "Int4",
+        "Int4",
+        "Text",
+        "Uuid",
+        "Int2",
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "25a13e81a4dc2558b5d8d8935e5174fd07da25a166da490fcfb835122fc2d5ba"
+}

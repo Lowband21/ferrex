@@ -434,22 +434,23 @@ impl ScanRunRepository for PostgresScanRunRepository {
     }
 
     async fn list_active(&self) -> Result<Vec<LibraryScanRun>> {
-        let rows = sqlx::query_as::<_, LibraryScanRunRow>(
+        let rows = sqlx::query_as!(
+            LibraryScanRunRow,
             r#"
             SELECT
-                scan_id,
-                library_id,
-                mode,
-                run_key,
+                scan_id as "scan_id!",
+                library_id as "library_id!",
+                mode as "mode!",
+                run_key as "run_key!",
                 correlation_id,
-                status,
-                completed_items,
-                total_items,
-                retrying_items,
-                dead_lettered_items,
+                status as "status!",
+                completed_items as "completed_items!",
+                total_items as "total_items!",
+                retrying_items as "retrying_items!",
+                dead_lettered_items as "dead_lettered_items!",
                 current_path,
                 last_error,
-                sequence,
+                sequence as "sequence!",
                 started_at,
                 terminal_at,
                 created_at,
@@ -457,7 +458,7 @@ impl ScanRunRepository for PostgresScanRunRepository {
             FROM library_scan_runs
             WHERE status::text IN ('pending','running','paused')
             ORDER BY started_at ASC
-            "#,
+            "#
         )
         .fetch_all(&self.pool)
         .await
