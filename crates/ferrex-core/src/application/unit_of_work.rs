@@ -7,6 +7,7 @@ use crate::database::repositories::watch_status::PostgresWatchStatusRepository;
 use crate::database::{
     postgres::PostgresDatabase,
     repositories::{
+        catalog_events::PostgresCatalogEventsRepository,
         folder_inventory::PostgresFolderInventoryRepository,
         images::PostgresImageRepository, indices::PostgresIndicesRepository,
         library::PostgresLibraryRepository, media::PostgresMediaRepository,
@@ -21,6 +22,7 @@ use crate::database::{
         watch_metrics::PostgresWatchMetricsRepository,
     },
     repository_ports::{
+        catalog_events::CatalogEventsRepository,
         folder_inventory::FolderInventoryRepository, images::ImageRepository,
         indices::IndicesRepository, library::LibraryRepository,
         media_files::MediaFilesReadPort, media_files::MediaFilesWritePort,
@@ -60,6 +62,7 @@ pub struct AppUnitOfWork {
     pub watch_status: Arc<dyn WatchStatusRepository>,
     pub watch_metrics: Arc<dyn WatchMetricsReadPort>,
     pub scan_observability: Arc<dyn ScanObservabilityRepository>,
+    pub catalog_events: Arc<dyn CatalogEventsRepository>,
 
     pub sync_sessions: Arc<dyn SyncSessionsRepository>,
 
@@ -107,6 +110,10 @@ impl fmt::Debug for AppUnitOfWork {
                 &type_name_of_val(self.scan_observability.as_ref()),
             )
             .field(
+                "catalog_events",
+                &type_name_of_val(self.catalog_events.as_ref()),
+            )
+            .field(
                 "sync_sessions",
                 &type_name_of_val(self.sync_sessions.as_ref()),
             )
@@ -141,6 +148,7 @@ pub struct AppUnitOfWorkBuilder {
     watch_status: Option<Arc<dyn WatchStatusRepository>>,
     watch_metrics: Option<Arc<dyn WatchMetricsReadPort>>,
     scan_observability: Option<Arc<dyn ScanObservabilityRepository>>,
+    catalog_events: Option<Arc<dyn CatalogEventsRepository>>,
 
     sync_sessions: Option<Arc<dyn SyncSessionsRepository>>,
 
@@ -166,6 +174,7 @@ impl fmt::Debug for AppUnitOfWorkBuilder {
             .field("watch_status", &self.watch_status.is_some())
             .field("watch_metrics", &self.watch_metrics.is_some())
             .field("scan_observability", &self.scan_observability.is_some())
+            .field("catalog_events", &self.catalog_events.is_some())
             .field("sync_sessions", &self.sync_sessions.is_some())
             .field("folder_inventory", &self.folder_inventory.is_some())
             .field("processing_status", &self.processing_status.is_some())
@@ -249,6 +258,13 @@ impl AppUnitOfWorkBuilder {
         self.scan_observability = Some(repo);
         self
     }
+    pub fn with_catalog_events(
+        mut self,
+        repo: Arc<dyn CatalogEventsRepository>,
+    ) -> Self {
+        self.catalog_events = Some(repo);
+        self
+    }
     pub fn with_sync_sessions(
         mut self,
         repo: Arc<dyn SyncSessionsRepository>,
@@ -322,6 +338,9 @@ impl AppUnitOfWorkBuilder {
             scan_observability: self.scan_observability.ok_or_else(|| {
                 "missing ScanObservabilityRepository".to_string()
             })?,
+            catalog_events: self
+                .catalog_events
+                .ok_or_else(|| "missing CatalogEventsRepository".to_string())?,
             sync_sessions: self
                 .sync_sessions
                 .ok_or_else(|| "missing SyncSessionsRepository".to_string())?,
@@ -402,6 +421,10 @@ impl AppUnitOfWorkBuilder {
         let scan_observability: Arc<dyn ScanObservabilityRepository> =
             Arc::new(PostgresScanObservabilityRepository::new(pool.clone()));
         self.scan_observability = Some(scan_observability);
+
+        let catalog_events: Arc<dyn CatalogEventsRepository> =
+            Arc::new(PostgresCatalogEventsRepository::new(pool.clone()));
+        self.catalog_events = Some(catalog_events);
 
         let sync_sessions: Arc<dyn SyncSessionsRepository> =
             Arc::new(PostgresSyncSessionsRepository::new(pool.clone()));

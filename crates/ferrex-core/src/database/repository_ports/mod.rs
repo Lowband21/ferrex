@@ -3,6 +3,7 @@
 //!
 //! Implementations live in the Postgres adapter under `database::infra::postgres`.
 
+pub mod catalog_events;
 pub mod file_watch;
 pub mod folder_inventory;
 pub mod images;
