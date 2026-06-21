@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use ferrex_core::{
     api::types::MovieReferenceBatchResponse,
     application::unit_of_work::AppUnitOfWork,
-    types::{LibraryId, MediaEvent, MovieBatchId},
+    types::{LibraryId, MovieBatchId},
 };
 use sha2::Digest;
 use tokio::{
@@ -13,7 +13,7 @@ use tokio::{
 };
 use tracing::{info, warn};
 
-use super::media_event_bus::MediaEventBus;
+use super::catalog_event_bus::{CatalogEvent, CatalogEventBus};
 
 const MOVIE_BATCH_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -24,8 +24,8 @@ struct LibraryNotifier {
     task: JoinHandle<()>,
 }
 
-/// Tracks active scans per library and emits `MediaEvent::MovieReferenceBatchFinalized`
-/// for newly-finalized movie reference batches.
+/// Tracks active scans per library and emits catalog movie-batch finalization
+/// events for newly-finalized movie reference batches.
 ///
 /// This is intentionally polling-based (via `list_finalized_movie_reference_batches`)
 /// to avoid coupling scan orchestration to database triggers/NOTIFY plumbing.
@@ -45,7 +45,7 @@ impl MovieBatchFinalizationNotifiers {
         &self,
         library_id: LibraryId,
         unit_of_work: Arc<AppUnitOfWork>,
-        media_bus: Arc<MediaEventBus>,
+        catalog_bus: Arc<CatalogEventBus>,
     ) {
         let mut guard = self.libraries.lock().await;
         if let Some(notifier) = guard.get_mut(&library_id) {
@@ -59,7 +59,7 @@ impl MovieBatchFinalizationNotifiers {
         let task = tokio::spawn(movie_batch_notifier_loop(
             library_id,
             unit_of_work,
-            media_bus,
+            catalog_bus,
             stop_rx,
             initial_last_finalized,
         ));
@@ -114,7 +114,7 @@ async fn fetch_last_finalized_batch_id(
 async fn movie_batch_notifier_loop(
     library_id: LibraryId,
     unit_of_work: Arc<AppUnitOfWork>,
-    media_bus: Arc<MediaEventBus>,
+    catalog_bus: Arc<CatalogEventBus>,
     mut stop_rx: watch::Receiver<bool>,
     mut last_notified: Option<MovieBatchId>,
 ) {
@@ -169,11 +169,12 @@ async fn movie_batch_notifier_loop(
                 );
             }
 
-            let receivers = media_bus.receiver_count();
-            let frame = media_bus.publish(MediaEvent::MovieBatchFinalized {
-                library_id,
-                batch_id,
-            });
+            let receivers = catalog_bus.receiver_count();
+            let frame =
+                catalog_bus.publish(CatalogEvent::MovieBatchFinalized {
+                    library_id,
+                    batch_id,
+                });
             info!(
                 library = %library_id,
                 batch_id = %batch_id,

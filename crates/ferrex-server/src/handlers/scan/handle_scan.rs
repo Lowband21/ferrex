@@ -27,7 +27,7 @@ use ferrex_core::scan_observability::{
     ScanRunEventRecord, ScanRunFailurePageRequest, ScanRunFailureSummary,
     ScanRunPageRequest, ScanRunRecord, ScanRunStatus,
 };
-use ferrex_core::types::{LibraryId, MediaEvent, ScanProgressEvent};
+use ferrex_core::types::{LibraryId, ScanProgressEvent};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -38,6 +38,7 @@ use uuid::Uuid;
 
 use crate::infra::app_state::AppState;
 use crate::infra::demo_mode;
+use crate::infra::scan::catalog_event_bus::CatalogEventFrame;
 use crate::infra::scan::scan_manager::{
     ScanBroadcastFrame, ScanCommandAccepted, ScanControlError,
     ScanControlPlane, ScanHistoryEntry, ScanRecoveryAccepted, ScanReplayGap,
@@ -927,17 +928,17 @@ pub async fn media_events_sse_handler(
     });
 
     let scan_control = state.scan_control();
-    let receiver = scan_control.subscribe_media_events();
+    let receiver = scan_control.subscribe_catalog_events();
 
     let history = match resume_from {
         Some(sequence) => {
-            scan_control.media_event_history_since_sequence(sequence)
+            scan_control.catalog_event_history_since_sequence(sequence)
         }
         None => {
             let now = std::time::Instant::now();
             let cutoff =
                 now.checked_sub(MEDIA_EVENT_REPLAY_WINDOW).unwrap_or(now);
-            scan_control.media_event_history_since_instant(cutoff)
+            scan_control.catalog_event_history_since_instant(cutoff)
         }
     };
 
@@ -946,13 +947,13 @@ pub async fn media_events_sse_handler(
         .into_iter()
         .filter_map(|frame| {
             history_last_sequence = history_last_sequence.max(frame.sequence);
-            media_frame_to_sse(frame)
+            catalog_frame_to_sse(frame)
         })
         .map(Ok::<Event, Infallible>)
         .collect::<Vec<_>>();
     let history_stream = tokio_stream::iter(history_events);
 
-    // Stream media events, but ensure primary poster availability for new movies/series
+    // Stream catalog invalidation events for the `/events/media` SSE route.
     let stream = async_stream::stream! {
         let mut live = BroadcastStream::new(receiver);
         use tokio_stream::StreamExt;
@@ -966,12 +967,12 @@ pub async fn media_events_sse_handler(
                     }
                     last_seen_sequence = frame.sequence;
                     //let event = maybe_prepare_and_refresh(&state, event).await;
-                    if let Some(sse) = media_frame_to_sse(frame) {
+                    if let Some(sse) = catalog_frame_to_sse(frame) {
                         yield Ok::<Event, Infallible>(sse);
                     }
                 }
                 Err(err) => {
-                    warn!("media event broadcast error: {err}");
+                    warn!("catalog event broadcast error: {err}");
                 }
             }
         }
@@ -991,12 +992,10 @@ fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
     })
 }
 
-fn media_frame_to_sse(
-    frame: crate::infra::scan::media_event_bus::MediaEventFrame,
-) -> Option<Event> {
+fn catalog_frame_to_sse(frame: CatalogEventFrame) -> Option<Event> {
     let name = frame.event.sse_event_type().event_name();
 
-    encode_media_event(&frame.event).map(|data| {
+    encode_catalog_event(&frame.event).map(|data| {
         Event::default()
             .event(name)
             .id(frame.sequence.to_string())
@@ -1068,11 +1067,14 @@ fn media_frame_to_sse(
 //     }
 // }
 
-fn encode_media_event(event: &MediaEvent) -> Option<String> {
-    to_bytes::<RkyvError>(event)
+fn encode_catalog_event(
+    event: &crate::infra::scan::catalog_event_bus::CatalogEvent,
+) -> Option<String> {
+    let media_event = event.to_media_event();
+    to_bytes::<RkyvError>(&media_event)
         .map(|bytes| BASE64_STANDARD.encode(bytes.as_slice()))
         .map_err(|err| {
-            warn!("failed to serialize media event with rkyv: {err}");
+            warn!("failed to serialize catalog event with rkyv: {err}");
             err
         })
         .ok()

@@ -38,15 +38,16 @@ use ferrex_core::{
     error::MediaError,
     player_prelude::MediaIDLike,
     types::{
-        LibraryId, Media, MediaEvent, ScanEventMetadata,
-        ScanPathReasonCategory, ScanPathReasonDetail, ScanProgressEvent,
-        ScanStageLatencySummary, events::ScanSseEventType,
+        LibraryId, Media, ScanPathReasonCategory, ScanPathReasonDetail,
+        ScanProgressEvent, ScanStageLatencySummary, events::ScanSseEventType,
     },
 };
 
 use crate::infra::{
     orchestration::ScanOrchestrator,
-    scan::media_event_bus::{MediaEventBus, MediaEventFrame},
+    scan::catalog_event_bus::{
+        CatalogEvent, CatalogEventBus, CatalogEventFrame,
+    },
     scan::movie_batch_notifier::MovieBatchFinalizationNotifiers,
     scan::series_bundle_tracker::{
         SeriesBundleFinalization, SeriesBundleTracker,
@@ -77,8 +78,8 @@ use uuid::Uuid;
 const EVENT_VERSION: &str = "2";
 const HISTORY_CAPACITY: usize = 256;
 const EVENT_HISTORY_CAPACITY: usize = 512;
-const MEDIA_EVENT_HISTORY_CAPACITY: usize = 512;
-const MEDIA_EVENT_BROADCAST_CAPACITY: usize = 512;
+const CATALOG_EVENT_HISTORY_CAPACITY: usize = 512;
+const CATALOG_EVENT_BROADCAST_CAPACITY: usize = 512;
 const DEFAULT_LATENCIES: ScanStageLatencySummary = ScanStageLatencySummary {
     scan: 12,
     analyze: 210,
@@ -233,7 +234,7 @@ impl fmt::Debug for ScanControlPlane {
             .map(|guard| guard.len());
         let history =
             self.inner.history.try_read().ok().map(|guard| guard.len());
-        let receiver_count = self.inner.media_bus.receiver_count();
+        let receiver_count = self.inner.catalog_bus.receiver_count();
         let uow_ptr = Arc::as_ptr(&self.inner.unit_of_work);
         let orchestrator_ptr = Arc::as_ptr(&self.inner.orchestrator);
 
@@ -254,7 +255,7 @@ struct ScanControlPlaneInner {
     active_by_run_key: RwLock<HashMap<String, Arc<ScanRun>>>,
     history: RwLock<VecDeque<ScanHistoryEntry>>,
     final_events: RwLock<HashMap<Uuid, VecDeque<ScanBroadcastFrame>>>,
-    media_bus: Arc<MediaEventBus>,
+    catalog_bus: Arc<CatalogEventBus>,
     aggregator: ScanRunAggregator,
     movie_batch_notifiers: MovieBatchFinalizationNotifiers,
 }
@@ -276,14 +277,14 @@ impl ScanControlPlane {
         orchestrator: Arc<ScanOrchestrator>,
         quiescence: Duration,
     ) -> Self {
-        let media_bus = Arc::new(MediaEventBus::new(
-            MEDIA_EVENT_HISTORY_CAPACITY,
-            MEDIA_EVENT_BROADCAST_CAPACITY,
+        let catalog_bus = Arc::new(CatalogEventBus::new(
+            CATALOG_EVENT_HISTORY_CAPACITY,
+            CATALOG_EVENT_BROADCAST_CAPACITY,
         ));
         let aggregator = ScanRunAggregator::new(
             Arc::clone(&orchestrator),
             quiescence,
-            Arc::clone(&media_bus),
+            Arc::clone(&catalog_bus),
             unit_of_work.clone(),
         );
 
@@ -295,7 +296,7 @@ impl ScanControlPlane {
                 active_by_run_key: RwLock::new(HashMap::new()),
                 history: RwLock::new(VecDeque::with_capacity(HISTORY_CAPACITY)),
                 final_events: RwLock::new(HashMap::new()),
-                media_bus,
+                catalog_bus,
                 aggregator,
                 movie_batch_notifiers: MovieBatchFinalizationNotifiers::new(),
             }),
@@ -306,28 +307,24 @@ impl ScanControlPlane {
         Arc::clone(&self.inner.orchestrator)
     }
 
-    pub fn subscribe_media_events(
+    pub fn subscribe_catalog_events(
         &self,
-    ) -> broadcast::Receiver<MediaEventFrame> {
-        self.inner.media_bus.subscribe()
+    ) -> broadcast::Receiver<CatalogEventFrame> {
+        self.inner.catalog_bus.subscribe()
     }
 
-    pub fn publish_media_event(&self, event: MediaEvent) {
-        self.inner.media_bus.publish(event);
-    }
-
-    pub fn media_event_history_since_sequence(
+    pub fn catalog_event_history_since_sequence(
         &self,
         sequence: u64,
-    ) -> Vec<MediaEventFrame> {
-        self.inner.media_bus.history_since_sequence(sequence)
+    ) -> Vec<CatalogEventFrame> {
+        self.inner.catalog_bus.history_since_sequence(sequence)
     }
 
-    pub fn media_event_history_since_instant(
+    pub fn catalog_event_history_since_instant(
         &self,
         since: Instant,
-    ) -> Vec<MediaEventFrame> {
-        self.inner.media_bus.history_since_instant(since)
+    ) -> Vec<CatalogEventFrame> {
+        self.inner.catalog_bus.history_since_instant(since)
     }
 
     pub async fn subscribe_scan(
@@ -898,7 +895,7 @@ impl ScanControlPlaneInner {
             .on_run_started(
                 run.library_id(),
                 Arc::clone(&self.unit_of_work),
-                Arc::clone(&self.media_bus),
+                Arc::clone(&self.catalog_bus),
             )
             .await;
 
@@ -2495,9 +2492,8 @@ impl ScanRun {
         } else {
             None
         };
-        self.persist_frame(&event, &payload, error.clone()).await;
+        self.persist_frame(&event, &payload, error).await;
         self.maybe_log_summary(&event, &payload).await;
-        self.emit_media_event(event, payload, error);
     }
 
     fn progress_pct(completed: u64, dead: u64, total: u64) -> u8 {
@@ -2726,55 +2722,6 @@ impl ScanRun {
         }
 
         warn!(scan = %self.scan_id, status = ?terminal, "finalized scan run");
-    }
-
-    fn emit_media_event(
-        &self,
-        event: ScanEventKind,
-        payload: ScanProgressEvent,
-        error: Option<String>,
-    ) {
-        if let Some(inner) = self.inner.upgrade() {
-            let message = match event {
-                ScanEventKind::Started => MediaEvent::ScanStarted {
-                    scan_id: payload.scan_id,
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-                ScanEventKind::Progress => MediaEvent::ScanProgress {
-                    scan_id: payload.scan_id,
-                    progress: payload.clone(),
-                },
-                ScanEventKind::Quiescing => MediaEvent::ScanProgress {
-                    scan_id: payload.scan_id,
-                    progress: payload.clone(),
-                },
-                ScanEventKind::Completed => MediaEvent::ScanCompleted {
-                    scan_id: payload.scan_id,
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-                ScanEventKind::Failed => MediaEvent::ScanFailed {
-                    scan_id: payload.scan_id,
-                    error: error.unwrap_or_else(|| "scan_failed".to_string()),
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-            };
-            inner.media_bus.publish(message);
-        }
     }
 }
 
@@ -3846,7 +3793,7 @@ struct ScanRunAggregatorInner {
     runs: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     quiescence_chrono: ChronoDuration,
     stall_timeout: ChronoDuration,
-    media_bus: Arc<MediaEventBus>,
+    catalog_bus: Arc<CatalogEventBus>,
     unit_of_work: Arc<AppUnitOfWork>,
     seen_media: Mutex<HashSet<Uuid>>,
     series_bundles: Mutex<HashMap<LibraryId, SeriesBundleTrackerEntry>>,
@@ -3877,7 +3824,7 @@ impl ScanRunAggregator {
     fn new(
         orchestrator: Arc<ScanOrchestrator>,
         quiescence: Duration,
-        media_bus: Arc<MediaEventBus>,
+        catalog_bus: Arc<CatalogEventBus>,
         unit_of_work: Arc<AppUnitOfWork>,
     ) -> Self {
         let chrono_window = ChronoDuration::from_std(quiescence)
@@ -3892,7 +3839,7 @@ impl ScanRunAggregator {
             runs: RwLock::new(HashMap::new()),
             quiescence_chrono: chrono_window,
             stall_timeout: stall_window,
-            media_bus,
+            catalog_bus,
             unit_of_work,
             seen_media: Mutex::new(HashSet::new()),
             series_bundles: Mutex::new(HashMap::new()),
@@ -4594,13 +4541,13 @@ impl ScanRunAggregatorInner {
                 continue;
             }
 
-            let event = MediaEvent::SeriesBundleFinalized {
+            let event = CatalogEvent::SeriesBundleFinalized {
                 library_id: finalization.library_id,
                 series_id: finalization.series_id,
             };
 
-            let receivers = self.media_bus.receiver_count();
-            let frame = self.media_bus.publish(event);
+            let receivers = self.catalog_bus.receiver_count();
+            let frame = self.catalog_bus.publish(event);
 
             let mut guard = self.series_bundles.lock().await;
             if let Some(entry) = guard.get_mut(&library_id) {
@@ -4764,21 +4711,21 @@ impl ScanRunAggregatorInner {
 
         let event = match (media, change) {
             (Media::Movie(movie), IndexingChange::Created) => {
-                MediaEvent::MovieAdded { movie: *movie }
+                CatalogEvent::MovieAdded { movie: *movie }
             }
             (Media::Movie(movie), IndexingChange::Updated) => {
-                MediaEvent::MovieUpdated { movie: *movie }
+                CatalogEvent::MovieUpdated { movie: *movie }
             }
             (Media::Series(series), IndexingChange::Created) => {
-                MediaEvent::SeriesAdded { series: *series }
+                CatalogEvent::SeriesAdded { series: *series }
             }
             (Media::Series(series), IndexingChange::Updated) => {
-                MediaEvent::SeriesUpdated { series: *series }
+                CatalogEvent::SeriesUpdated { series: *series }
             }
             (_, _) => return Ok(()),
         };
 
-        let _ = self.media_bus.publish(event);
+        let _ = self.catalog_bus.publish(event);
 
         Ok(())
     }
