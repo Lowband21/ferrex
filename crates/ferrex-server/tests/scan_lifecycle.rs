@@ -355,6 +355,17 @@ async fn rehydrate_active_runs_restores_identity_and_job_correlation(
     assert_eq!(snapshot.mode, ScanRunMode::Manual);
     assert_eq!(snapshot.status, ScanLifecycleStatus::Running.into());
 
+    let restored_again = recovered_state
+        .scan_control()
+        .rehydrate_active_runs()
+        .await?;
+    assert_eq!(restored_again, 0);
+    let snapshots_after_rehydrate =
+        recovered_state.scan_control().active_scans().await;
+    assert_eq!(snapshots_after_rehydrate.len(), 1);
+    assert_eq!(snapshots_after_rehydrate[0].scan_id, accepted.scan_id);
+    assert_eq!(snapshots_after_rehydrate[0].correlation_id, correlation_id);
+
     let events = recovered_state
         .scan_control()
         .events(&accepted.scan_id)
