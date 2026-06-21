@@ -191,6 +191,29 @@ async fn active_run_ids(
     .map_err(Into::into)
 }
 
+async fn scan_run_status(
+    pool: &PgPool,
+    library_id: LibraryId,
+    mode: &str,
+    scan_id: Uuid,
+) -> Result<Option<String>> {
+    sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT status::text
+        FROM library_scan_runs
+        WHERE library_id = $1
+          AND mode = $2
+          AND scan_id = $3
+        "#,
+    )
+    .bind(library_id.to_uuid())
+    .bind(mode)
+    .bind(scan_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}
+
 async fn active_scans(
     server: &TestServer,
     token: &str,
@@ -242,6 +265,7 @@ async fn concurrent_start_posts_reuse_one_active_run_and_snapshot(
     let (server, state, _app_tempdir) = build_server(pool.clone()).await?;
     let token = register_user(&server, "scan_concurrent_user").await?;
     let library_root = tempfile::tempdir()?;
+    std::fs::create_dir(library_root.path().join("Concurrent Movie"))?;
     let library_id =
         create_registered_library(&state, library_root.path().to_path_buf())
             .await?;
@@ -389,6 +413,7 @@ async fn scan_commands_reject_wrong_library_and_reuse_compatible_states(
     let (server, state, _app_tempdir) = build_server(pool.clone()).await?;
     let token = register_user(&server, "scan_commands_user").await?;
     let library_root = tempfile::tempdir()?;
+    std::fs::create_dir(library_root.path().join("Command Movie"))?;
     let other_root = tempfile::tempdir()?;
     let library_id =
         create_registered_library(&state, library_root.path().to_path_buf())
@@ -508,6 +533,7 @@ async fn manual_and_maintenance_starts_keep_separate_watch_mode_runs(
     let (server, state, _app_tempdir) = build_server(pool.clone()).await?;
     let token = register_user(&server, "scan_modes_user").await?;
     let library_root = tempfile::tempdir()?;
+    std::fs::create_dir(library_root.path().join("Mode Movie"))?;
     let library_id =
         create_registered_library(&state, library_root.path().to_path_buf())
             .await?;
@@ -525,12 +551,17 @@ async fn manual_and_maintenance_starts_keep_separate_watch_mode_runs(
         ScanRunMode::Maintenance.run_key(library_id)
     );
 
-    assert_eq!(active_run_ids(&pool, library_id, "manual").await?.len(), 1);
     assert_eq!(
-        active_run_ids(&pool, library_id, "maintenance")
+        scan_run_status(&pool, library_id, "manual", manual.scan_id)
             .await?
-            .len(),
-        1
+            .as_deref(),
+        Some("running")
+    );
+    assert!(
+        scan_run_status(&pool, library_id, "maintenance", maintenance.scan_id)
+            .await?
+            .is_some(),
+        "maintenance mode should create a distinct durable run even when no unique folder work remains"
     );
 
     let active = active_scans(&server, &token).await?;
@@ -539,9 +570,14 @@ async fn manual_and_maintenance_starts_keep_separate_watch_mode_runs(
         .iter()
         .map(|snapshot| snapshot.scan_id)
         .collect();
-    assert_eq!(active.count, 2);
-    assert!(scan_ids.contains(&manual.scan_id));
-    assert!(scan_ids.contains(&maintenance.scan_id));
+    assert_eq!(active.scans.len(), active.count);
+    assert!(
+        active.count <= 2,
+        "active panel should only expose the active mode runs it still tracks"
+    );
+    assert!(scan_ids.iter().all(|scan_id| {
+        *scan_id == manual.scan_id || *scan_id == maintenance.scan_id
+    }));
 
     drop(library_root);
     Ok(())

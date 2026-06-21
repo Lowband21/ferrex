@@ -836,6 +836,7 @@ async fn post_series_bundle_sync_flatbuffers(
 
 async fn seed_series_records(
     state: &AppState,
+    pool: &PgPool,
     library_id: LibraryId,
     series_id: SeriesID,
     season_id: SeasonID,
@@ -844,10 +845,30 @@ async fn seed_series_records(
 ) -> Result<()> {
     let now = Utc::now();
     let title = "Finalized Contract Series";
+    let series_poster_iid = Uuid::now_v7();
+    let season_poster_iid = Uuid::now_v7();
+    seed_primary_image(
+        pool,
+        series_id.to_uuid(),
+        "series",
+        "poster",
+        series_poster_iid,
+    )
+    .await?;
+    seed_primary_image(
+        pool,
+        season_id.to_uuid(),
+        "season",
+        "poster",
+        season_poster_iid,
+    )
+    .await?;
     let mut series_details = make_series_details(title);
     series_details.id = 9_200;
+    series_details.primary_poster_iid = Some(series_poster_iid);
     let mut season_details = make_season_details();
     season_details.id = 9_201;
+    season_details.primary_poster_iid = Some(season_poster_iid);
     let mut episode_details = make_episode_details();
     episode_details.id = 9_202;
     let series = Series {
@@ -1648,6 +1669,7 @@ async fn series_bundle_finalization_emits_once_and_feeds_sync_fetch(
 
     seed_series_records(
         &state,
+        &pool,
         library_id,
         series_id,
         season_id,
