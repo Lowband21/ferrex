@@ -2334,6 +2334,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fs_watch_service_coalesces_burst_into_single_command() -> Result<()>
+    {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Burst Movie");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let first_media = movie_dir.join("feature-a.mkv");
+        let second_media = movie_dir.join("feature-b.mkv");
+        std::fs::write(&first_media, b"movie-a").unwrap();
+        std::fs::write(&second_media, b"movie-b").unwrap();
+
+        let library_id = LibraryId::new();
+        let executor = RecordingCommandExecutor::default();
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            Arc::new(executor.clone());
+        let service: FsWatchService = FsWatchService::new(
+            FsWatchConfig {
+                debounce_window: Duration::from_millis(100),
+                max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
+                poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5 * 60),
+            },
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+        );
+        service
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
+            .await?;
+
+        service
+            .send_watch_message_for_test(
+                library_id,
+                WatchMessage::Event(
+                    Event::new(EventKind::Create(CreateKind::File))
+                        .add_path(first_media.clone()),
+                ),
+            )
+            .await?;
+        service
+            .send_watch_message_for_test(
+                library_id,
+                WatchMessage::Event(
+                    Event::new(EventKind::Modify(ModifyKind::Data(
+                        DataChange::Content,
+                    )))
+                    .add_path(second_media.clone()),
+                ),
+            )
+            .await?;
+
+        let commands = wait_for_commands(&executor, 1).await;
+        assert_eq!(commands.len(), 1);
+        let LibraryActorCommand::FsEvents {
+            root,
+            events: actor_events,
+            correlation_id,
+        } = &commands[0]
+        else {
+            panic!("expected FsEvents command");
+        };
+        assert_eq!(*root, LibraryRootsId(0));
+        assert!(correlation_id.is_none());
+        assert_eq!(actor_events.len(), 2);
+        assert!(actor_events.iter().any(|event| {
+            event.path == first_media
+                && matches!(event.kind, FileSystemEventKind::Created)
+        }));
+        assert!(actor_events.iter().any(|event| {
+            event.path == second_media
+                && matches!(event.kind, FileSystemEventKind::Modified)
+        }));
+
+        time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(executor.commands().await.len(), 1);
+        service.unregister_library(library_id).await;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn fs_watch_service_batch_enqueues_deduped_folder_scan() -> Result<()>
     {
         let tmp = tempdir().unwrap();

@@ -697,6 +697,15 @@ mod tests {
             &self,
             update: LibraryScanRunProgressUpdate,
         ) -> Result<Option<LibraryScanRun>> {
+            if let Some(status) = &update.status
+                && status.is_terminal()
+            {
+                return Err(MediaError::InvalidMedia(
+                    "update_progress cannot mark a scan run terminal; use mark_terminal"
+                        .into(),
+                ));
+            }
+
             let mut guard = self.runs.lock().await;
             let Some(run) = guard.get_mut(&update.scan_id) else {
                 return Ok(None);
@@ -724,6 +733,13 @@ mod tests {
             terminal_at: DateTime<Utc>,
             last_error: Option<String>,
         ) -> Result<Option<LibraryScanRun>> {
+            if !status.is_terminal() {
+                return Err(MediaError::InvalidMedia(format!(
+                    "mark_terminal requires a terminal status, got {}",
+                    status.as_str()
+                )));
+            }
+
             let mut guard = self.runs.lock().await;
             let Some(run) = guard.get_mut(&scan_id) else {
                 return Ok(None);
@@ -1016,6 +1032,76 @@ mod tests {
             .execute(&pool)
             .await
             .expect("cleanup library succeeds");
+    }
+
+    #[tokio::test]
+    async fn progress_update_rejects_terminal_status() {
+        let repo = InMemoryScanRunRepository::default();
+        let library_id = LibraryId(Uuid::now_v7());
+        let active = repo
+            .get_or_create_active(NewLibraryScanRun::new(
+                library_id,
+                ScanRunMode::Manual,
+            ))
+            .await
+            .expect("active get_or_create succeeds");
+
+        let err = repo
+            .update_progress(LibraryScanRunProgressUpdate {
+                scan_id: active.run.scan_id,
+                status: Some(ScanLifecycleStatus::Completed),
+                completed_items: 1,
+                total_items: 1,
+                retrying_items: 0,
+                dead_lettered_items: 0,
+                current_path: None,
+                sequence: 1,
+            })
+            .await
+            .expect_err("terminal progress update is rejected");
+
+        assert!(err.to_string().contains("update_progress cannot mark"));
+        assert_eq!(
+            repo.load_active(library_id, ScanRunMode::Manual)
+                .await
+                .expect("load active succeeds")
+                .expect("run stays active")
+                .status,
+            ScanLifecycleStatus::Pending
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_terminal_rejects_non_terminal_status() {
+        let repo = InMemoryScanRunRepository::default();
+        let library_id = LibraryId(Uuid::now_v7());
+        let active = repo
+            .get_or_create_active(NewLibraryScanRun::new(
+                library_id,
+                ScanRunMode::Manual,
+            ))
+            .await
+            .expect("active get_or_create succeeds");
+
+        let err = repo
+            .mark_terminal(
+                active.run.scan_id,
+                ScanLifecycleStatus::Running,
+                Utc::now(),
+                None,
+            )
+            .await
+            .expect_err("non-terminal terminal mark is rejected");
+
+        assert!(err.to_string().contains("mark_terminal requires"));
+        assert_eq!(
+            repo.load_active(library_id, ScanRunMode::Manual)
+                .await
+                .expect("load active succeeds")
+                .expect("run stays active")
+                .status,
+            ScanLifecycleStatus::Pending
+        );
     }
 
     #[tokio::test]

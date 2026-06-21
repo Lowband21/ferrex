@@ -2253,6 +2253,178 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unchanged_cursor_folder_scan_emits_completion_without_followups() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000000));
+        let library_root = "/library";
+        let movie_root_path = MovieRootPath::try_new_under_library_root(
+            library_root,
+            "/library/Stable Movie",
+        )
+        .unwrap();
+        let context = FolderScanContext::Movie(MovieFolderScanContext {
+            library_id,
+            movie_root_path: movie_root_path.clone(),
+        });
+        let hierarchy = AnalyzeScanHierarchy::Movie(MovieScanHierarchy {
+            movie_root_path: movie_root_path.clone(),
+            movie_id: None,
+            extra_tag: None,
+        });
+        let listing_hash = "stable-listing".to_string();
+        let previous_scan_at = Utc::now() - chrono::Duration::hours(2);
+        let previous_modified_at = Utc::now() - chrono::Duration::hours(3);
+
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(16));
+        let mut scan_rx = events.subscribe_scan();
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let cursor_id = ScanCursorId::new(
+            library_id,
+            &vec![PathBuf::from(context.folder_path_norm())],
+        );
+        cursors
+            .upsert(ScanCursor {
+                id: cursor_id.clone(),
+                folder_path_norm: context.folder_path_norm().to_string(),
+                listing_hash: listing_hash.clone(),
+                entry_count: 2,
+                last_scan_at: previous_scan_at,
+                last_modified_at: Some(previous_modified_at),
+                device_id: Some("old-device".into()),
+            })
+            .await
+            .expect("seed matching cursor");
+
+        let folder_actor = Arc::new(StubFolderActor {
+            plan: FolderListingPlan {
+                directories: vec![PathBuf::from(
+                    "/library/Stable Movie/Extras",
+                )],
+                media_files: vec![PathBuf::from(
+                    "/library/Stable Movie/feature.mkv",
+                )],
+                ancillary_files: vec![],
+                generated_listing_hash: listing_hash.clone(),
+                total_entries: 2,
+                folder_missing: false,
+            },
+            discovered: vec![MediaFileDiscovered {
+                library_id,
+                path_norm: "/library/Stable Movie/feature.mkv".into(),
+                fingerprint: MediaFingerprint {
+                    device_id: None,
+                    inode: Some(42),
+                    size: 100,
+                    mtime: 1_700_000_000,
+                    weak_hash: Some("stable".into()),
+                },
+                classified_as: MediaKindHint::Movie,
+                media_id: MediaID::new(VideoMediaType::Movie),
+                variant: VideoMediaType::Movie,
+                node: ScanNodeKind::MovieFolder,
+                hierarchy,
+                context: context.clone(),
+                scan_reason: ScanReason::MaintenanceSweep,
+            }],
+            children: vec![FolderScanContext::Movie(MovieFolderScanContext {
+                library_id,
+                movie_root_path: MovieRootPath::try_new_under_library_root(
+                    library_root,
+                    "/library/Should Not Enqueue",
+                )
+                .unwrap(),
+            })],
+            summary: FolderScanSummary {
+                context: context.clone(),
+                discovered_files: 1,
+                enqueued_subfolders: 1,
+                listing_hash: listing_hash.clone(),
+                outcome: FolderScanOutcome::Changed,
+                completed_at: Utc::now(),
+            },
+        }) as Arc<dyn FolderScanActor>;
+
+        let actors = DispatcherActors::new(
+            folder_actor,
+            Arc::new(StubAnalyzeActor) as Arc<dyn MediaAnalyzeActor>,
+            Arc::new(StubMetadataActor) as Arc<dyn MetadataActor>,
+            Arc::new(StubIndexActor) as Arc<dyn IndexerActor>,
+            Arc::new(StubImageActor) as Arc<dyn ImageFetchActor>,
+        );
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&series_states)));
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            Arc::clone(&cursors),
+            Arc::clone(&series_states),
+            series_resolver,
+            actors,
+            CorrelationCache::default(),
+        );
+
+        let status = dispatcher
+            .dispatch(&lease_for_payload(JobPayload::FolderScan(
+                FolderScanJob {
+                    context: context.clone(),
+                    scan_reason: ScanReason::MaintenanceSweep,
+                    enqueue_time: Utc::now(),
+                    device_id: Some("device-unchanged".into()),
+                },
+            )))
+            .await;
+
+        assert!(matches!(status, DispatchStatus::Success));
+        assert!(
+            queue.enqueued().await.is_empty(),
+            "unchanged cursor completion must not enqueue follow-up work"
+        );
+
+        let refreshed = cursors
+            .get(&cursor_id)
+            .await
+            .expect("cursor read")
+            .expect("cursor remains present");
+        assert_eq!(refreshed.listing_hash, listing_hash);
+        assert_eq!(refreshed.entry_count, 2);
+        assert!(refreshed.last_scan_at >= previous_scan_at);
+        assert_eq!(refreshed.last_modified_at, Some(previous_modified_at));
+        assert_eq!(refreshed.device_id.as_deref(), Some("device-unchanged"));
+
+        let mut completion_count = 0;
+        let mut media_discovered_count = 0;
+        let mut folder_discovered_count = 0;
+        while let Ok(event) = scan_rx.try_recv() {
+            match event {
+                ScanEvent::FolderScanCompleted(summary) => {
+                    completion_count += 1;
+                    assert_eq!(
+                        summary.context.folder_path_norm(),
+                        "/library/Stable Movie"
+                    );
+                    assert_eq!(
+                        summary.outcome,
+                        FolderScanOutcome::UnchangedCursor
+                    );
+                }
+                ScanEvent::MediaFileDiscovered(_) => {
+                    media_discovered_count += 1
+                }
+                ScanEvent::FolderDiscovered { .. } => {
+                    folder_discovered_count += 1
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(completion_count, 1);
+        assert_eq!(media_discovered_count, 0);
+        assert_eq!(folder_discovered_count, 0);
+    }
+
+    #[tokio::test]
     async fn series_root_scan_enqueues_resolve_and_season_discovery() {
         let library_id =
             LibraryId(Uuid::from_u128(0x57600000000000000000000000000001));

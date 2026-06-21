@@ -586,6 +586,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plan_prioritizes_new_root_folder_before_stale_cursor_when_limited()
+    {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        let new_dir = root.join("New Movie");
+        let stale_dir = root.join("Stale Movie");
+        std::fs::create_dir_all(&new_dir).expect("new dir");
+        std::fs::create_dir_all(&stale_dir).expect("stale dir");
+        let now = Utc::now();
+        let library =
+            test_library(root.clone(), Some(now - Duration::minutes(61)), true);
+        let repo = FakeCursorRepository::default();
+        let stale_path_norm = normalize_path(&stale_dir).expect("normalize");
+        repo.insert(ScanCursor {
+            id: crate::domain::scan::orchestration::scan_cursor::ScanCursorId::new(
+                library.id,
+                &vec![PathBuf::from(&stale_path_norm)],
+            ),
+            folder_path_norm: stale_path_norm,
+            listing_hash: "hash".into(),
+            entry_count: 0,
+            last_scan_at: now - Duration::minutes(90),
+            last_modified_at: None,
+            device_id: None,
+        })
+        .await;
+
+        let plan = plan_maintenance_sweep(
+            &library,
+            &repo,
+            MaintenancePlanningLimits::new(1, 16),
+            now,
+        )
+        .await
+        .expect("plan");
+
+        assert_eq!(plan.requests.len(), 1);
+        assert_eq!(plan.new_root_folder_count, 1);
+        assert_eq!(plan.stale_cursor_count, 1);
+        let JobPayload::FolderScan(job) = &plan.requests[0].payload else {
+            panic!("expected folder scan")
+        };
+        assert!(job.context.folder_path_norm().ends_with("New Movie"));
+    }
+
+    #[tokio::test]
     async fn plan_enqueues_only_stale_existing_cursors() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path().to_path_buf();

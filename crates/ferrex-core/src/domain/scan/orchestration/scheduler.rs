@@ -409,3 +409,45 @@ impl WeightedFairScheduler {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn reservation_accounting_tracks_ready_cancel_inflight_and_completion()
+     {
+        let scheduler = WeightedFairScheduler::new(
+            &QueueConfig::default(),
+            PriorityWeights::default(),
+        );
+        let library_id = LibraryId::new();
+
+        scheduler.record_enqueued(library_id, JobPriority::P1).await;
+        assert_eq!(scheduler.snapshot().await[&library_id], (0, 1));
+
+        let canceled = scheduler
+            .reserve()
+            .await
+            .expect("ready job reserves capacity");
+        assert_eq!(canceled.library_id, library_id);
+        assert_eq!(canceled.priority, JobPriority::P1);
+        assert_eq!(scheduler.snapshot().await[&library_id], (0, 0));
+
+        scheduler.cancel(canceled.id).await;
+        assert_eq!(scheduler.snapshot().await[&library_id], (0, 1));
+
+        let confirmed = scheduler
+            .reserve()
+            .await
+            .expect("restored ready job reserves again");
+        scheduler
+            .confirm(confirmed.id)
+            .await
+            .expect("reservation confirms");
+        assert_eq!(scheduler.snapshot().await[&library_id], (1, 0));
+
+        scheduler.record_completed(library_id).await;
+        assert_eq!(scheduler.snapshot().await[&library_id], (0, 0));
+    }
+}

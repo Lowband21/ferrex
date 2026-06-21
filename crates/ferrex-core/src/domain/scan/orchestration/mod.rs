@@ -1,8 +1,8 @@
-//! Orchestrator domain skeleton for the future scan provider.
+//! Scan orchestration domain ports, adapters, and runtime wiring.
 //!
-//! This module gathers the foundational types and contracts that describe the
-//! scan orchestrator domain. The goal is to provide a compile-time home for the
-//! forthcoming implementation without coupling it to today's scanner logic.
+//! `BOUNDARY_CONTRACTS.md` maps the public black-box seams in this module to
+//! the focused characterization tests that pin current behavior before further
+//! extraction work.
 
 pub mod budget;
 pub mod config;
