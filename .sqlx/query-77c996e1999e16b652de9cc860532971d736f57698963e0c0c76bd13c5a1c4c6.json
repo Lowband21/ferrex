@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT mr.id AS \"id!\", mr.title AS \"title!\"\n                FROM movie_references mr\n                WHERE (cardinality($1::uuid[]) = 0 OR mr.library_id = ANY($1))\n                  AND mr.title ILIKE $2 ESCAPE E'\\\\'\n                ORDER BY LOWER(mr.title) ASC, LENGTH(mr.title) ASC\n                LIMIT $3\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "77c996e1999e16b652de9cc860532971d736f57698963e0c0c76bd13c5a1c4c6"
+}

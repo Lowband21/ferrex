@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH target_prefixes AS (\n                SELECT root,\n                       root || '/%' AS child_pattern\n                FROM UNNEST($2::text[]) AS root\n            )\n            DELETE FROM scan_cursors AS sc\n            USING target_prefixes AS p\n            WHERE sc.library_id = $1\n              AND (sc.folder_path_norm = p.root OR sc.folder_path_norm LIKE p.child_pattern)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8ea430349b6b68f2e0aa82419750ece6a2d5d272633a8cbe2eaf2935291b9ddc"
+}

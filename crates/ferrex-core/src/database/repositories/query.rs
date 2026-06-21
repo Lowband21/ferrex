@@ -1,11 +1,7 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use sqlx::Row;
-use sqlx::{
-    PgPool, Postgres, QueryBuilder,
-    types::{BigDecimal, Uuid},
-};
+use sqlx::{PgPool, types::Uuid};
 // Use Media enum from our domain prelude, not tmdb_api
 
 use crate::domain::watch::{CompletedItem, ItemWatchStatus, WatchResumePolicy};
@@ -23,8 +19,8 @@ use crate::{
 const MOVIE_WATCH_KIND: i32 = 0;
 const EPISODE_WATCH_KIND: i32 = 3;
 
-fn rating_bound(value: RatingValue) -> BigDecimal {
-    BigDecimal::from(value).with_scale(RATING_DECIMAL_SCALE as i64)
+fn rating_bound(value: RatingValue) -> f32 {
+    value as f32 / 10f32.powi(RATING_DECIMAL_SCALE as i32)
 }
 
 fn is_completed_progress(position: f32, duration: f32) -> bool {
@@ -87,6 +83,97 @@ struct CompletedRow {
 struct TitleCandidateRow {
     id: Uuid,
     title: String,
+}
+
+#[derive(Debug, Clone)]
+struct SearchSqlParams {
+    apply: bool,
+    fuzzy: bool,
+    text: String,
+    like_pattern: String,
+    include_title: bool,
+    include_overview: bool,
+    include_cast: bool,
+}
+
+impl SearchSqlParams {
+    fn from_query(search: Option<&SearchQuery>) -> Self {
+        let Some(search) = search else {
+            return Self::disabled();
+        };
+
+        let include_title = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Title);
+        let include_overview = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Overview);
+        let include_cast = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Cast);
+        let apply = include_title || include_overview || include_cast;
+
+        Self {
+            apply,
+            fuzzy: search.fuzzy,
+            text: search.text.clone(),
+            like_pattern: format!("%{}%", search.text),
+            include_title,
+            include_overview,
+            include_cast,
+        }
+    }
+
+    fn disabled() -> Self {
+        Self {
+            apply: false,
+            fuzzy: false,
+            text: String::new(),
+            like_pattern: String::new(),
+            include_title: false,
+            include_overview: false,
+            include_cast: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MediaSqlSortKey {
+    Title = 0,
+    DateAdded = 1,
+    CreatedAt = 2,
+    ReleaseDate = 3,
+    Rating = 4,
+    Runtime = 5,
+}
+
+impl MediaSqlSortKey {
+    fn for_movie(sort: &SortCriteria) -> Self {
+        match sort.primary {
+            SortBy::Title => Self::Title,
+            SortBy::DateAdded => Self::DateAdded,
+            SortBy::CreatedAt => Self::CreatedAt,
+            SortBy::ReleaseDate => Self::ReleaseDate,
+            SortBy::Rating => Self::Rating,
+            SortBy::Runtime => Self::Runtime,
+            _ => Self::DateAdded,
+        }
+    }
+
+    fn for_series(sort: &SortCriteria) -> Self {
+        match sort.primary {
+            SortBy::Title => Self::Title,
+            SortBy::DateAdded => Self::DateAdded,
+            SortBy::CreatedAt => Self::CreatedAt,
+            SortBy::ReleaseDate => Self::ReleaseDate,
+            SortBy::Rating => Self::Rating,
+            _ => Self::DateAdded,
+        }
+    }
+
+    fn as_i16(self) -> i16 {
+        self as i16
+    }
 }
 
 impl PostgresQueryRepository {
@@ -223,79 +310,73 @@ impl PostgresQueryRepository {
     ) -> Result<Vec<TitleCandidate>> {
         let escaped = escape_like_literal(search_text);
 
-        let mut sql_builder = QueryBuilder::<Postgres>::new(
-            "SELECT mr.id, mr.title FROM movie_references mr WHERE 1=1",
-        );
-
-        if !library_ids.is_empty() {
-            sql_builder.push(" AND mr.library_id = ANY(");
-            sql_builder.push_bind(library_ids);
-            sql_builder.push(")");
-        }
-
-        if query_len <= 2 {
+        let rows = if query_len <= 2 {
             let prefix_pattern = format!("{}%", escaped);
-            sql_builder.push(" AND mr.title ILIKE ");
-            sql_builder.push_bind(prefix_pattern);
-            sql_builder.push(" ESCAPE E'\\\\'");
-            sql_builder
-                .push(" ORDER BY LOWER(mr.title) ASC, LENGTH(mr.title) ASC");
+            sqlx::query_as!(
+                TitleCandidateRow,
+                r#"
+                SELECT mr.id AS "id!", mr.title AS "title!"
+                FROM movie_references mr
+                WHERE (cardinality($1::uuid[]) = 0 OR mr.library_id = ANY($1))
+                  AND mr.title ILIKE $2 ESCAPE E'\\'
+                ORDER BY LOWER(mr.title) ASC, LENGTH(mr.title) ASC
+                LIMIT $3
+                "#,
+                library_ids,
+                prefix_pattern,
+                candidate_limit
+            )
+            .fetch_all(&self.pool)
+            .await
         } else {
             let similarity_threshold = similarity_threshold(query_len);
             let substring_pattern = format!("%{}%", escaped);
             let subsequence_pattern = build_subsequence_regex(search_text);
             let token_like_pattern = first_token_like_pattern(search_text);
-
-            sql_builder.push(" AND (");
-            sql_builder.push("mr.title ILIKE ");
-            sql_builder.push_bind(substring_pattern.clone());
-            sql_builder.push(" ESCAPE E'\\\\'");
-            sql_builder.push(" OR similarity(mr.title, ");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") > ");
-            sql_builder.push_bind(similarity_threshold);
-            if let Some(ref pattern) = subsequence_pattern {
-                sql_builder.push(" OR LOWER(mr.title) ~ ");
-                sql_builder.push_bind(pattern.clone());
-            }
-            if let Some(ref pattern) = token_like_pattern {
-                sql_builder.push(" OR LOWER(mr.title) LIKE ");
-                sql_builder.push_bind(pattern.clone());
-            }
-            sql_builder.push(")");
-
             let prefix_pattern = format!("{}%", escaped);
-            sql_builder.push(" ORDER BY ");
-            sql_builder.push("CASE ");
-            sql_builder.push("WHEN LOWER(mr.title) = LOWER(");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") THEN 0 ");
-            sql_builder.push("WHEN LOWER(mr.title) LIKE LOWER(");
-            sql_builder.push_bind(prefix_pattern);
-            sql_builder.push(") ESCAPE E'\\\\' THEN 1 ");
-            sql_builder.push("WHEN mr.title ILIKE ");
-            sql_builder.push_bind(substring_pattern);
-            sql_builder.push(" ESCAPE E'\\\\' THEN 2 ");
-            sql_builder.push("ELSE 3 END, ");
-            sql_builder.push("similarity(mr.title, ");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") DESC, ");
-            sql_builder.push("LENGTH(mr.title) ASC, LOWER(mr.title) ASC");
-        }
 
-        sql_builder.push(" LIMIT ");
-        sql_builder.push_bind(candidate_limit);
-
-        let rows = sql_builder
-            .build_query_as::<TitleCandidateRow>()
+            sqlx::query_as!(
+                TitleCandidateRow,
+                r#"
+                SELECT mr.id AS "id!", mr.title AS "title!"
+                FROM movie_references mr
+                WHERE (cardinality($1::uuid[]) = 0 OR mr.library_id = ANY($1))
+                  AND (
+                    mr.title ILIKE $2 ESCAPE E'\\'
+                    OR similarity(mr.title, $3) > $4::real
+                    OR ($5::text IS NOT NULL AND LOWER(mr.title) ~ $5)
+                    OR ($6::text IS NOT NULL AND LOWER(mr.title) LIKE $6)
+                  )
+                ORDER BY
+                  CASE
+                    WHEN LOWER(mr.title) = LOWER($3) THEN 0
+                    WHEN LOWER(mr.title) LIKE LOWER($7) ESCAPE E'\\' THEN 1
+                    WHEN mr.title ILIKE $2 ESCAPE E'\\' THEN 2
+                    ELSE 3
+                  END,
+                  similarity(mr.title, $3) DESC,
+                  LENGTH(mr.title) ASC,
+                  LOWER(mr.title) ASC
+                LIMIT $8
+                "#,
+                library_ids,
+                substring_pattern,
+                search_text,
+                similarity_threshold,
+                subsequence_pattern.as_deref(),
+                token_like_pattern.as_deref(),
+                prefix_pattern,
+                candidate_limit
+            )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "Database candidate query failed: {}",
-                    e
-                ))
-            })?;
+        }
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Database candidate query failed: {}",
+                e
+            ))
+        })?;
 
         Ok(rows
             .into_iter()
@@ -315,84 +396,81 @@ impl PostgresQueryRepository {
     ) -> Result<Vec<TitleCandidate>> {
         let escaped = escape_like_literal(search_text);
 
-        let mut sql_builder = QueryBuilder::<Postgres>::new(
-            "SELECT s.id, s.title \
-             FROM series s \
-             INNER JOIN series_bundle_versioning sbv \
-               ON sbv.series_id = s.id \
-              AND sbv.library_id = s.library_id \
-             WHERE sbv.finalized = true",
-        );
-
-        if !library_ids.is_empty() {
-            sql_builder.push(" AND s.library_id = ANY(");
-            sql_builder.push_bind(library_ids);
-            sql_builder.push(")");
-        }
-
-        if query_len <= 2 {
+        let rows = if query_len <= 2 {
             let prefix_pattern = format!("{}%", escaped);
-            sql_builder.push(" AND s.title ILIKE ");
-            sql_builder.push_bind(prefix_pattern);
-            sql_builder.push(" ESCAPE E'\\\\'");
-            sql_builder
-                .push(" ORDER BY LOWER(s.title) ASC, LENGTH(s.title) ASC");
+            sqlx::query_as!(
+                TitleCandidateRow,
+                r#"
+                SELECT s.id AS "id!", s.title AS "title!"
+                FROM series s
+                INNER JOIN series_bundle_versioning sbv
+                  ON sbv.series_id = s.id
+                 AND sbv.library_id = s.library_id
+                WHERE sbv.finalized = true
+                  AND (cardinality($1::uuid[]) = 0 OR s.library_id = ANY($1))
+                  AND s.title ILIKE $2 ESCAPE E'\\'
+                ORDER BY LOWER(s.title) ASC, LENGTH(s.title) ASC
+                LIMIT $3
+                "#,
+                library_ids,
+                prefix_pattern,
+                candidate_limit
+            )
+            .fetch_all(&self.pool)
+            .await
         } else {
             let similarity_threshold = similarity_threshold(query_len);
             let substring_pattern = format!("%{}%", escaped);
             let subsequence_pattern = build_subsequence_regex(search_text);
             let token_like_pattern = first_token_like_pattern(search_text);
-
-            sql_builder.push(" AND (");
-            sql_builder.push("s.title ILIKE ");
-            sql_builder.push_bind(substring_pattern.clone());
-            sql_builder.push(" ESCAPE E'\\\\'");
-            sql_builder.push(" OR similarity(s.title, ");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") > ");
-            sql_builder.push_bind(similarity_threshold);
-            if let Some(ref pattern) = subsequence_pattern {
-                sql_builder.push(" OR LOWER(s.title) ~ ");
-                sql_builder.push_bind(pattern.clone());
-            }
-            if let Some(ref pattern) = token_like_pattern {
-                sql_builder.push(" OR LOWER(s.title) LIKE ");
-                sql_builder.push_bind(pattern.clone());
-            }
-            sql_builder.push(")");
-
             let prefix_pattern = format!("{}%", escaped);
-            sql_builder.push(" ORDER BY ");
-            sql_builder.push("CASE ");
-            sql_builder.push("WHEN LOWER(s.title) = LOWER(");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") THEN 0 ");
-            sql_builder.push("WHEN LOWER(s.title) LIKE LOWER(");
-            sql_builder.push_bind(prefix_pattern);
-            sql_builder.push(") ESCAPE E'\\\\' THEN 1 ");
-            sql_builder.push("WHEN s.title ILIKE ");
-            sql_builder.push_bind(substring_pattern);
-            sql_builder.push(" ESCAPE E'\\\\' THEN 2 ");
-            sql_builder.push("ELSE 3 END, ");
-            sql_builder.push("similarity(s.title, ");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") DESC, ");
-            sql_builder.push("LENGTH(s.title) ASC, LOWER(s.title) ASC");
-        }
 
-        sql_builder.push(" LIMIT ");
-        sql_builder.push_bind(candidate_limit);
-
-        let rows = sql_builder
-            .build_query_as::<TitleCandidateRow>()
+            sqlx::query_as!(
+                TitleCandidateRow,
+                r#"
+                SELECT s.id AS "id!", s.title AS "title!"
+                FROM series s
+                INNER JOIN series_bundle_versioning sbv
+                  ON sbv.series_id = s.id
+                 AND sbv.library_id = s.library_id
+                WHERE sbv.finalized = true
+                  AND (cardinality($1::uuid[]) = 0 OR s.library_id = ANY($1))
+                  AND (
+                    s.title ILIKE $2 ESCAPE E'\\'
+                    OR similarity(s.title, $3) > $4::real
+                    OR ($5::text IS NOT NULL AND LOWER(s.title) ~ $5)
+                    OR ($6::text IS NOT NULL AND LOWER(s.title) LIKE $6)
+                  )
+                ORDER BY
+                  CASE
+                    WHEN LOWER(s.title) = LOWER($3) THEN 0
+                    WHEN LOWER(s.title) LIKE LOWER($7) ESCAPE E'\\' THEN 1
+                    WHEN s.title ILIKE $2 ESCAPE E'\\' THEN 2
+                    ELSE 3
+                  END,
+                  similarity(s.title, $3) DESC,
+                  LENGTH(s.title) ASC,
+                  LOWER(s.title) ASC
+                LIMIT $8
+                "#,
+                library_ids,
+                substring_pattern,
+                search_text,
+                similarity_threshold,
+                subsequence_pattern.as_deref(),
+                token_like_pattern.as_deref(),
+                prefix_pattern,
+                candidate_limit
+            )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "Database candidate query failed: {}",
-                    e
-                ))
-            })?;
+        }
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Database candidate query failed: {}",
+                e
+            ))
+        })?;
 
         Ok(rows
             .into_iter()
@@ -412,87 +490,87 @@ impl PostgresQueryRepository {
     ) -> Result<Vec<TitleCandidate>> {
         let escaped = escape_like_literal(search_text);
 
-        let mut sql_builder = QueryBuilder::<Postgres>::new(
-            "SELECT er.id, em.name AS title \
-            FROM episode_references er \
-            JOIN episode_metadata em ON em.episode_id = er.id \
-            JOIN series s ON s.id = er.series_id \
-            INNER JOIN series_bundle_versioning sbv \
-              ON sbv.series_id = s.id \
-             AND sbv.library_id = s.library_id \
-            WHERE em.name IS NOT NULL \
-              AND sbv.finalized = true",
-        );
-
-        if !library_ids.is_empty() {
-            sql_builder.push(" AND s.library_id = ANY(");
-            sql_builder.push_bind(library_ids);
-            sql_builder.push(")");
-        }
-
-        if query_len <= 2 {
+        let rows = if query_len <= 2 {
             let prefix_pattern = format!("{}%", escaped);
-            sql_builder.push(" AND em.name ILIKE ");
-            sql_builder.push_bind(prefix_pattern);
-            sql_builder.push(" ESCAPE E'\\\\'");
-            sql_builder
-                .push(" ORDER BY LOWER(em.name) ASC, LENGTH(em.name) ASC");
+            sqlx::query_as!(
+                TitleCandidateRow,
+                r#"
+                SELECT er.id AS "id!", em.name AS "title!"
+                FROM episode_references er
+                JOIN episode_metadata em ON em.episode_id = er.id
+                JOIN series s ON s.id = er.series_id
+                INNER JOIN series_bundle_versioning sbv
+                  ON sbv.series_id = s.id
+                 AND sbv.library_id = s.library_id
+                WHERE em.name IS NOT NULL
+                  AND sbv.finalized = true
+                  AND (cardinality($1::uuid[]) = 0 OR s.library_id = ANY($1))
+                  AND em.name ILIKE $2 ESCAPE E'\\'
+                ORDER BY LOWER(em.name) ASC, LENGTH(em.name) ASC
+                LIMIT $3
+                "#,
+                library_ids,
+                prefix_pattern,
+                candidate_limit
+            )
+            .fetch_all(&self.pool)
+            .await
         } else {
             let similarity_threshold = similarity_threshold(query_len);
             let substring_pattern = format!("%{}%", escaped);
             let subsequence_pattern = build_subsequence_regex(search_text);
             let token_like_pattern = first_token_like_pattern(search_text);
-
-            sql_builder.push(" AND (");
-            sql_builder.push("em.name ILIKE ");
-            sql_builder.push_bind(substring_pattern.clone());
-            sql_builder.push(" ESCAPE E'\\\\'");
-            sql_builder.push(" OR similarity(em.name, ");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") > ");
-            sql_builder.push_bind(similarity_threshold);
-            if let Some(ref pattern) = subsequence_pattern {
-                sql_builder.push(" OR LOWER(em.name) ~ ");
-                sql_builder.push_bind(pattern.clone());
-            }
-            if let Some(ref pattern) = token_like_pattern {
-                sql_builder.push(" OR LOWER(em.name) LIKE ");
-                sql_builder.push_bind(pattern.clone());
-            }
-            sql_builder.push(")");
-
             let prefix_pattern = format!("{}%", escaped);
-            sql_builder.push(" ORDER BY ");
-            sql_builder.push("CASE ");
-            sql_builder.push("WHEN LOWER(em.name) = LOWER(");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") THEN 0 ");
-            sql_builder.push("WHEN LOWER(em.name) LIKE LOWER(");
-            sql_builder.push_bind(prefix_pattern);
-            sql_builder.push(") ESCAPE E'\\\\' THEN 1 ");
-            sql_builder.push("WHEN em.name ILIKE ");
-            sql_builder.push_bind(substring_pattern);
-            sql_builder.push(" ESCAPE E'\\\\' THEN 2 ");
-            sql_builder.push("ELSE 3 END, ");
-            sql_builder.push("similarity(em.name, ");
-            sql_builder.push_bind(search_text);
-            sql_builder.push(") DESC, ");
-            sql_builder.push("LENGTH(em.name) ASC, LOWER(em.name) ASC");
-        }
 
-        sql_builder.push(" LIMIT ");
-        sql_builder.push_bind(candidate_limit);
-
-        let rows = sql_builder
-            .build_query_as::<TitleCandidateRow>()
+            sqlx::query_as!(
+                TitleCandidateRow,
+                r#"
+                SELECT er.id AS "id!", em.name AS "title!"
+                FROM episode_references er
+                JOIN episode_metadata em ON em.episode_id = er.id
+                JOIN series s ON s.id = er.series_id
+                INNER JOIN series_bundle_versioning sbv
+                  ON sbv.series_id = s.id
+                 AND sbv.library_id = s.library_id
+                WHERE em.name IS NOT NULL
+                  AND sbv.finalized = true
+                  AND (cardinality($1::uuid[]) = 0 OR s.library_id = ANY($1))
+                  AND (
+                    em.name ILIKE $2 ESCAPE E'\\'
+                    OR similarity(em.name, $3) > $4::real
+                    OR ($5::text IS NOT NULL AND LOWER(em.name) ~ $5)
+                    OR ($6::text IS NOT NULL AND LOWER(em.name) LIKE $6)
+                  )
+                ORDER BY
+                  CASE
+                    WHEN LOWER(em.name) = LOWER($3) THEN 0
+                    WHEN LOWER(em.name) LIKE LOWER($7) ESCAPE E'\\' THEN 1
+                    WHEN em.name ILIKE $2 ESCAPE E'\\' THEN 2
+                    ELSE 3
+                  END,
+                  similarity(em.name, $3) DESC,
+                  LENGTH(em.name) ASC,
+                  LOWER(em.name) ASC
+                LIMIT $8
+                "#,
+                library_ids,
+                substring_pattern,
+                search_text,
+                similarity_threshold,
+                subsequence_pattern.as_deref(),
+                token_like_pattern.as_deref(),
+                prefix_pattern,
+                candidate_limit
+            )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "Database candidate query failed: {}",
-                    e
-                ))
-            })?;
+        }
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Database candidate query failed: {}",
+                e
+            ))
+        })?;
 
         Ok(rows
             .into_iter()
@@ -560,100 +638,107 @@ impl QueryRepository for PostgresQueryRepository {
         &self,
         query: &MediaQuery,
     ) -> Result<Vec<MediaWithStatus>> {
-        let mut sql_builder = QueryBuilder::<Postgres>::new(
+        let year_min = query.filters.year_range.map(|range| range.min as i32);
+        let year_max = query.filters.year_range.map(|range| range.max as i32);
+        let rating_min = query
+            .filters
+            .rating_range
+            .map(|range| rating_bound(range.min));
+        let rating_max = query
+            .filters
+            .rating_range
+            .map(|range| rating_bound(range.max));
+        let search = SearchSqlParams::from_query(query.search.as_ref());
+        let sort_key = MediaSqlSortKey::for_movie(&query.sort).as_i16();
+        let sort_ascending = matches!(query.sort.order, SortOrder::Ascending);
+
+        let rows = sqlx::query!(
             r#"
-            SELECT
-                mr.id,
-                mr.tmdb_id,
-                mr.title,
-                mr.theme_color,
-                mf.id AS file_id,
-                mf.file_path,
-                mf.filename,
-                mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
-                mf.technical_metadata,
-                mf.library_id,
-                mm.release_date,
-                mm.vote_average,
-                mm.runtime,
-                mm.popularity,
-                mm.overview
+            SELECT mr.id AS "id!"
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
             WHERE mf.is_available = TRUE
+              AND (cardinality($1::uuid[]) = 0 OR mr.library_id = ANY($1))
+              AND (cardinality($2::text[]) = 0 OR EXISTS (
+                    SELECT 1 FROM movie_genres mg
+                    WHERE mg.movie_id = mr.id AND mg.name = ANY($2)
+              ))
+              AND ($3::int4 IS NULL OR (
+                    mm.release_date IS NOT NULL
+                    AND EXTRACT(YEAR FROM mm.release_date)::int BETWEEN $3 AND $4
+              ))
+              AND ($5::real IS NULL OR mm.vote_average BETWEEN $5 AND $6)
+              AND (
+                    NOT $7::bool
+                    OR (
+                        $8::bool AND (
+                            ($11::bool AND mr.title % $9)
+                            OR ($12::bool AND mm.overview % $9)
+                            OR ($13::bool AND EXISTS (
+                                SELECT 1
+                                FROM movie_cast search_mc
+                                JOIN persons search_p ON search_p.id = search_mc.person_id
+                                WHERE search_mc.movie_id = mr.id AND search_p.name % $9
+                            ))
+                        )
+                    )
+                    OR (
+                        NOT $8::bool AND (
+                            ($11::bool AND mr.title ILIKE $10)
+                            OR ($12::bool AND mm.overview ILIKE $10)
+                            OR ($13::bool AND EXISTS (
+                                SELECT 1
+                                FROM movie_cast search_mc
+                                JOIN persons search_p ON search_p.id = search_mc.person_id
+                                WHERE search_mc.movie_id = mr.id AND search_p.name ILIKE $10
+                            ))
+                        )
+                    )
+              )
+            ORDER BY
+              CASE WHEN $14::int2 = 0 AND $15::bool THEN LOWER(mr.title) END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 0 AND NOT $15::bool THEN LOWER(mr.title) END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 1 AND $15::bool THEN mf.discovered_at END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 1 AND NOT $15::bool THEN mf.discovered_at END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 2 AND $15::bool THEN mf.created_at END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 2 AND NOT $15::bool THEN mf.created_at END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 3 AND $15::bool THEN mm.release_date END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 3 AND NOT $15::bool THEN mm.release_date END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 4 AND $15::bool THEN mm.vote_average END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 4 AND NOT $15::bool THEN mm.vote_average END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 5 AND $15::bool THEN mm.runtime END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 5 AND NOT $15::bool THEN mm.runtime END DESC NULLS LAST,
+              mr.id ASC
+            LIMIT $16 OFFSET $17
             "#,
-        );
+            &query.filters.library_ids,
+            &query.filters.genres,
+            year_min,
+            year_max,
+            rating_min,
+            rating_max,
+            search.apply,
+            search.fuzzy,
+            search.text,
+            search.like_pattern,
+            search.include_title,
+            search.include_overview,
+            search.include_cast,
+            sort_key,
+            sort_ascending,
+            query.pagination.limit as i64,
+            query.pagination.offset as i64
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("Database query failed: {}", e))
+        })?;
 
-        // Add library filter
-        if !query.filters.library_ids.is_empty() {
-            sql_builder.push(" AND mr.library_id = ANY(");
-            sql_builder.push_bind(&query.filters.library_ids);
-            sql_builder.push(")");
-        }
-
-        // Add genre filter
-        if !query.filters.genres.is_empty() {
-            sql_builder.push(
-                " AND EXISTS (SELECT 1 FROM movie_genres mg WHERE mg.movie_id = mr.id AND mg.name = ANY("
-            );
-            sql_builder.push_bind(&query.filters.genres);
-            sql_builder.push("))");
-        }
-
-        // Add year range filter
-        if let Some(range) = &query.filters.year_range {
-            sql_builder.push(
-                " AND mm.release_date IS NOT NULL AND EXTRACT(YEAR FROM mm.release_date)::INT BETWEEN "
-            );
-            sql_builder.push_bind(range.min as i32);
-            sql_builder.push(" AND ");
-            sql_builder.push_bind(range.max as i32);
-        }
-
-        // Add rating range filter
-        if let Some(range) = &query.filters.rating_range {
-            sql_builder.push(" AND mm.vote_average BETWEEN ");
-            sql_builder.push_bind(rating_bound(range.min));
-            sql_builder.push(" AND ");
-            sql_builder.push_bind(rating_bound(range.max));
-        }
-
-        // Add search query if present
-        if let Some(search) = &query.search {
-            self.add_search_clause(&mut sql_builder, search);
-        }
-
-        // Add sorting
-        self.add_movie_sort_clause(&mut sql_builder, &query.sort);
-
-        // Add pagination
-        sql_builder.push(" LIMIT ");
-        sql_builder.push_bind(query.pagination.limit as i64);
-        sql_builder.push(" OFFSET ");
-        sql_builder.push_bind(query.pagination.offset as i64);
-
-        // Execute query
-        let rows =
-            sql_builder
-                .build()
-                .fetch_all(&self.pool)
-                .await
-                .map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Database query failed: {}",
-                        e
-                    ))
-                })?;
-
-        // Convert rows to MediaWithStatus
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(rows.len());
         for row in rows {
-            let id = MovieID(row.get::<Uuid, _>("id"));
-
-            // Get watch status if user context provided
+            let id = MovieID(row.id);
             let watch_status = if let Some(user_id) = query.user_context {
                 self.get_movie_watch_status(user_id, &id).await?
             } else {
@@ -673,22 +758,30 @@ impl QueryRepository for PostgresQueryRepository {
         &self,
         query: &MediaQuery,
     ) -> Result<Vec<MediaWithStatus>> {
-        // For TV shows, we need to handle the hierarchy differently
-        // We'll use a LATERAL JOIN to efficiently fetch series with their episodes
-        let mut sql_builder = QueryBuilder::<Postgres>::new(
+        let year_min = query.filters.year_range.map(|range| range.min as i32);
+        let year_max = query.filters.year_range.map(|range| range.max as i32);
+        let rating_min = query
+            .filters
+            .rating_range
+            .map(|range| rating_bound(range.min));
+        let rating_max = query
+            .filters
+            .rating_range
+            .map(|range| rating_bound(range.max));
+        let search = SearchSqlParams::from_query(query.search.as_ref());
+        let sort_key = MediaSqlSortKey::for_series(&query.sort).as_i16();
+        let sort_ascending = matches!(query.sort.order, SortOrder::Ascending);
+
+        let rows = sqlx::query!(
             r#"
             WITH series_data AS (
                 SELECT
                     sr.id,
-                    sr.library_id,
-                    sr.tmdb_id,
                     sr.title,
-                    sr.theme_color,
                     sr.discovered_at,
                     sr.created_at,
                     sm.first_air_date,
                     sm.vote_average,
-                    sm.popularity,
                     sm.overview
                 FROM series sr
                 LEFT JOIN series_metadata sm ON sr.id = sm.series_id
@@ -699,76 +792,48 @@ impl QueryRepository for PostgresQueryRepository {
                     WHERE er_visible.series_id = sr.id
                       AND mf_visible.is_available = TRUE
                 )
-            "#,
-        );
-
-        // Add library filter
-        if !query.filters.library_ids.is_empty() {
-            sql_builder.push(" AND sr.library_id = ANY(");
-            sql_builder.push_bind(&query.filters.library_ids);
-            sql_builder.push(")");
-        }
-
-        // Add genre filter
-        if !query.filters.genres.is_empty() {
-            sql_builder.push(
-                " AND EXISTS (SELECT 1 FROM series_genres sg WHERE sg.series_id = sr.id AND sg.name = ANY("
-            );
-            sql_builder.push_bind(&query.filters.genres);
-            sql_builder.push("))");
-        }
-
-        // Add year range filter
-        if let Some(range) = &query.filters.year_range {
-            sql_builder.push(
-                " AND sm.first_air_date IS NOT NULL AND EXTRACT(YEAR FROM sm.first_air_date)::INT BETWEEN "
-            );
-            sql_builder.push_bind(range.min as i32);
-            sql_builder.push(" AND ");
-            sql_builder.push_bind(range.max as i32);
-        }
-
-        // Add rating range filter
-        if let Some(range) = &query.filters.rating_range {
-            sql_builder.push(" AND sm.vote_average BETWEEN ");
-            sql_builder.push_bind(rating_bound(range.min));
-            sql_builder.push(" AND ");
-            sql_builder.push_bind(rating_bound(range.max));
-        }
-
-        if let Some(search) = &query.search {
-            self.add_series_search_clause(&mut sql_builder, search);
-        }
-
-        sql_builder.push(
-            r#"
+                  AND (cardinality($1::uuid[]) = 0 OR sr.library_id = ANY($1))
+                  AND (cardinality($2::text[]) = 0 OR EXISTS (
+                        SELECT 1 FROM series_genres sg
+                        WHERE sg.series_id = sr.id AND sg.name = ANY($2)
+                  ))
+                  AND ($3::int4 IS NULL OR (
+                        sm.first_air_date IS NOT NULL
+                        AND EXTRACT(YEAR FROM sm.first_air_date)::int BETWEEN $3 AND $4
+                  ))
+                  AND ($5::real IS NULL OR sm.vote_average BETWEEN $5 AND $6)
+                  AND (
+                        NOT $7::bool
+                        OR (
+                            $8::bool AND (
+                                ($11::bool AND sr.title % $9)
+                                OR ($12::bool AND sm.overview % $9)
+                                OR ($13::bool AND EXISTS (
+                                    SELECT 1
+                                    FROM series_cast search_sc
+                                    JOIN persons search_p ON search_p.id = search_sc.person_id
+                                    WHERE search_sc.series_id = sr.id AND search_p.name % $9
+                                ))
+                            )
+                        )
+                        OR (
+                            NOT $8::bool AND (
+                                ($11::bool AND sr.title ILIKE $10)
+                                OR ($12::bool AND sm.overview ILIKE $10)
+                                OR ($13::bool AND EXISTS (
+                                    SELECT 1
+                                    FROM series_cast search_sc
+                                    JOIN persons search_p ON search_p.id = search_sc.person_id
+                                    WHERE search_sc.series_id = sr.id AND search_p.name ILIKE $10
+                                ))
+                            )
+                        )
+                  )
             )
             SELECT
-                sd.id AS series_id,
-                sd.library_id AS series_library_id,
-                sd.tmdb_id AS series_tmdb_id,
-                sd.title AS series_title,
-                sd.theme_color AS series_theme_color,
-                sd.discovered_at AS series_discovered_at,
-                sd.created_at AS series_created_at,
-                sd.first_air_date AS series_first_air_date,
-                sd.vote_average AS series_vote_average,
-                sd.popularity AS series_popularity,
-                sd.overview AS series_overview,
-                sn.id AS season_id,
-                sn.season_number,
-                sn.discovered_at AS season_discovered_at,
-                sn.created_at AS season_created_at,
-                ep.id AS episode_id,
-                ep.season_number AS ep_season,
-                ep.episode_number,
-                ep.file_id,
-                mf.file_path,
-                mf.filename,
-                mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
-                mf.library_id AS file_library_id
+                sd.id AS "series_id!",
+                sn.id AS "season_id?",
+                ep.id AS "episode_id?"
             FROM series_data sd
             LEFT JOIN LATERAL (
                 SELECT * FROM season_references
@@ -785,31 +850,88 @@ impl QueryRepository for PostgresQueryRepository {
                 ORDER BY er.season_number, er.episode_number
             ) ep ON true
             LEFT JOIN media_files mf ON ep.file_id = mf.id
+            ORDER BY
+              CASE WHEN $14::int2 = 0 AND $15::bool THEN LOWER(sd.title) END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 0 AND NOT $15::bool THEN LOWER(sd.title) END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 1 AND $15::bool THEN COALESCE(mf.discovered_at, sn.discovered_at, sd.discovered_at) END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 1 AND NOT $15::bool THEN COALESCE(mf.discovered_at, sn.discovered_at, sd.discovered_at) END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 2 AND $15::bool THEN COALESCE(mf.created_at, sn.created_at, sd.created_at) END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 2 AND NOT $15::bool THEN COALESCE(mf.created_at, sn.created_at, sd.created_at) END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 3 AND $15::bool THEN sd.first_air_date END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 3 AND NOT $15::bool THEN sd.first_air_date END DESC NULLS LAST,
+              CASE WHEN $14::int2 = 4 AND $15::bool THEN sd.vote_average END ASC NULLS LAST,
+              CASE WHEN $14::int2 = 4 AND NOT $15::bool THEN sd.vote_average END DESC NULLS LAST,
+              sd.id,
+              sn.season_number,
+              ep.episode_number
             "#,
-        );
+            &query.filters.library_ids,
+            &query.filters.genres,
+            year_min,
+            year_max,
+            rating_min,
+            rating_max,
+            search.apply,
+            search.fuzzy,
+            search.text,
+            search.like_pattern,
+            search.include_title,
+            search.include_overview,
+            search.include_cast,
+            sort_key,
+            sort_ascending
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("Database query failed: {}", e))
+        })?;
 
-        // Add sorting for series
-        self.add_series_sort_clause(&mut sql_builder, &query.sort);
+        let mut media_ids: HashSet<MediaID> = HashSet::new();
+        let mut results = Vec::new();
 
-        // Note: Pagination for hierarchical data is complex
-        // We'll apply it after building the hierarchy
+        for row in rows {
+            let id: MediaID = MediaID::Series(SeriesID(row.series_id));
 
-        let rows =
-            sql_builder
-                .build()
-                .fetch_all(&self.pool)
-                .await
-                .map_err(|e| {
-                    MediaError::Internal(format!(
-                        "Database query failed: {}",
-                        e
-                    ))
-                })?;
+            if !media_ids.contains(&id) {
+                media_ids.insert(id);
+                results.push(MediaWithStatus {
+                    id,
+                    watch_status: None,
+                });
+            }
 
-        // Build hierarchical structure from flat rows
-        let results = self.build_tv_hierarchy_from_rows(rows, query).await?;
+            if let Some(season_id) = row.season_id {
+                let season_id = MediaID::Season(SeasonID(season_id));
 
-        // Apply pagination to the final results
+                if media_ids.contains(&id) {
+                    media_ids.insert(season_id);
+                    results.push(MediaWithStatus {
+                        id: season_id,
+                        watch_status: None,
+                    });
+                }
+            }
+
+            if let Some(episode_id) = row.episode_id {
+                let episode_media_id = MediaID::Episode(EpisodeID(episode_id));
+                let watch_status = if let Some(user_id) = query.user_context {
+                    self.get_episode_watch_status(
+                        user_id,
+                        &EpisodeID(episode_id),
+                    )
+                    .await?
+                } else {
+                    None
+                };
+
+                results.push(MediaWithStatus {
+                    id: episode_media_id,
+                    watch_status,
+                });
+            }
+        }
+
         let start = query.pagination.offset;
         if start >= results.len() {
             return Ok(Vec::new());
@@ -1074,309 +1196,6 @@ impl QueryRepository for PostgresQueryRepository {
     ) -> Result<Vec<MediaWithStatus>> {
         // Query media watched within the specified number of days
         todo!("Implement recently watched media query")
-    }
-
-    fn add_search_clause(
-        &self,
-        sql_builder: &mut QueryBuilder<Postgres>,
-        search: &SearchQuery,
-    ) {
-        let include_title = search.fields.is_empty()
-            || search.fields.contains(&SearchField::All)
-            || search.fields.contains(&SearchField::Title);
-        let include_overview = search.fields.is_empty()
-            || search.fields.contains(&SearchField::All)
-            || search.fields.contains(&SearchField::Overview);
-        let include_cast = search.fields.is_empty()
-            || search.fields.contains(&SearchField::All)
-            || search.fields.contains(&SearchField::Cast);
-
-        // If no supported fields are requested, avoid altering the query
-        if !include_title && !include_overview && !include_cast {
-            return;
-        }
-
-        sql_builder.push(" AND (");
-        let mut has_clause = false;
-
-        if search.fuzzy {
-            if include_title {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                has_clause = true;
-                sql_builder.push("mr.title % ");
-                sql_builder.push_bind(search.text.clone());
-            }
-
-            if include_overview {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                has_clause = true;
-                sql_builder.push("mm.overview % ");
-                sql_builder.push_bind(search.text.clone());
-            }
-
-            if include_cast {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                has_clause = true;
-                sql_builder.push(
-                    "EXISTS (SELECT 1 FROM movie_cast search_mc JOIN persons search_p ON search_p.id = search_mc.person_id WHERE search_mc.movie_id = mr.id AND search_p.name % "
-                );
-                sql_builder.push_bind(search.text.clone());
-                sql_builder.push(")");
-            }
-        } else {
-            let like_pattern = format!("%{}%", search.text);
-
-            if include_title {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                has_clause = true;
-                sql_builder.push("mr.title ILIKE ");
-                sql_builder.push_bind(like_pattern.clone());
-            }
-
-            if include_overview {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                has_clause = true;
-                sql_builder.push("mm.overview ILIKE ");
-                sql_builder.push_bind(like_pattern.clone());
-            }
-
-            if include_cast {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                has_clause = true;
-                sql_builder.push(
-                    "EXISTS (SELECT 1 FROM movie_cast search_mc JOIN persons search_p ON search_p.id = search_mc.person_id WHERE search_mc.movie_id = mr.id AND search_p.name ILIKE "
-                );
-                sql_builder.push_bind(like_pattern);
-                sql_builder.push(")");
-            }
-        }
-
-        if !has_clause {
-            sql_builder.push("FALSE");
-        }
-
-        sql_builder.push(")");
-    }
-
-    fn add_movie_sort_clause(
-        &self,
-        sql_builder: &mut QueryBuilder<Postgres>,
-        sort: &SortCriteria,
-    ) {
-        sql_builder.push(" ORDER BY ");
-
-        let (field, null_position) = match sort.primary {
-            SortBy::Title => ("LOWER(mr.title)", "LAST"),
-            SortBy::DateAdded => ("mf.discovered_at", "LAST"),
-            SortBy::CreatedAt => ("mf.created_at", "LAST"),
-            SortBy::ReleaseDate => ("mm.release_date", "LAST"),
-            SortBy::Rating => ("mm.vote_average", "LAST"),
-            SortBy::Runtime => ("mm.runtime", "LAST"),
-            _ => ("mf.discovered_at", "LAST"), // Default to date added
-        };
-
-        sql_builder.push(field);
-
-        match sort.order {
-            SortOrder::Ascending => sql_builder.push(" ASC NULLS "),
-            SortOrder::Descending => sql_builder.push(" DESC NULLS "),
-        };
-        sql_builder.push(null_position);
-        sql_builder.push(", mr.id ASC");
-    }
-
-    fn add_series_sort_clause(
-        &self,
-        sql_builder: &mut QueryBuilder<Postgres>,
-        sort: &SortCriteria,
-    ) {
-        sql_builder.push(" ORDER BY ");
-
-        let (field, null_position) = match sort.primary {
-            SortBy::Title => ("LOWER(sd.title)", "LAST"),
-            SortBy::DateAdded => (
-                "COALESCE(mf.discovered_at, sn.discovered_at, sd.discovered_at)",
-                "LAST",
-            ),
-            SortBy::CreatedAt => (
-                "COALESCE(mf.created_at, sn.created_at, sd.created_at)",
-                "LAST",
-            ),
-            SortBy::ReleaseDate => ("sd.first_air_date", "LAST"),
-            SortBy::Rating => ("sd.vote_average", "LAST"),
-            _ => (
-                "COALESCE(mf.discovered_at, sn.discovered_at, sd.discovered_at)",
-                "LAST",
-            ),
-        };
-
-        sql_builder.push(field);
-
-        match sort.order {
-            SortOrder::Ascending => sql_builder.push(" ASC NULLS "),
-            SortOrder::Descending => sql_builder.push(" DESC NULLS "),
-        };
-        sql_builder.push(null_position);
-
-        sql_builder.push(", sd.id, sn.season_number, ep.episode_number");
-    }
-
-    fn add_series_search_clause(
-        &self,
-        sql_builder: &mut QueryBuilder<Postgres>,
-        search: &SearchQuery,
-    ) {
-        let include_title = search.fields.is_empty()
-            || search.fields.contains(&SearchField::All)
-            || search.fields.contains(&SearchField::Title);
-        let include_overview = search.fields.is_empty()
-            || search.fields.contains(&SearchField::All)
-            || search.fields.contains(&SearchField::Overview);
-        let include_cast = search.fields.is_empty()
-            || search.fields.contains(&SearchField::All)
-            || search.fields.contains(&SearchField::Cast);
-
-        if !include_title && !include_overview && !include_cast {
-            return;
-        }
-
-        sql_builder.push(" AND (");
-        let mut has_clause = false;
-
-        if search.fuzzy {
-            if include_title {
-                sql_builder.push("sr.title % ");
-                sql_builder.push_bind(search.text.clone());
-                has_clause = true;
-            }
-
-            if include_overview {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                sql_builder.push("sm.overview % ");
-                sql_builder.push_bind(search.text.clone());
-                has_clause = true;
-            }
-
-            if include_cast {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                sql_builder.push(
-                    "EXISTS (SELECT 1 FROM series_cast search_sc JOIN persons search_p ON search_p.id = search_sc.person_id WHERE search_sc.series_id = sr.id AND search_p.name % "
-                );
-                sql_builder.push_bind(search.text.clone());
-                sql_builder.push(")");
-            }
-        } else {
-            let like_pattern = format!("%{}%", search.text);
-
-            if include_title {
-                sql_builder.push("sr.title ILIKE ");
-                sql_builder.push_bind(like_pattern.clone());
-                has_clause = true;
-            }
-
-            if include_overview {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                sql_builder.push("sm.overview ILIKE ");
-                sql_builder.push_bind(like_pattern.clone());
-                has_clause = true;
-            }
-
-            if include_cast {
-                if has_clause {
-                    sql_builder.push(" OR ");
-                }
-                sql_builder.push(
-                    "EXISTS (SELECT 1 FROM series_cast search_sc JOIN persons search_p ON search_p.id = search_sc.person_id WHERE search_sc.series_id = sr.id AND search_p.name ILIKE "
-                );
-                sql_builder.push_bind(like_pattern);
-                sql_builder.push(")");
-            }
-        }
-
-        sql_builder.push(")");
-    }
-
-    async fn build_tv_hierarchy_from_rows(
-        &self,
-        rows: Vec<sqlx::postgres::PgRow>,
-        query: &MediaQuery,
-    ) -> Result<Vec<MediaWithStatus>> {
-        use sqlx::Row;
-
-        let mut media_ids: HashSet<MediaID> = HashSet::new();
-
-        let mut results = Vec::new();
-
-        for row in rows {
-            let id: MediaID = MediaID::Series(SeriesID(row.get("series_id")));
-
-            // Create or get series reference
-            if !media_ids.contains(&id) {
-                media_ids.insert(id);
-
-                // Add series to results
-                results.push(MediaWithStatus {
-                    id,
-                    watch_status: None,
-                });
-            }
-
-            // Process season if present
-            if let Ok(season_id) = row.try_get::<Uuid, _>("season_id") {
-                let season_id = MediaID::Season(SeasonID(season_id));
-
-                if media_ids.contains(&id) {
-                    media_ids.insert(season_id);
-
-                    // Add season to results
-                    results.push(MediaWithStatus {
-                        id: season_id,
-                        watch_status: None,
-                    });
-                }
-            }
-
-            // Process episode if present
-            if let Ok(episode_id) = row.try_get::<Uuid, _>("episode_id") {
-                let episode_media_id = MediaID::Episode(EpisodeID(episode_id));
-
-                // Get watch status if user context provided
-                let watch_status = if let Some(user_id) = query.user_context {
-                    self.get_episode_watch_status(
-                        user_id,
-                        &EpisodeID(episode_id),
-                    )
-                    .await?
-                } else {
-                    None
-                };
-
-                results.push(MediaWithStatus {
-                    id: episode_media_id,
-                    watch_status,
-                });
-            }
-        }
-
-        Ok(results)
     }
 
     async fn get_movie_watch_status(

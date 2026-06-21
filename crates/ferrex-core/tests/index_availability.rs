@@ -68,8 +68,16 @@ async fn create_minimal_index_schema(pool: &PgPool) -> Result<()> {
             vote_average real,
             runtime integer,
             popularity real,
+            overview text,
             primary_certification text,
             poster_path text
+        );
+
+        CREATE TABLE public.movie_genres (
+            movie_id uuid NOT NULL,
+            library_id uuid NOT NULL,
+            batch_id bigint NOT NULL,
+            name text NOT NULL
         );
 
         CREATE TABLE public.movie_sort_positions (
@@ -99,6 +107,22 @@ async fn create_minimal_index_schema(pool: &PgPool) -> Result<()> {
             resolution_pos integer NOT NULL,
             resolution_pos_desc integer NOT NULL,
             updated_at timestamp with time zone DEFAULT now() NOT NULL
+        );
+
+        CREATE TABLE public.user_watch_progress (
+            user_id uuid NOT NULL,
+            media_uuid uuid NOT NULL,
+            media_type smallint NOT NULL,
+            position double precision NOT NULL,
+            duration double precision NOT NULL,
+            last_watched bigint NOT NULL
+        );
+
+        CREATE TABLE public.user_completed_media (
+            user_id uuid NOT NULL,
+            media_uuid uuid NOT NULL,
+            media_type smallint NOT NULL,
+            completed_at bigint NOT NULL
         );
         "#,
     )

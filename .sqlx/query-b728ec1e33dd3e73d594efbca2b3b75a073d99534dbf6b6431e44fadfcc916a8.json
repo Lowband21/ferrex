@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT mr.id AS \"id!\"\n            FROM movie_references mr\n            JOIN media_files mf ON mr.file_id = mf.id\n            LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id\n            WHERE mf.is_available = TRUE\n              AND (cardinality($1::uuid[]) = 0 OR mr.library_id = ANY($1))\n              AND (cardinality($2::text[]) = 0 OR EXISTS (\n                    SELECT 1 FROM movie_genres mg\n                    WHERE mg.movie_id = mr.id AND mg.name = ANY($2)\n              ))\n              AND ($3::int4 IS NULL OR (\n                    mm.release_date IS NOT NULL\n                    AND EXTRACT(YEAR FROM mm.release_date)::int BETWEEN $3 AND $4\n              ))\n              AND ($5::real IS NULL OR mm.vote_average BETWEEN $5 AND $6)\n              AND (\n                    NOT $7::bool\n                    OR (\n                        $8::bool AND (\n                            ($11::bool AND mr.title % $9)\n                            OR ($12::bool AND mm.overview % $9)\n                            OR ($13::bool AND EXISTS (\n                                SELECT 1\n                                FROM movie_cast search_mc\n                                JOIN persons search_p ON search_p.id = search_mc.person_id\n                                WHERE search_mc.movie_id = mr.id AND search_p.name % $9\n                            ))\n                        )\n                    )\n                    OR (\n                        NOT $8::bool AND (\n                            ($11::bool AND mr.title ILIKE $10)\n                            OR ($12::bool AND mm.overview ILIKE $10)\n                            OR ($13::bool AND EXISTS (\n                                SELECT 1\n                                FROM movie_cast search_mc\n                                JOIN persons search_p ON search_p.id = search_mc.person_id\n                                WHERE search_mc.movie_id = mr.id AND search_p.name ILIKE $10\n                            ))\n                        )\n                    )\n              )\n            ORDER BY\n              CASE WHEN $14::int2 = 0 AND $15::bool THEN LOWER(mr.title) END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 0 AND NOT $15::bool THEN LOWER(mr.title) END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 1 AND $15::bool THEN mf.discovered_at END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 1 AND NOT $15::bool THEN mf.discovered_at END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 2 AND $15::bool THEN mf.created_at END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 2 AND NOT $15::bool THEN mf.created_at END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 3 AND $15::bool THEN mm.release_date END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 3 AND NOT $15::bool THEN mm.release_date END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 4 AND $15::bool THEN mm.vote_average END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 4 AND NOT $15::bool THEN mm.vote_average END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 5 AND $15::bool THEN mm.runtime END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 5 AND NOT $15::bool THEN mm.runtime END DESC NULLS LAST,\n              mr.id ASC\n            LIMIT $16 OFFSET $17\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "TextArray",
+        "Int4",
+        "Int4",
+        "Float4",
+        "Float4",
+        "Bool",
+        "Bool",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int2",
+        "Bool",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b728ec1e33dd3e73d594efbca2b3b75a073d99534dbf6b6431e44fadfcc916a8"
+}

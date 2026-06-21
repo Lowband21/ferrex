@@ -2005,28 +2005,29 @@ impl ScanCursorRepository for PostgresCursorRepository {
             return Ok(0);
         }
 
-        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-            "DELETE FROM scan_cursors WHERE library_id = ",
-        );
-        builder.push_bind(library_id.0);
-        builder.push(" AND (");
+        let roots: Vec<String> = prefixes
+            .iter()
+            .map(|prefix| prefix.trim_end_matches('/').to_owned())
+            .collect();
 
-        for (idx, prefix) in prefixes.iter().enumerate() {
-            if idx > 0 {
-                builder.push(" OR ");
-            }
-            let root = prefix.trim_end_matches('/');
-            let mut child_prefix = root.to_string();
-            child_prefix.push('/');
-            builder.push("(folder_path_norm = ");
-            builder.push_bind(root);
-            builder.push(" OR folder_path_norm LIKE ");
-            builder.push_bind(format!("{}%", child_prefix));
-            builder.push(")");
-        }
-        builder.push(")");
+        let result = sqlx::query!(
+            r#"
+            WITH target_prefixes AS (
+                SELECT root,
+                       root || '/%' AS child_pattern
+                FROM UNNEST($2::text[]) AS root
+            )
+            DELETE FROM scan_cursors AS sc
+            USING target_prefixes AS p
+            WHERE sc.library_id = $1
+              AND (sc.folder_path_norm = p.root OR sc.folder_path_norm LIKE p.child_pattern)
+            "#,
+            library_id.0,
+            &roots
+        )
+        .execute(&self.pool)
+        .await?;
 
-        let result = builder.build().execute(&self.pool).await?;
         Ok(result.rows_affected() as usize)
     }
 

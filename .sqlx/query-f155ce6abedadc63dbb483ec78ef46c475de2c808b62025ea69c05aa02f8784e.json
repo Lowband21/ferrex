@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, media_id, media_type::text AS \"media_type!\", file_path, file_size,\n                   is_available, fingerprint_device_id, fingerprint_inode,\n                   fingerprint_size, fingerprint_mtime_ms, fingerprint_weak_hash\n            FROM media_files\n            WHERE library_id = $1\n              AND is_available = TRUE\n              AND file_path <> $2\n              AND COALESCE(fingerprint_size, file_size) = $3\n              AND ($4::bigint IS NULL OR fingerprint_mtime_ms = $4)\n              AND ($5::text IS NULL OR fingerprint_weak_hash = $5)\n            ORDER BY updated_at DESC\n            LIMIT 2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "media_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "file_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_available",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "fingerprint_device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "fingerprint_inode",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "fingerprint_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "fingerprint_mtime_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "fingerprint_weak_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f155ce6abedadc63dbb483ec78ef46c475de2c808b62025ea69c05aa02f8784e"
+}

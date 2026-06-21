@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH series_data AS (\n                SELECT\n                    sr.id,\n                    sr.title,\n                    sr.discovered_at,\n                    sr.created_at,\n                    sm.first_air_date,\n                    sm.vote_average,\n                    sm.overview\n                FROM series sr\n                LEFT JOIN series_metadata sm ON sr.id = sm.series_id\n                WHERE EXISTS (\n                    SELECT 1\n                    FROM episode_references er_visible\n                    JOIN media_files mf_visible ON mf_visible.id = er_visible.file_id\n                    WHERE er_visible.series_id = sr.id\n                      AND mf_visible.is_available = TRUE\n                )\n                  AND (cardinality($1::uuid[]) = 0 OR sr.library_id = ANY($1))\n                  AND (cardinality($2::text[]) = 0 OR EXISTS (\n                        SELECT 1 FROM series_genres sg\n                        WHERE sg.series_id = sr.id AND sg.name = ANY($2)\n                  ))\n                  AND ($3::int4 IS NULL OR (\n                        sm.first_air_date IS NOT NULL\n                        AND EXTRACT(YEAR FROM sm.first_air_date)::int BETWEEN $3 AND $4\n                  ))\n                  AND ($5::real IS NULL OR sm.vote_average BETWEEN $5 AND $6)\n                  AND (\n                        NOT $7::bool\n                        OR (\n                            $8::bool AND (\n                                ($11::bool AND sr.title % $9)\n                                OR ($12::bool AND sm.overview % $9)\n                                OR ($13::bool AND EXISTS (\n                                    SELECT 1\n                                    FROM series_cast search_sc\n                                    JOIN persons search_p ON search_p.id = search_sc.person_id\n                                    WHERE search_sc.series_id = sr.id AND search_p.name % $9\n                                ))\n                            )\n                        )\n                        OR (\n                            NOT $8::bool AND (\n                                ($11::bool AND sr.title ILIKE $10)\n                                OR ($12::bool AND sm.overview ILIKE $10)\n                                OR ($13::bool AND EXISTS (\n                                    SELECT 1\n                                    FROM series_cast search_sc\n                                    JOIN persons search_p ON search_p.id = search_sc.person_id\n                                    WHERE search_sc.series_id = sr.id AND search_p.name ILIKE $10\n                                ))\n                            )\n                        )\n                  )\n            )\n            SELECT\n                sd.id AS \"series_id!\",\n                sn.id AS \"season_id?\",\n                ep.id AS \"episode_id?\"\n            FROM series_data sd\n            LEFT JOIN LATERAL (\n                SELECT * FROM season_references\n                WHERE series_id = sd.id\n                ORDER BY season_number\n            ) sn ON true\n            LEFT JOIN LATERAL (\n                SELECT er.*\n                FROM episode_references er\n                JOIN media_files mf_visible ON mf_visible.id = er.file_id\n                WHERE er.series_id = sd.id\n                  AND er.season_id = sn.id\n                  AND mf_visible.is_available = TRUE\n                ORDER BY er.season_number, er.episode_number\n            ) ep ON true\n            LEFT JOIN media_files mf ON ep.file_id = mf.id\n            ORDER BY\n              CASE WHEN $14::int2 = 0 AND $15::bool THEN LOWER(sd.title) END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 0 AND NOT $15::bool THEN LOWER(sd.title) END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 1 AND $15::bool THEN COALESCE(mf.discovered_at, sn.discovered_at, sd.discovered_at) END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 1 AND NOT $15::bool THEN COALESCE(mf.discovered_at, sn.discovered_at, sd.discovered_at) END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 2 AND $15::bool THEN COALESCE(mf.created_at, sn.created_at, sd.created_at) END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 2 AND NOT $15::bool THEN COALESCE(mf.created_at, sn.created_at, sd.created_at) END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 3 AND $15::bool THEN sd.first_air_date END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 3 AND NOT $15::bool THEN sd.first_air_date END DESC NULLS LAST,\n              CASE WHEN $14::int2 = 4 AND $15::bool THEN sd.vote_average END ASC NULLS LAST,\n              CASE WHEN $14::int2 = 4 AND NOT $15::bool THEN sd.vote_average END DESC NULLS LAST,\n              sd.id,\n              sn.season_number,\n              ep.episode_number\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "season_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_id?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "TextArray",
+        "Int4",
+        "Int4",
+        "Float4",
+        "Float4",
+        "Bool",
+        "Bool",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int2",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3b71f9e9c874c51b7ad6f80191bf53d63b1dee1c45cababffda44e7fe93fea0c"
+}

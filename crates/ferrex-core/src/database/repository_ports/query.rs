@@ -1,15 +1,11 @@
 use crate::{
     domain::watch::{ItemWatchStatus, WatchStatusFilter},
     error::Result,
-    query::{
-        prelude::{SearchQuery, SortCriteria},
-        types::{MediaQuery, MediaWithStatus},
-    },
+    query::types::{MediaQuery, MediaWithStatus},
     types::{EpisodeID, MovieID},
 };
 
 use async_trait::async_trait;
-use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
 #[async_trait]
@@ -65,41 +61,11 @@ pub trait QueryRepository: Send + Sync {
         query: &MediaQuery,
     ) -> Result<Vec<MediaWithStatus>>;
 
-    fn add_search_clause(
-        &self,
-        sql_builder: &mut QueryBuilder<Postgres>,
-        search: &SearchQuery,
-    );
-
-    fn add_movie_sort_clause(
-        &self,
-        sql_builder: &mut QueryBuilder<Postgres>,
-        sort: &SortCriteria,
-    );
-
-    fn add_series_sort_clause(
-        &self,
-        sql_builder: &mut QueryBuilder<Postgres>,
-        sort: &SortCriteria,
-    );
-
-    fn add_series_search_clause(
-        &self,
-        sql_builder: &mut QueryBuilder<Postgres>,
-        search: &SearchQuery,
-    );
-
     async fn get_episode_watch_status(
         &self,
         user_id: Uuid,
         episode_id: &EpisodeID,
     ) -> Result<Option<ItemWatchStatus>>;
-
-    async fn build_tv_hierarchy_from_rows(
-        &self,
-        rows: Vec<sqlx::postgres::PgRow>,
-        query: &MediaQuery,
-    ) -> Result<Vec<MediaWithStatus>>;
 
     async fn get_movie_watch_status(
         &self,

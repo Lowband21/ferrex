@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use ferrex_contracts::id::MediaIDLike;
 use ferrex_model::MediaID;
 use ferrex_model::media_type::VideoMediaType;
-use sqlx::{PgPool, Postgres, QueryBuilder, Row, Transaction, postgres::PgRow};
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::database::repository_ports::media_files::{
@@ -176,15 +176,6 @@ impl PostgresMediaRepository {
         Ok(available.unwrap_or(false))
     }
 
-    fn map_sort_field(field: MediaFileSortField) -> &'static str {
-        match field {
-            MediaFileSortField::DiscoveredAt => "discovered_at",
-            MediaFileSortField::CreatedAt => "created_at",
-            MediaFileSortField::FileSize => "file_size",
-            MediaFileSortField::Filename => "LOWER(filename)",
-        }
-    }
-
     fn convert_filters(
         filters: MediaFilters,
     ) -> (MediaFileFilter, MediaFileSort, Page) {
@@ -243,67 +234,27 @@ impl PostgresMediaRepository {
         (filter, sort, page)
     }
 
-    fn apply_filter(
-        builder: &mut QueryBuilder<Postgres>,
-        filter: &MediaFileFilter,
-    ) {
-        builder.push(" AND is_available = TRUE");
-
-        if let Some(library) = filter.library_id {
-            builder.push(" AND library_id = ");
-            builder.push_bind(library.to_uuid());
-        }
-
-        if let Some(prefix) = &filter.path_prefix {
-            builder.push(" AND file_path LIKE ");
-            builder.push_bind(format!("{}%", prefix));
-        }
-
-        if !filter.extension_in.is_empty() {
-            let lowered: Vec<String> = filter
-                .extension_in
-                .iter()
-                .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
-                .collect();
-            builder.push(" AND LOWER(split_part(filename, '.', -1)) = ANY(");
-            builder.push_bind(lowered);
-            builder.push(")");
-        }
-
-        if let Some(min_size) = filter.min_size {
-            builder.push(" AND file_size >= ");
-            builder.push_bind(min_size as i64);
-        }
-
-        if let Some(max_size) = filter.max_size {
-            builder.push(" AND file_size <= ");
-            builder.push_bind(max_size as i64);
-        }
-
-        if let Some(after) = filter.discovered_after {
-            builder.push(" AND discovered_at >= ");
-            builder.push_bind(after);
-        }
-
-        if let Some(before) = filter.discovered_before {
-            builder.push(" AND discovered_at <= ");
-            builder.push_bind(before);
-        }
-
-        if let Some(after) = filter.created_after {
-            builder.push(" AND created_at >= ");
-            builder.push_bind(after);
-        }
-
-        if let Some(before) = filter.created_before {
-            builder.push(" AND created_at <= ");
-            builder.push_bind(before);
-        }
+    fn normalized_extensions(filter: &MediaFileFilter) -> Vec<String> {
+        filter
+            .extension_in
+            .iter()
+            .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+            .collect()
     }
 
-    fn hydrate_media_file(row: &PgRow) -> Result<MediaFile> {
-        let technical_metadata: Option<serde_json::Value> =
-            row.try_get("technical_metadata")?;
+    #[allow(clippy::too_many_arguments)]
+    fn media_file_from_parts(
+        id: Uuid,
+        media_id: Uuid,
+        media_type: VideoMediaType,
+        library_id: Uuid,
+        file_path: String,
+        filename: String,
+        file_size: i64,
+        discovered_at: chrono::DateTime<chrono::Utc>,
+        created_at: chrono::DateTime<chrono::Utc>,
+        technical_metadata: Option<serde_json::Value>,
+    ) -> Result<MediaFile> {
         let media_file_metadata = technical_metadata
             .map(serde_json::from_value)
             .transpose()
@@ -314,21 +265,16 @@ impl PostgresMediaRepository {
                 ))
             })?;
 
-        let id: Uuid = row.try_get("media_id")?;
-        let imt: i16 = row.try_get("media_type")?;
-        let media_id: MediaID =
-            MediaID::from((id, VideoMediaType::from(imt as u16)));
-
         Ok(MediaFile {
-            id: row.try_get("id")?,
-            media_id,
-            path: PathBuf::from(row.try_get::<String, _>("file_path")?),
-            filename: row.try_get("filename")?,
-            size: row.try_get::<i64, _>("file_size")? as u64,
-            discovered_at: row.try_get("discovered_at")?,
-            created_at: row.try_get("created_at")?,
+            id,
+            media_id: MediaID::from((media_id, media_type)),
+            path: PathBuf::from(file_path),
+            filename,
+            size: file_size as u64,
+            discovered_at,
+            created_at,
             media_file_metadata,
-            library_id: LibraryId(row.try_get("library_id")?),
+            library_id: LibraryId(library_id),
         })
     }
 
@@ -601,33 +547,92 @@ impl PostgresMediaRepository {
         sort: MediaFileSort,
         page: Page,
     ) -> Result<Vec<MediaFile>> {
-        let mut builder = QueryBuilder::<Postgres>::new(
-            "SELECT id, media_id, media_type, library_id, file_path, filename, file_size, discovered_at, created_at, technical_metadata, parsed_info FROM media_files WHERE 1=1",
-        );
+        let library_id = filter.library_id.map(|id| id.to_uuid());
+        let path_prefix = filter
+            .path_prefix
+            .as_ref()
+            .map(|prefix| format!("{}%", prefix));
+        let extensions = Self::normalized_extensions(&filter);
+        let min_size = filter.min_size.map(|size| size as i64);
+        let max_size = filter.max_size.map(|size| size as i64);
+        let sort_key: i16 = match sort.field {
+            MediaFileSortField::DiscoveredAt => 0,
+            MediaFileSortField::CreatedAt => 1,
+            MediaFileSortField::FileSize => 2,
+            MediaFileSortField::Filename => 3,
+        };
+        let sort_ascending = matches!(sort.direction, SortDirection::Ascending);
 
-        Self::apply_filter(&mut builder, &filter);
-
-        builder.push(" ORDER BY ");
-        builder.push(Self::map_sort_field(sort.field));
-        builder.push(match sort.direction {
-            SortDirection::Ascending => " ASC",
-            SortDirection::Descending => " DESC",
-        });
-
-        builder.push(", id ASC");
-
-        builder.push(" LIMIT ");
-        builder.push_bind(page.limit as i64);
-        builder.push(" OFFSET ");
-        builder.push_bind(page.offset as i64);
-
-        let rows =
-            builder.build().fetch_all(self.pool()).await.map_err(|e| {
-                MediaError::Internal(format!("Database query failed: {}", e))
-            })?;
+        let rows = sqlx::query!(
+            r#"
+            SELECT id,
+                   media_id,
+                   media_type AS "media_type!: VideoMediaType",
+                   library_id,
+                   file_path,
+                   filename,
+                   file_size,
+                   discovered_at,
+                   created_at,
+                   technical_metadata
+            FROM media_files
+            WHERE is_available = TRUE
+              AND ($1::uuid IS NULL OR library_id = $1)
+              AND ($2::text IS NULL OR file_path LIKE $2)
+              AND (cardinality($3::text[]) = 0 OR LOWER(split_part(filename, '.', -1)) = ANY($3))
+              AND ($4::bigint IS NULL OR file_size >= $4)
+              AND ($5::bigint IS NULL OR file_size <= $5)
+              AND ($6::timestamptz IS NULL OR discovered_at >= $6)
+              AND ($7::timestamptz IS NULL OR discovered_at <= $7)
+              AND ($8::timestamptz IS NULL OR created_at >= $8)
+              AND ($9::timestamptz IS NULL OR created_at <= $9)
+            ORDER BY
+              CASE WHEN $10::int2 = 0 AND $11::bool THEN discovered_at END ASC,
+              CASE WHEN $10::int2 = 0 AND NOT $11::bool THEN discovered_at END DESC,
+              CASE WHEN $10::int2 = 1 AND $11::bool THEN created_at END ASC,
+              CASE WHEN $10::int2 = 1 AND NOT $11::bool THEN created_at END DESC,
+              CASE WHEN $10::int2 = 2 AND $11::bool THEN file_size END ASC,
+              CASE WHEN $10::int2 = 2 AND NOT $11::bool THEN file_size END DESC,
+              CASE WHEN $10::int2 = 3 AND $11::bool THEN LOWER(filename) END ASC,
+              CASE WHEN $10::int2 = 3 AND NOT $11::bool THEN LOWER(filename) END DESC,
+              id ASC
+            LIMIT $12 OFFSET $13
+            "#,
+            library_id,
+            path_prefix,
+            &extensions,
+            min_size,
+            max_size,
+            filter.discovered_after,
+            filter.discovered_before,
+            filter.created_after,
+            filter.created_before,
+            sort_key,
+            sort_ascending,
+            page.limit as i64,
+            page.offset as i64
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("Database query failed: {}", e))
+        })?;
 
         rows.into_iter()
-            .map(|row| Self::hydrate_media_file(&row))
+            .map(|row| {
+                Self::media_file_from_parts(
+                    row.id,
+                    row.media_id,
+                    row.media_type,
+                    row.library_id,
+                    row.file_path,
+                    row.filename,
+                    row.file_size,
+                    row.discovered_at,
+                    row.created_at,
+                    row.technical_metadata,
+                )
+            })
             .collect()
     }
 
@@ -639,50 +644,88 @@ impl PostgresMediaRepository {
         &self,
         filter: MediaFileFilter,
     ) -> Result<MediaStats> {
-        let mut totals_builder = QueryBuilder::<Postgres>::new(
-            "SELECT COUNT(*) as count, COALESCE(SUM(file_size), 0) as total_size FROM media_files WHERE 1=1",
-        );
-        Self::apply_filter(&mut totals_builder, &filter);
+        let library_id = filter.library_id.map(|id| id.to_uuid());
+        let path_prefix = filter
+            .path_prefix
+            .as_ref()
+            .map(|prefix| format!("{}%", prefix));
+        let extensions = Self::normalized_extensions(&filter);
+        let min_size = filter.min_size.map(|size| size as i64);
+        let max_size = filter.max_size.map(|size| size as i64);
 
-        let total_row = totals_builder
-            .build()
-            .fetch_one(self.pool())
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("Database query failed: {}", e))
-            })?;
+        let total_row = sqlx::query!(
+            r#"
+            SELECT COUNT(*)::bigint AS "count!",
+                   COALESCE(SUM(file_size), 0)::bigint AS "total_size!"
+            FROM media_files
+            WHERE is_available = TRUE
+              AND ($1::uuid IS NULL OR library_id = $1)
+              AND ($2::text IS NULL OR file_path LIKE $2)
+              AND (cardinality($3::text[]) = 0 OR LOWER(split_part(filename, '.', -1)) = ANY($3))
+              AND ($4::bigint IS NULL OR file_size >= $4)
+              AND ($5::bigint IS NULL OR file_size <= $5)
+              AND ($6::timestamptz IS NULL OR discovered_at >= $6)
+              AND ($7::timestamptz IS NULL OR discovered_at <= $7)
+              AND ($8::timestamptz IS NULL OR created_at >= $8)
+              AND ($9::timestamptz IS NULL OR created_at <= $9)
+            "#,
+            library_id,
+            path_prefix.as_deref(),
+            &extensions,
+            min_size,
+            max_size,
+            filter.discovered_after,
+            filter.discovered_before,
+            filter.created_after,
+            filter.created_before
+        )
+        .fetch_one(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("Database query failed: {}", e))
+        })?;
 
-        let mut type_builder = QueryBuilder::<Postgres>::new(
-            "SELECT COALESCE(parsed_info->>'media_type', 'unknown') as media_type, COUNT(*) as count FROM media_files WHERE 1=1",
-        );
-        Self::apply_filter(&mut type_builder, &filter);
-        type_builder
-            .push(" GROUP BY COALESCE(parsed_info->>'media_type', 'unknown')");
-
-        let type_rows = type_builder
-            .build()
-            .fetch_all(self.pool())
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("Database query failed: {}", e))
-            })?;
+        let type_rows = sqlx::query!(
+            r#"
+            SELECT COALESCE(parsed_info->>'media_type', 'unknown') AS "media_type!",
+                   COUNT(*)::bigint AS "count!"
+            FROM media_files
+            WHERE is_available = TRUE
+              AND ($1::uuid IS NULL OR library_id = $1)
+              AND ($2::text IS NULL OR file_path LIKE $2)
+              AND (cardinality($3::text[]) = 0 OR LOWER(split_part(filename, '.', -1)) = ANY($3))
+              AND ($4::bigint IS NULL OR file_size >= $4)
+              AND ($5::bigint IS NULL OR file_size <= $5)
+              AND ($6::timestamptz IS NULL OR discovered_at >= $6)
+              AND ($7::timestamptz IS NULL OR discovered_at <= $7)
+              AND ($8::timestamptz IS NULL OR created_at >= $8)
+              AND ($9::timestamptz IS NULL OR created_at <= $9)
+            GROUP BY COALESCE(parsed_info->>'media_type', 'unknown')
+            "#,
+            library_id,
+            path_prefix.as_deref(),
+            &extensions,
+            min_size,
+            max_size,
+            filter.discovered_after,
+            filter.discovered_before,
+            filter.created_after,
+            filter.created_before
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("Database query failed: {}", e))
+        })?;
 
         let mut by_type = HashMap::new();
         for row in type_rows {
-            let media_type: Option<String> = row.try_get("media_type").ok();
-            let count: i64 = row.try_get("count").unwrap_or(0);
-            by_type.insert(
-                media_type.unwrap_or_else(|| "unknown".to_string()),
-                count as u64,
-            );
+            by_type.insert(row.media_type, row.count as u64);
         }
 
-        let total_files: i64 = total_row.try_get("count").unwrap_or(0);
-        let total_size: i64 = total_row.try_get("total_size").unwrap_or(0);
-
         Ok(MediaStats {
-            total_files: total_files as u64,
-            total_size: total_size as u64,
+            total_files: total_row.count as u64,
+            total_size: total_row.total_size as u64,
             by_type,
         })
     }
@@ -740,38 +783,39 @@ impl PostgresMediaRepository {
             return Ok(0);
         }
 
-        let mut builder = QueryBuilder::<Postgres>::new(
-            "DELETE FROM media_files WHERE library_id = ",
-        );
-        builder.push_bind(library_id.as_uuid());
-        builder.push(" AND (");
+        let roots: Vec<String> = prefixes
+            .iter()
+            .map(|prefix| {
+                prefix
+                    .trim_end_matches(std::path::MAIN_SEPARATOR)
+                    .to_owned()
+            })
+            .collect();
 
-        for (idx, prefix) in prefixes.iter().enumerate() {
-            if idx > 0 {
-                builder.push(" OR ");
-            }
-
-            let root = prefix.trim_end_matches(std::path::MAIN_SEPARATOR);
-            let mut children_prefix = root.to_string();
-            children_prefix.push(std::path::MAIN_SEPARATOR);
-
-            builder.push("(");
-            builder.push("file_path = ");
-            builder.push_bind(root);
-            builder.push(" OR file_path LIKE ");
-            builder.push_bind(format!("{}%", children_prefix));
-            builder.push(")");
-        }
-
-        builder.push(")");
-
-        let result =
-            builder.build().execute(self.pool()).await.map_err(|e| {
-                MediaError::Internal(format!(
-                    "Delete by prefixes failed for library {}: {}",
-                    library_id, e
-                ))
-            })?;
+        let result = sqlx::query!(
+            r#"
+            WITH target_prefixes AS (
+                SELECT root,
+                       root || $3::text || '%' AS child_pattern
+                FROM UNNEST($2::text[]) AS root
+            )
+            DELETE FROM media_files AS mf
+            USING target_prefixes AS p
+            WHERE mf.library_id = $1
+              AND (mf.file_path = p.root OR mf.file_path LIKE p.child_pattern)
+            "#,
+            library_id.as_uuid(),
+            &roots,
+            std::path::MAIN_SEPARATOR.to_string()
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Delete by prefixes failed for library {}: {}",
+                library_id, e
+            ))
+        })?;
 
         Ok(result.rows_affected())
     }
@@ -1073,24 +1117,6 @@ impl PostgresMediaRepository {
             is_available,
         })
     }
-
-    fn stored_media_from_row(
-        row: sqlx::postgres::PgRow,
-    ) -> Result<StoredMediaFile> {
-        Self::stored_media_from_parts(
-            row.try_get("id")?,
-            row.try_get("media_id")?,
-            row.try_get("media_type")?,
-            row.try_get("file_path")?,
-            row.try_get("file_size")?,
-            row.try_get("is_available")?,
-            row.try_get("fingerprint_device_id")?,
-            row.try_get("fingerprint_inode")?,
-            row.try_get("fingerprint_size")?,
-            row.try_get("fingerprint_mtime_ms")?,
-            row.try_get("fingerprint_weak_hash")?,
-        )
-    }
 }
 
 #[async_trait]
@@ -1164,39 +1190,56 @@ impl FolderDeltaRepository for PostgresMediaRepository {
             return Ok(Vec::new());
         }
 
-        let mut builder = QueryBuilder::<Postgres>::new(
+        let fingerprint_mtime =
+            (fingerprint.mtime > 0).then_some(fingerprint.mtime);
+
+        let rows = sqlx::query!(
             r#"
-            SELECT id, media_id, media_type::text AS media_type, file_path, file_size,
+            SELECT id, media_id, media_type::text AS "media_type!", file_path, file_size,
                    is_available, fingerprint_device_id, fingerprint_inode,
                    fingerprint_size, fingerprint_mtime_ms, fingerprint_weak_hash
             FROM media_files
-            WHERE library_id = 
+            WHERE library_id = $1
+              AND is_available = TRUE
+              AND file_path <> $2
+              AND COALESCE(fingerprint_size, file_size) = $3
+              AND ($4::bigint IS NULL OR fingerprint_mtime_ms = $4)
+              AND ($5::text IS NULL OR fingerprint_weak_hash = $5)
+            ORDER BY updated_at DESC
+            LIMIT 2
             "#,
-        );
-        builder.push_bind(library_id.as_uuid());
-        builder.push(" AND is_available = TRUE AND file_path <> ");
-        builder.push_bind(excluding_path_norm);
-        builder.push(" AND COALESCE(fingerprint_size, file_size) = ");
-        builder.push_bind(fingerprint.size as i64);
-        if fingerprint.mtime > 0 {
-            builder.push(" AND fingerprint_mtime_ms = ");
-            builder.push_bind(fingerprint.mtime);
-        }
-        if let Some(weak_hash) = fingerprint.weak_hash.as_deref() {
-            builder.push(" AND fingerprint_weak_hash = ");
-            builder.push_bind(weak_hash);
-        }
-        builder.push(" ORDER BY updated_at DESC LIMIT 2");
+            library_id.as_uuid(),
+            excluding_path_norm,
+            fingerprint.size as i64,
+            fingerprint_mtime,
+            fingerprint.weak_hash.as_deref()
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to find media move candidates for {}: {}",
+                excluding_path_norm, e
+            ))
+        })?;
 
-        let rows =
-            builder.build().fetch_all(self.pool()).await.map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to find media move candidates for {}: {}",
-                    excluding_path_norm, e
-                ))
-            })?;
-
-        rows.into_iter().map(Self::stored_media_from_row).collect()
+        rows.into_iter()
+            .map(|row| {
+                Self::stored_media_from_parts(
+                    row.id,
+                    row.media_id,
+                    row.media_type,
+                    row.file_path,
+                    row.file_size,
+                    row.is_available,
+                    row.fingerprint_device_id,
+                    row.fingerprint_inode,
+                    row.fingerprint_size,
+                    row.fingerprint_mtime_ms,
+                    row.fingerprint_weak_hash,
+                )
+            })
+            .collect()
     }
 
     async fn move_media_by_path(
@@ -1262,35 +1305,40 @@ impl FolderDeltaRepository for PostgresMediaRepository {
             return Ok(0);
         }
 
-        let mut builder = QueryBuilder::<Postgres>::new(
-            "UPDATE media_files SET is_available = FALSE, tombstoned_at = COALESCE(tombstoned_at, NOW()), tombstone_reason = ",
-        );
-        builder.push_bind(reason);
-        builder.push(", updated_at = NOW() WHERE library_id = ");
-        builder.push_bind(library_id.as_uuid());
-        builder.push(" AND is_available = TRUE AND (");
+        let roots: Vec<String> = prefixes
+            .iter()
+            .map(|prefix| prefix.trim_end_matches('/').to_owned())
+            .collect();
 
-        for (idx, prefix) in prefixes.iter().enumerate() {
-            if idx > 0 {
-                builder.push(" OR ");
-            }
-            let root = prefix.trim_end_matches('/');
-            let child_prefix = format!("{root}/%");
-            builder.push("(file_path = ");
-            builder.push_bind(root);
-            builder.push(" OR file_path LIKE ");
-            builder.push_bind(child_prefix);
-            builder.push(")");
-        }
-        builder.push(")");
-
-        let result =
-            builder.build().execute(self.pool()).await.map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to tombstone media prefixes for library {}: {}",
-                    library_id, e
-                ))
-            })?;
+        let result = sqlx::query!(
+            r#"
+            WITH target_prefixes AS (
+                SELECT root,
+                       root || '/%' AS child_pattern
+                FROM UNNEST($3::text[]) AS root
+            )
+            UPDATE media_files AS mf
+            SET is_available = FALSE,
+                tombstoned_at = COALESCE(tombstoned_at, NOW()),
+                tombstone_reason = $2,
+                updated_at = NOW()
+            FROM target_prefixes AS p
+            WHERE mf.library_id = $1
+              AND mf.is_available = TRUE
+              AND (mf.file_path = p.root OR mf.file_path LIKE p.child_pattern)
+            "#,
+            library_id.as_uuid(),
+            reason,
+            &roots
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to tombstone media prefixes for library {}: {}",
+                library_id, e
+            ))
+        })?;
 
         Ok(result.rows_affected())
     }
