@@ -460,6 +460,7 @@
               git
               wl-clipboard
               postgresqlWithPgUuidv7
+              sqlx-cli
               flatpak
               flatpak-builder
               appstream
@@ -497,6 +498,7 @@
               git
               wl-clipboard
               postgresqlWithPgUuidv7Player
+              sqlx-cli
               flatpak
               flatpak-builder
               appstream

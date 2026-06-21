@@ -466,6 +466,42 @@ run-server-demo:
 
 # sqlx
 [no-cd]
+sqlx-db *args:
+    ./scripts/dev/sqlx-db.sh {{ args }}
+
+[no-cd]
+sqlx-db-start:
+    ./scripts/dev/sqlx-db.sh start
+
+[no-cd]
+sqlx-db-status:
+    ./scripts/dev/sqlx-db.sh status
+
+[no-cd]
+sqlx-db-migrate:
+    ./scripts/dev/sqlx-db.sh migrate
+
+[no-cd]
+sqlx-db-prepare:
+    ./scripts/dev/sqlx-db.sh prepare
+
+[no-cd]
+sqlx-db-prepare-check:
+    ./scripts/dev/sqlx-db.sh prepare-check
+
+[no-cd]
+sqlx-db-stop:
+    ./scripts/dev/sqlx-db.sh stop
+
+[no-cd]
+sqlx-db-reset:
+    ./scripts/dev/sqlx-db.sh reset
+
+[no-cd]
+sqlx-db-destroy:
+    ./scripts/dev/sqlx-db.sh destroy
+
+[no-cd]
 prepare $SQLX_OFFLINE="false":
     DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx prepare --workspace -- --all-features --all-targets
 

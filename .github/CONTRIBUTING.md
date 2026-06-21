@@ -36,7 +36,7 @@ rustup component add rustfmt clippy
 pipx install pre-commit   # or: pip install --user pre-commit
 
 # Tools used by hooks and checks
-cargo install sqlx-cli       # for SQLx prepare/check
+cargo install sqlx-cli       # for SQLx prepare/check (included in Nix dev shells)
 cargo install cargo-deny     # for license/advisory checks
 ```
 
@@ -84,22 +84,19 @@ cargo test -p ferrex-player-app --test ui_end_to_end
 
 ## Database and SQLx
 
-Parts of the codebase use SQLx with offline metadata under `./.sqlx/`.
+Parts of the codebase use SQLx with offline metadata under `./.sqlx/`. Prefer the disposable per-worktree PostgreSQL workflow in [`docs/sqlx-postgres-workflow.md`](../docs/sqlx-postgres-workflow.md) when preparing or checking SQLx metadata; it uses Nix-provided PostgreSQL with `pg_uuidv7`, Unix sockets, no passwords, and no `.env`/production URL dependency.
 
-- To verify queries without network/DB access, run the offline check:
+```bash
+nix develop .#server
+./scripts/dev/sqlx-db.sh start          # or: just sqlx-db-start
+./scripts/dev/sqlx-db.sh migrate        # or: just sqlx-db-migrate
+./scripts/dev/sqlx-db.sh prepare        # or: just sqlx-db-prepare
+./scripts/dev/sqlx-db.sh prepare-check  # or: just sqlx-db-prepare-check
+./scripts/dev/sqlx-db.sh stop           # or: just sqlx-db-stop
+./scripts/dev/sqlx-db.sh destroy        # or: just sqlx-db-destroy
+```
 
-  ```bash
-  SQLX_OFFLINE=true cargo sqlx prepare --workspace --check
-  ```
-
-- If you change queries or migrations, update the metadata (requires a DB):
-
-  ```bash
-  # ensure the stack is up (just start) and DATABASE_URL is set via .env
-  just prepare
-  # or
-  cargo sqlx prepare --workspace -- --all-features --all-targets
-  ```
+Use `./scripts/dev/sqlx-db.sh reset` to recreate an empty migrated database for the current worktree. The script writes `.env.sqlx` with safe local `DATABASE_URL` and `DATABASE_URL_ADMIN` values for manual commands.
 
 ## Git Hooks (pre-commit)
 
