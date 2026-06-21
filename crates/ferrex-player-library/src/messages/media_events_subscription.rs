@@ -472,21 +472,29 @@ mod tests {
         scan_id: uuid::Uuid,
         library_id: LibraryId,
     ) -> ScanProgressEvent {
+        sample_scan_progress_with_sequence(scan_id, library_id, 1)
+    }
+
+    fn sample_scan_progress_with_sequence(
+        scan_id: uuid::Uuid,
+        library_id: LibraryId,
+        sequence: u64,
+    ) -> ScanProgressEvent {
         ScanProgressEvent {
             version: "1".into(),
             scan_id,
             library_id,
             status: "running".into(),
-            completed_items: 1,
+            completed_items: sequence.min(10),
             total_items: 10,
-            validated_items: 1,
+            validated_items: sequence.min(10),
             known_unchanged_items: 0,
             skipped_items: 0,
             failed_items: 0,
             needs_attention_items: 0,
             retrying_items: 0,
-            sequence: 1,
-            current_path: Some("/media/movie.mkv".into()),
+            sequence,
+            current_path: Some(format!("/media/movie-{sequence}.mkv")),
             path_key: None,
             p95_stage_latencies_ms: ScanStageLatencySummary {
                 scan: 1,
@@ -494,7 +502,7 @@ mod tests {
                 index: 3,
             },
             correlation_id: scan_id,
-            idempotency_key: "scan-progress".into(),
+            idempotency_key: format!("scan-progress-{sequence}"),
             emitted_at: chrono::Utc::now(),
             terminal_at: None,
             reason_details: Vec::new(),
@@ -553,6 +561,74 @@ mod tests {
                 "scan media SSE events must not request dashboard refreshes"
             );
         }
+    }
+
+    #[test]
+    fn catalog_media_events_survive_high_volume_scan_progress() {
+        let library_id = LibraryId::new();
+        let scan_id = uuid::Uuid::now_v7();
+        let batch_id = MovieBatchId::new(7).expect("valid batch id");
+        let series_id = SeriesID::new();
+        let api: Arc<dyn ApiService> = Arc::new(TestApiService::default());
+        let state = MediaEventState::new("http://localhost".into(), api);
+
+        let mut movie_fetches = Vec::new();
+        let mut series_fetches = Vec::new();
+        let mut dashboard_refreshes = 0usize;
+
+        for sequence in 1..=1_000 {
+            let mut events = vec![MediaEvent::ScanProgress {
+                scan_id,
+                progress: sample_scan_progress_with_sequence(
+                    scan_id, library_id, sequence,
+                ),
+            }];
+
+            if sequence == 250 {
+                events.push(MediaEvent::MovieBatchFinalized {
+                    library_id,
+                    batch_id,
+                });
+            }
+            if sequence == 750 {
+                events.push(MediaEvent::SeriesBundleFinalized {
+                    library_id,
+                    series_id,
+                });
+            }
+
+            for event in events {
+                let Some(message) = state.convert_media_event(event) else {
+                    continue;
+                };
+
+                match message {
+                    LibraryMessage::FetchMovieBatch {
+                        library_id,
+                        batch_id,
+                    } => movie_fetches.push((library_id, batch_id)),
+                    LibraryMessage::FetchSeriesBundle {
+                        library_id,
+                        series_id,
+                    } => series_fetches.push((library_id, series_id)),
+                    LibraryMessage::RefreshScanDashboard(_)
+                    | LibraryMessage::RefreshScanDashboardRun(_) => {
+                        dashboard_refreshes += 1;
+                    }
+                    other => panic!(
+                        "unexpected media subscription message: {}",
+                        other.name()
+                    ),
+                }
+            }
+        }
+
+        assert_eq!(movie_fetches, vec![(library_id, batch_id)]);
+        assert_eq!(series_fetches, vec![(library_id, series_id)]);
+        assert_eq!(
+            dashboard_refreshes, 0,
+            "scan progress on the media stream must not trigger dashboard refreshes"
+        );
     }
 
     #[test]
