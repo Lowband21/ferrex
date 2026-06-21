@@ -12,9 +12,6 @@ pub mod types;
 pub use routes::v1;
 pub use scan::{
     IncrementalScanPolicyView, IncrementalScanStatusView,
-    ManifestDeferredWatchHintsHealthView, ManifestDiagnosticCodeCountView,
-    ManifestRunStatusCountsView, ManifestScanConfigView,
-    ManifestScanHealthView, OrchestratorConfigView, ScanConfig, ScanMetrics,
-    ScanQueueDepths,
+    OrchestratorConfigView, ScanConfig, ScanMetrics, ScanQueueDepths,
 };
 pub use types::*;

@@ -148,9 +148,7 @@ max_jobs_per_library = 64
 max_root_entries_per_library = 256
 ```
 
-Invalid scanner config fails during startup with the field path in the error (for example, `scanner.orchestrator.watch.poll_interval_ms must be greater than 0`). Operators can inspect the effective policy and health counters via the scan config/metrics/status endpoints; these report watch strategy, poll/debounce/batch settings, maintenance sweep policy, media/ignore filters, watcher registrations, replay lag, stale cursor counts, overflow events, manifest run counts, deferred watch hints, diagnostics grouped by code, stale partition counts, stuck run/library indicators, and oldest manifest lag.
-
-The stable Movies/Series layout contract and diagnostic code taxonomy are documented in `docs/scanner-layout-contract.md` and codified in `ferrex_core::domain::scan::manifest`.
+Invalid scanner config fails during startup with the field path in the error (for example, `scanner.orchestrator.watch.poll_interval_ms must be greater than 0`). Operators can inspect the effective policy and health counters via the scan config/metrics/status endpoints; these report watch strategy, poll/debounce/batch settings, maintenance sweep policy, media/ignore filters, watcher registrations, replay lag, stale cursor counts, and overflow events.
 
 ## Logging
 

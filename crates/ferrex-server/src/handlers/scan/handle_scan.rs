@@ -10,28 +10,13 @@ use base64::{
 use ferrex_core::api::ScanQueueDepths;
 use ferrex_core::api::types::{
     ActiveScansResponse, ApiResponse, LatestProgressResponse,
-    ScanCommandAcceptedResponse, ScanCommandRequest, ScanFailureDebugDetails,
-    ScanFailureDto, ScanPageMeta, ScanRecoveryRequest, ScanRecoveryResponse,
-    ScanReplayGapResponse, ScanReplayInfo, ScanRunDetailResponse, ScanRunDto,
-    ScanRunEventDto, ScanRunEventsPageResponse, ScanRunFailuresPageResponse,
-    ScanRunListResponse, ScanSnapshotDto, ScanStartDisposition,
-    ScannerHealthResponse, StartScanRequest, display_text_for_scan_failure,
-    display_text_for_scan_status,
-};
-use ferrex_core::database::repository_ports::catalog_events::CatalogEventRecord;
-use ferrex_core::domain::scan::manifest::{
-    DEFAULT_MANIFEST_WALK_BATCH_LIMIT, DEFAULT_MANIFEST_WALK_MAX_DEPTH,
-    DEFAULT_MANIFEST_WALK_PARTITION_LIMIT, ManifestDiagnosticReason,
+    ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
+    ScanStartDisposition, StartScanRequest,
 };
 use ferrex_core::error::MediaError;
-use ferrex_core::scan_observability::{
-    ScanRunEventRecord, ScanRunFailurePageRequest, ScanRunFailureSummary,
-    ScanRunPageRequest, ScanRunRecord, ScanRunStatus,
-};
-use ferrex_core::types::{LibraryId, ScanProgressEvent};
+use ferrex_core::types::{LibraryId, MediaEvent, ScanProgressEvent};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tracing::warn;
@@ -39,17 +24,15 @@ use uuid::Uuid;
 
 use crate::infra::app_state::AppState;
 use crate::infra::demo_mode;
-use crate::infra::scan::catalog_event_bus::CatalogEventFrame;
 use crate::infra::scan::scan_manager::{
     ScanBroadcastFrame, ScanCommandAccepted, ScanControlError,
-    ScanControlPlane, ScanHistoryEntry, ScanRecoveryAccepted, ScanReplayGap,
-    ScanRunEventReplayPage,
+    ScanControlPlane, ScanHistoryEntry,
 };
 use ferrex_core::api::scan::{
     BudgetConfigView, BulkModeView, IncrementalScanPolicyView,
     IncrementalScanStatusView, LeaseConfigView, MaintenanceConfigView,
-    ManifestScanConfigView, MetadataLimitsView, OrchestratorConfigView,
-    QueueConfigView, RetryConfigView, ScanConfig, ScanMetrics, WatchConfigView,
+    MetadataLimitsView, OrchestratorConfigView, QueueConfigView,
+    RetryConfigView, ScanConfig, ScanMetrics, WatchConfigView,
 };
 
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
@@ -59,50 +42,18 @@ const MEDIA_EVENT_REPLAY_WINDOW: Duration = Duration::from_secs(10 * 60);
 pub struct ScanHttpError {
     status: StatusCode,
     message: String,
-    replay_gap: Option<ScanReplayGapResponse>,
-}
-
-impl ScanHttpError {
-    fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            message: message.into(),
-            replay_gap: None,
-        }
-    }
 }
 
 impl From<ScanControlError> for ScanHttpError {
     fn from(error: ScanControlError) -> Self {
         let status = error.status_code();
-        let replay_gap = match &error {
-            ScanControlError::ReplayGap(gap) => {
-                Some(scan_replay_gap_response(gap))
-            }
-            _ => None,
-        };
         let message = error.message();
-        Self {
-            status,
-            message,
-            replay_gap,
-        }
+        Self { status, message }
     }
 }
 
 impl IntoResponse for ScanHttpError {
     fn into_response(self) -> axum::response::Response {
-        if let Some(replay_gap) = self.replay_gap {
-            let payload = Json(json!({
-                "status": "error",
-                "error": self.message,
-                "message": replay_gap.recovery_hint,
-                "recoverable": true,
-                "recovery": replay_gap,
-            }));
-            return (self.status, payload).into_response();
-        }
-
         let payload = Json(ApiResponse::<()>::error(self.message));
         (self.status, payload).into_response()
     }
@@ -121,28 +72,6 @@ pub struct ProgressQuery {
 #[derive(Debug, Deserialize)]
 pub struct MediaEventsQuery {
     pub last_sequence: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RunsQuery {
-    pub library_id: Option<Uuid>,
-    pub status: Option<String>,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RunEventsQuery {
-    pub after_sequence: Option<u64>,
-    pub limit: Option<usize>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RunFailuresQuery {
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
-    #[serde(default)]
-    pub debug: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -165,10 +94,10 @@ pub async fn start_scan_handler(
     if demo_mode::is_demo_mode(&state)
         && !demo_mode::is_demo_library(&LibraryId(library_id))
     {
-        return Err(ScanHttpError::new(
-            StatusCode::NOT_FOUND,
-            "Library not found",
-        ));
+        return Err(ScanHttpError {
+            status: StatusCode::NOT_FOUND,
+            message: "Library not found".to_string(),
+        });
     }
 
     let accepted = state
@@ -326,164 +255,6 @@ pub async fn scan_events_handler(
     })))
 }
 
-pub async fn scan_runs_handler(
-    State(state): State<AppState>,
-    Query(query): Query<RunsQuery>,
-) -> Result<Json<ApiResponse<ScanRunListResponse>>, ScanHttpError> {
-    let limit = query.limit.unwrap_or(25).clamp(1, 100);
-    let offset = query.offset.unwrap_or(0);
-    let status = parse_run_status_filter(query.status.as_deref())?;
-    let page = state
-        .scan_control()
-        .runs_page(ScanRunPageRequest {
-            library_id: query.library_id.map(LibraryId),
-            status,
-            limit: limit as i64,
-            offset: offset.min(i64::MAX as usize) as i64,
-        })
-        .await?;
-    let total = page.total.max(0) as usize;
-    let runs = page
-        .runs
-        .into_iter()
-        .map(|run| scan_run_to_dto(run, None))
-        .collect::<Vec<_>>();
-    let page_meta = ScanPageMeta::new(limit, offset, runs.len(), total);
-
-    Ok(Json(ApiResponse::success(ScanRunListResponse {
-        runs,
-        page: page_meta,
-    })))
-}
-
-pub async fn scan_run_detail_handler(
-    State(state): State<AppState>,
-    Path(scan_id): Path<Uuid>,
-) -> Result<Json<ApiResponse<ScanRunDetailResponse>>, ScanHttpError> {
-    let run = state.scan_control().run_detail(scan_id).await?;
-    let terminal_summary = run.terminal_summary.clone();
-    Ok(Json(ApiResponse::success(ScanRunDetailResponse {
-        run: scan_run_to_dto(run, None),
-        terminal_summary,
-    })))
-}
-
-pub async fn scan_run_events_handler(
-    State(state): State<AppState>,
-    Path(scan_id): Path<Uuid>,
-    Query(query): Query<RunEventsQuery>,
-) -> Result<Json<ApiResponse<ScanRunEventsPageResponse>>, ScanHttpError> {
-    let limit = query.limit.unwrap_or(100).clamp(1, 500);
-    let replay = state
-        .scan_control()
-        .run_events_page(scan_id, query.after_sequence, limit as i64)
-        .await?;
-    let events = replay
-        .events
-        .iter()
-        .cloned()
-        .map(scan_event_to_dto)
-        .collect::<Vec<_>>();
-    let page = ScanPageMeta::new(
-        limit,
-        query.after_sequence.unwrap_or(0) as usize,
-        events.len(),
-        replay.bounds.max_sequence.unwrap_or(0).max(0) as usize,
-    );
-
-    Ok(Json(ApiResponse::success(ScanRunEventsPageResponse {
-        scan_id,
-        events,
-        page,
-        replay: Some(replay_info(&replay)),
-    })))
-}
-
-pub async fn scan_run_failures_handler(
-    State(state): State<AppState>,
-    Path(scan_id): Path<Uuid>,
-    Query(query): Query<RunFailuresQuery>,
-) -> Result<Json<ApiResponse<ScanRunFailuresPageResponse>>, ScanHttpError> {
-    let limit = query.limit.unwrap_or(50).clamp(1, 100);
-    let offset = query.offset.unwrap_or(0);
-    let page = state
-        .scan_control()
-        .run_failures_page(ScanRunFailurePageRequest {
-            run_id: scan_id,
-            limit: limit as i64,
-            offset: offset.min(i64::MAX as usize) as i64,
-        })
-        .await?;
-    let total = page.total.max(0) as usize;
-    let failures = page
-        .failures
-        .into_iter()
-        .map(|failure| scan_failure_to_dto(failure, query.debug))
-        .collect::<Vec<_>>();
-
-    Ok(Json(ApiResponse::success(ScanRunFailuresPageResponse {
-        scan_id,
-        page: ScanPageMeta::new(limit, offset, failures.len(), total),
-        failures,
-    })))
-}
-
-pub async fn scanner_health_handler(
-    State(state): State<AppState>,
-) -> Result<Json<ApiResponse<ScannerHealthResponse>>, ScanHttpError> {
-    let queue_depths = state
-        .scan_control()
-        .orchestrator()
-        .queue_depths()
-        .await
-        .map_err(|e: MediaError| {
-            ScanHttpError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
-    let active_scans = state.scan_control().active_scans().await.len();
-    let incremental = incremental_status(&state).await?;
-    let retained = state
-        .scan_control()
-        .runs_page(ScanRunPageRequest {
-            library_id: None,
-            status: None,
-            limit: 1,
-            offset: 0,
-        })
-        .await?;
-    let failed = state
-        .scan_control()
-        .runs_page(ScanRunPageRequest {
-            library_id: None,
-            status: Some(ScanRunStatus::Failed),
-            limit: 1,
-            offset: 0,
-        })
-        .await?;
-
-    Ok(Json(ApiResponse::success(ScannerHealthResponse {
-        queue_depths,
-        active_scans,
-        retained_runs: retained.total.max(0) as usize,
-        failed_runs: failed.total.max(0) as usize,
-        incremental,
-    })))
-}
-
-pub async fn scan_recovery_handler(
-    State(state): State<AppState>,
-    Json(request): Json<ScanRecoveryRequest>,
-) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state
-        .scan_control()
-        .recover_path(request.library_id, &request.path, request.correlation_id)
-        .await?;
-
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(ApiResponse::success(recovery_response(accepted))),
-    ))
-}
-
 pub async fn scan_progress_sse_handler(
     State(state): State<AppState>,
     Path(scan_id): Path<Uuid>,
@@ -514,15 +285,15 @@ pub async fn scan_metrics_handler(
         .orchestrator()
         .queue_depths()
         .await
-        .map_err(|e: MediaError| {
-            ScanHttpError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        .map_err(|e: MediaError| ScanHttpError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: e.to_string(),
         })?;
     let active = state.scan_control().active_scans().await.len();
     let incremental = incremental_status(&state).await?;
     Ok(Json(ApiResponse::success(ScanMetrics {
         queue_depths: depths,
         active_scans: active,
-        manifest: incremental.manifest.clone(),
         incremental,
     })))
 }
@@ -580,7 +351,6 @@ pub async fn scan_config_handler(
                 .max_root_entries_per_library,
             error_backoff_ms: cfg.maintenance.error_backoff_ms,
             run_stall_timeout_ms: cfg.maintenance.run_stall_timeout_ms,
-            scan_run_retention_days: cfg.maintenance.scan_run_retention_days,
         },
         lease: LeaseConfigView {
             lease_ttl_secs: cfg.lease.lease_ttl_secs,
@@ -610,9 +380,6 @@ pub async fn scan_config_handler(
         maintenance_max_root_entries_per_library: cfg
             .maintenance
             .max_root_entries_per_library,
-        maintenance_scan_run_retention_days: cfg
-            .maintenance
-            .scan_run_retention_days,
         media_extensions: scanner.video_extensions.clone(),
         ignored_extensions: scanner.ignored_extensions.clone(),
         ignored_path_patterns: scanner.ignored_path_patterns.clone(),
@@ -621,33 +388,7 @@ pub async fn scan_config_handler(
     Ok(Json(ApiResponse::success(ScanConfig {
         orchestrator: view,
         incremental_policy,
-        manifest: manifest_scan_config_view(),
     })))
-}
-
-fn manifest_scan_config_view() -> ManifestScanConfigView {
-    ManifestScanConfigView {
-        max_entries_per_batch: DEFAULT_MANIFEST_WALK_BATCH_LIMIT,
-        max_entries_per_partition: DEFAULT_MANIFEST_WALK_PARTITION_LIMIT,
-        max_depth: DEFAULT_MANIFEST_WALK_MAX_DEPTH,
-        supported_movie_layouts: vec![
-            "/Movies/Alien.mkv".to_string(),
-            "/Movies/Alien (1979)/Alien.mkv".to_string(),
-        ],
-        supported_series_layouts: vec![
-            "/Series/Fringe/Season 01/S01E01.mkv".to_string(),
-            "/Series/Fringe/Specials/S00E01.mkv".to_string(),
-            "/Series/Fringe/S01E02.mkv".to_string(),
-        ],
-        diagnostic_codes: manifest_diagnostic_codes(),
-    }
-}
-
-fn manifest_diagnostic_codes() -> Vec<String> {
-    ManifestDiagnosticReason::all()
-        .iter()
-        .map(|reason| reason.code().to_string())
-        .collect()
 }
 
 async fn incremental_status(
@@ -658,11 +399,9 @@ async fn incremental_status(
         .orchestrator()
         .incremental_status()
         .await
-        .map_err(|err| {
-            ScanHttpError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                err.to_string(),
-            )
+        .map_err(|err| ScanHttpError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: err.to_string(),
         })
 }
 
@@ -670,149 +409,6 @@ fn watch_strategy_label(
     strategy: ferrex_core::domain::scan::orchestration::config::WatchStrategy,
 ) -> String {
     format!("{strategy:?}").to_ascii_lowercase()
-}
-
-fn parse_run_status_filter(
-    raw: Option<&str>,
-) -> Result<Option<ScanRunStatus>, ScanHttpError> {
-    raw.map(|value| {
-        ScanRunStatus::from_str(value).ok_or_else(|| {
-            ScanHttpError::new(
-                StatusCode::BAD_REQUEST,
-                format!("invalid scan run status filter: {value}"),
-            )
-        })
-    })
-    .transpose()
-}
-
-fn scan_run_to_dto(
-    run: ScanRunRecord,
-    has_failures: Option<bool>,
-) -> ScanRunDto {
-    let status = run.status.as_str().to_string();
-    let display = display_text_for_scan_status(&status);
-    ScanRunDto {
-        scan_id: run.id,
-        library_id: run.library_id,
-        source: run.source.as_str().to_string(),
-        status,
-        status_label: display.label,
-        status_message: display.message,
-        completed_items: run.completed_items.max(0) as u64,
-        total_items: run.total_items.max(0) as u64,
-        retrying_items: run.retrying_items.max(0) as u64,
-        dead_lettered_items: run.dead_lettered_items.max(0) as u64,
-        correlation_id: run.correlation_id,
-        idempotency_key: run.idempotency_key,
-        current_path: run.current_path,
-        started_at: run.started_at,
-        last_event_at: run.last_event_at,
-        terminal_at: run.terminal_at,
-        sequence: run.sequence.max(0) as u64,
-        has_failures: has_failures.unwrap_or(
-            run.dead_lettered_items > 0 || run.status == ScanRunStatus::Failed,
-        ),
-    }
-}
-
-fn scan_event_to_dto(record: ScanRunEventRecord) -> ScanRunEventDto {
-    let display = display_text_for_scan_status(&record.status);
-    ScanRunEventDto {
-        event_id: record.id,
-        scan_id: record.run_id,
-        library_id: record.library_id,
-        sequence: record.sequence.max(0) as u64,
-        event_kind: record.event_kind,
-        status: record.status,
-        status_label: display.label,
-        status_message: display.message,
-        correlation_id: record.correlation_id,
-        idempotency_key: record.idempotency_key,
-        subject_key: record.subject_key,
-        current_path: record.current_path,
-        occurred_at: record.occurred_at,
-        completed_items: record.completed_items.max(0) as u64,
-        total_items: record.total_items.max(0) as u64,
-        retrying_items: record.retrying_items.max(0) as u64,
-        dead_lettered_items: record.dead_lettered_items.max(0) as u64,
-        payload: record.payload,
-    }
-}
-
-fn scan_failure_to_dto(
-    failure: ScanRunFailureSummary,
-    include_debug: bool,
-) -> ScanFailureDto {
-    let display =
-        display_text_for_scan_failure(&failure.category, &failure.message_code);
-    let debug = include_debug.then(|| ScanFailureDebugDetails {
-        raw_debug_details: failure.raw_debug_details.clone(),
-        last_error: failure.last_error.clone(),
-        job_id: failure.job_id,
-        idempotency_key: failure.idempotency_key.clone(),
-    });
-
-    ScanFailureDto {
-        scan_id: failure.run_id,
-        library_id: failure.library_id,
-        subject_key: failure.subject_key,
-        category: failure.category,
-        category_label: display.label,
-        message_code: failure.message_code,
-        message: display.message,
-        occurrences: failure.occurrences.max(1) as u32,
-        first_seen_at: failure.first_seen_at,
-        last_seen_at: failure.last_seen_at,
-        retryable: failure.retryable,
-        debug,
-    }
-}
-
-fn replay_info(replay: &ScanRunEventReplayPage) -> ScanReplayInfo {
-    ScanReplayInfo {
-        requested_after_sequence: replay.requested_after_sequence,
-        min_available_sequence: replay
-            .bounds
-            .min_sequence
-            .map(|value| value.max(0) as u64),
-        max_available_sequence: replay
-            .bounds
-            .max_sequence
-            .map(|value| value.max(0) as u64),
-        next_sequence: replay.next_sequence,
-        recoverable: true,
-        recovery_hint: "Use the latest returned sequence as Last-Event-ID; if the stream reports a gap, refetch this run's events without a cursor.".to_string(),
-    }
-}
-
-fn scan_replay_gap_response(gap: &ScanReplayGap) -> ScanReplayGapResponse {
-    ScanReplayGapResponse {
-        scan_id: gap.scan_id,
-        requested_after_sequence: gap.requested_after_sequence,
-        min_available_sequence: gap.min_available_sequence,
-        max_available_sequence: gap.max_available_sequence,
-        recoverable: true,
-        recovery_hint: "Requested scan events are no longer retained. Refetch the run detail/events without Last-Event-ID, then resume from the newest sequence.".to_string(),
-    }
-}
-
-fn recovery_response(accepted: ScanRecoveryAccepted) -> ScanRecoveryResponse {
-    ScanRecoveryResponse {
-        library_id: accepted.library_id,
-        path: accepted.original_path,
-        normalized_path: accepted.normalized_path,
-        job_id: accepted.handle.job_id.0,
-        accepted: accepted.handle.accepted,
-        merged_into: accepted.handle.merged_into.map(|job_id| job_id.0),
-        idempotency_key: accepted.handle.dedupe_key,
-        message: if accepted.handle.accepted {
-            "Recovery scan enqueued without deleting user data.".to_string()
-        } else {
-            "Recovery scan already queued; existing retry work was reused."
-                .to_string()
-        },
-    }
 }
 
 pub async fn build_scan_progress_stream(
@@ -829,24 +425,22 @@ pub async fn build_scan_progress_stream(
     >,
     ScanControlError,
 > {
-    let replay = scan_control
-        .run_events_page(scan_id, last_sequence, 500)
-        .await?;
+    let history = scan_control.events(&scan_id).await?;
     let receiver = match scan_control.subscribe_scan(scan_id).await {
         Ok(receiver) => Some(receiver),
-        Err(ScanControlError::ScanNotFound) => None,
+        Err(ScanControlError::ScanNotFound) if !history.is_empty() => None,
         Err(err) => return Err(err),
     };
 
     Ok(scan_progress_stream_from_parts(
-        replay.events,
+        history,
         receiver,
         last_sequence,
     ))
 }
 
 fn scan_progress_stream_from_parts(
-    history: Vec<ScanRunEventRecord>,
+    history: Vec<ScanBroadcastFrame>,
     receiver: Option<tokio::sync::broadcast::Receiver<ScanBroadcastFrame>>,
     last_sequence: Option<u64>,
 ) -> Pin<
@@ -856,26 +450,17 @@ fn scan_progress_stream_from_parts(
             + 'static,
     >,
 > {
-    let mut history_last_sequence = last_sequence.unwrap_or(0);
-    let history_events = history
-        .into_iter()
-        .filter_map(ScanBroadcastFrame::from_observability)
-        .filter_map(|frame| {
-            history_last_sequence =
-                history_last_sequence.max(frame.payload.sequence);
-            scan_frame_to_event(frame)
-        })
-        .map(Ok::<Event, Infallible>)
-        .collect::<Vec<_>>();
+    let history_events = scan_progress_history_events(history, last_sequence);
     let history_stream = tokio_stream::iter(history_events);
 
     let Some(receiver) = receiver else {
         return Box::pin(history_stream);
     };
 
+    let initial_sequence = last_sequence.unwrap_or(0);
     let live_stream = async_stream::stream! {
         let mut live_receiver = BroadcastStream::new(receiver);
-        let mut last_seen_sequence = history_last_sequence;
+        let mut last_seen_sequence = initial_sequence;
         use tokio_stream::StreamExt;
 
         while let Some(frame_result) = live_receiver.next().await {
@@ -899,7 +484,6 @@ fn scan_progress_stream_from_parts(
     Box::pin(history_stream.chain(live_stream))
 }
 
-#[cfg(test)]
 fn scan_progress_history_events(
     history: Vec<ScanBroadcastFrame>,
     last_sequence: Option<u64>,
@@ -920,80 +504,42 @@ pub async fn media_events_sse_handler(
     State(state): State<AppState>,
     Query(query): Query<MediaEventsQuery>,
     headers: HeaderMap,
-) -> Result<
-    Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>,
-    ScanHttpError,
-> {
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let resume_from = query.last_sequence.or_else(|| {
         headers
             .get(LAST_EVENT_ID_HEADER)
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.trim().parse::<u64>().ok())
+            .and_then(|value| value.parse::<u64>().ok())
     });
 
     let scan_control = state.scan_control();
-    let receiver = scan_control.subscribe_catalog_events();
-    let uow = state.unit_of_work();
+    let receiver = scan_control.subscribe_media_events();
 
     let history = match resume_from {
         Some(sequence) => {
-            uow.catalog_events.list_after_sequence(sequence).await
+            scan_control.media_event_history_since_sequence(sequence)
         }
         None => {
-            let replay_seconds = MEDIA_EVENT_REPLAY_WINDOW.as_secs() as i64;
+            let now = std::time::Instant::now();
             let cutoff =
-                chrono::Utc::now() - chrono::Duration::seconds(replay_seconds);
-            uow.catalog_events.list_since(cutoff).await
+                now.checked_sub(MEDIA_EVENT_REPLAY_WINDOW).unwrap_or(now);
+            scan_control.media_event_history_since_instant(cutoff)
         }
-    }
-    .map_err(|err| {
-        ScanHttpError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to replay catalog events: {err}"),
-        )
-    })?;
+    };
 
-    let stream =
-        catalog_events_stream_from_parts(history, Some(receiver), resume_from);
-    Ok(Sse::new(stream).keep_alive(default_keep_alive()))
-}
-
-fn catalog_events_stream_from_parts(
-    history: Vec<CatalogEventRecord>,
-    receiver: Option<tokio::sync::broadcast::Receiver<CatalogEventFrame>>,
-    last_sequence: Option<u64>,
-) -> Pin<
-    Box<
-        dyn tokio_stream::Stream<Item = Result<Event, Infallible>>
-            + Send
-            + 'static,
-    >,
-> {
-    let mut history_last_sequence = last_sequence.unwrap_or(0);
+    let mut history_last_sequence = resume_from.unwrap_or(0);
     let history_events = history
         .into_iter()
-        .filter_map(|record| {
-            if record.sequence <= history_last_sequence {
-                return None;
-            }
-
-            history_last_sequence = history_last_sequence.max(record.sequence);
-            CatalogEventFrame::try_from(record)
-                .ok()
-                .and_then(catalog_frame_to_sse)
+        .filter_map(|frame| {
+            history_last_sequence = history_last_sequence.max(frame.sequence);
+            media_frame_to_sse(frame)
         })
         .map(Ok::<Event, Infallible>)
         .collect::<Vec<_>>();
     let history_stream = tokio_stream::iter(history_events);
 
-    let Some(receiver) = receiver else {
-        return Box::pin(history_stream);
-    };
-
-    // Stream catalog invalidation events for the `/events/media` SSE route.
-    // Frames with a durable sequence come from committed catalog_events rows;
-    // live-only wake-ups do not advance the client's replay cursor.
-    let live_stream = async_stream::stream! {
+    // Stream media events, but ensure primary poster availability for new movies/series
+    let stream = async_stream::stream! {
         let mut live = BroadcastStream::new(receiver);
         use tokio_stream::StreamExt;
 
@@ -1001,25 +547,24 @@ fn catalog_events_stream_from_parts(
         while let Some(item) = live.next().await {
             match item {
                 Ok(frame) => {
-                    if let Some(sequence) = frame.sequence {
-                        if sequence <= last_seen_sequence {
-                            continue;
-                        }
-                        last_seen_sequence = sequence;
+                    if frame.sequence <= last_seen_sequence {
+                        continue;
                     }
+                    last_seen_sequence = frame.sequence;
                     //let event = maybe_prepare_and_refresh(&state, event).await;
-                    if let Some(sse) = catalog_frame_to_sse(frame) {
+                    if let Some(sse) = media_frame_to_sse(frame) {
                         yield Ok::<Event, Infallible>(sse);
                     }
                 }
                 Err(err) => {
-                    warn!("catalog event broadcast error: {err}");
+                    warn!("media event broadcast error: {err}");
                 }
             }
         }
     };
 
-    Box::pin(history_stream.chain(live_stream))
+    let stream = history_stream.chain(stream);
+    Sse::new(stream).keep_alive(default_keep_alive())
 }
 
 fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
@@ -1032,15 +577,16 @@ fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
     })
 }
 
-fn catalog_frame_to_sse(frame: CatalogEventFrame) -> Option<Event> {
+fn media_frame_to_sse(
+    frame: crate::infra::scan::media_event_bus::MediaEventFrame,
+) -> Option<Event> {
     let name = frame.event.sse_event_type().event_name();
 
-    encode_catalog_event(&frame.event).map(|data| {
-        let mut event = Event::default().event(name).data(data);
-        if let Some(sequence) = frame.sequence {
-            event = event.id(sequence.to_string());
-        }
-        event
+    encode_media_event(&frame.event).map(|data| {
+        Event::default()
+            .event(name)
+            .id(frame.sequence.to_string())
+            .data(data)
     })
 }
 
@@ -1108,14 +654,11 @@ fn catalog_frame_to_sse(frame: CatalogEventFrame) -> Option<Event> {
 //     }
 // }
 
-fn encode_catalog_event(
-    event: &crate::infra::scan::catalog_event_bus::CatalogEvent,
-) -> Option<String> {
-    let media_event = event.to_media_event();
-    to_bytes::<RkyvError>(&media_event)
+fn encode_media_event(event: &MediaEvent) -> Option<String> {
+    to_bytes::<RkyvError>(event)
         .map(|bytes| BASE64_STANDARD.encode(bytes.as_slice()))
         .map_err(|err| {
-            warn!("failed to serialize catalog event with rkyv: {err}");
+            warn!("failed to serialize media event with rkyv: {err}");
             err
         })
         .ok()
@@ -1182,206 +725,6 @@ mod sse_tests {
         }
     }
 
-    fn catalog_record(sequence: u64) -> CatalogEventRecord {
-        use ferrex_core::database::repository_ports::catalog_events::CatalogEventKind;
-        use ferrex_core::types::MovieBatchId;
-
-        let library_id = LibraryId(Uuid::from_u128(1));
-        let batch_id = MovieBatchId::new(2).unwrap();
-        CatalogEventRecord {
-            sequence,
-            kind: CatalogEventKind::MovieBatchFinalized,
-            library_id,
-            entity_kind: "movie_batch".to_string(),
-            entity_id: None,
-            movie_batch_id: Some(batch_id),
-            payload: json!({
-                "library_id": library_id.to_uuid(),
-                "batch_id": batch_id.as_u32(),
-                "version": 1,
-            }),
-            idempotency_key: format!(
-                "catalog:movie_batch_finalized:{library_id}:{batch_id}:1"
-            ),
-            occurred_at: Utc::now(),
-        }
-    }
-
-    fn series_catalog_record(sequence: u64) -> CatalogEventRecord {
-        use ferrex_core::database::repository_ports::catalog_events::CatalogEventKind;
-        use ferrex_core::types::SeriesID;
-
-        let library_id = LibraryId(Uuid::from_u128(1));
-        let series_id = SeriesID(Uuid::from_u128(3));
-        CatalogEventRecord {
-            sequence,
-            kind: CatalogEventKind::SeriesBundleFinalized,
-            library_id,
-            entity_kind: "series".to_string(),
-            entity_id: Some(series_id.to_uuid()),
-            movie_batch_id: None,
-            payload: json!({
-                "library_id": library_id.to_uuid(),
-                "series_id": series_id.to_uuid(),
-                "version": 1,
-            }),
-            idempotency_key: format!(
-                "catalog:series_bundle_finalized:{library_id}:{series_id}:1"
-            ),
-            occurred_at: Utc::now(),
-        }
-    }
-
-    async fn render_sse_events(events: Vec<Event>) -> String {
-        use axum::{
-            body::to_bytes,
-            response::{IntoResponse, Sse},
-        };
-
-        let stream =
-            tokio_stream::iter(events.into_iter().map(Ok::<Event, Infallible>));
-        let response = Sse::new(stream).into_response();
-        let bytes = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("SSE body should render");
-        String::from_utf8(bytes.to_vec()).expect("SSE body should be UTF-8")
-    }
-
-    #[tokio::test]
-    async fn media_events_stream_excludes_scan_progress() {
-        use crate::infra::scan::catalog_event_bus::CatalogEventBus;
-        use tokio::time::timeout;
-        use tokio_stream::StreamExt as _;
-
-        let progress_event = scan_frame_to_event(frame(1))
-            .expect("scan progress frames should encode on scan SSE");
-        let progress_body = render_sse_events(vec![progress_event]).await;
-        assert!(
-            progress_body.contains("event: scan.progress"),
-            "sanity check should render scan progress on the scan SSE path"
-        );
-
-        let bus = CatalogEventBus::new(16);
-        let receiver = bus.subscribe();
-        let mut stream =
-            catalog_events_stream_from_parts(Vec::new(), Some(receiver), None);
-
-        for sequence in 1..=250 {
-            let _ = scan_frame_to_event(frame(sequence))
-                .expect("scan progress frames should continue to encode");
-        }
-
-        bus.publish_record(catalog_record(1))
-            .expect("movie batch finalization should publish");
-        bus.publish_record(series_catalog_record(2))
-            .expect("series bundle finalization should publish");
-
-        let mut catalog_events = Vec::new();
-        for _ in 0..2 {
-            catalog_events.push(
-                timeout(std::time::Duration::from_millis(100), stream.next())
-                    .await
-                    .expect("catalog event should arrive")
-                    .expect("catalog stream should remain open")
-                    .expect("catalog stream item should be infallible"),
-            );
-        }
-
-        let catalog_body = render_sse_events(catalog_events).await;
-        assert!(catalog_body.contains("event: media.movie_batch_finalized"));
-        assert!(catalog_body.contains("event: media.series_bundle_finalized"));
-        assert!(
-            !catalog_body.contains("event: scan.progress"),
-            "/events/media must not emit scan progress frames"
-        );
-    }
-
-    #[tokio::test]
-    async fn last_event_id_replays_catalog_finalizations_in_order() {
-        use tokio_stream::StreamExt as _;
-
-        let history = vec![
-            catalog_record(40),
-            catalog_record(41),
-            series_catalog_record(42),
-        ];
-        let mut stream =
-            catalog_events_stream_from_parts(history, None, Some(40));
-
-        let first = stream
-            .next()
-            .await
-            .expect("first missed catalog event should replay")
-            .expect("catalog stream item should be infallible");
-        let second = stream
-            .next()
-            .await
-            .expect("second missed catalog event should replay")
-            .expect("catalog stream item should be infallible");
-        assert!(
-            stream.next().await.is_none(),
-            "only catalog events after the Last-Event-ID cursor should replay"
-        );
-
-        let body = render_sse_events(vec![first, second]).await;
-        let id_41 = body.find("id: 41").expect("movie event id should render");
-        let movie_event = body
-            .find("event: media.movie_batch_finalized")
-            .expect("movie finalization should replay");
-        let id_42 = body.find("id: 42").expect("series event id should render");
-        let series_event = body
-            .find("event: media.series_bundle_finalized")
-            .expect("series finalization should replay");
-
-        assert!(id_41 < id_42, "replay ids should remain ordered");
-        assert!(
-            movie_event < series_event,
-            "replay events should preserve durable catalog order"
-        );
-        assert!(!body.contains("event: scan.progress"));
-    }
-
-    #[tokio::test]
-    async fn media_events_stream_replays_history_and_skips_duplicate_live_sequence()
-     {
-        use crate::infra::scan::catalog_event_bus::CatalogEventBus;
-        use tokio::time::timeout;
-        use tokio_stream::StreamExt as _;
-
-        let bus = CatalogEventBus::new(8);
-        let receiver = bus.subscribe();
-        let mut stream = catalog_events_stream_from_parts(
-            vec![catalog_record(10)],
-            Some(receiver),
-            Some(9),
-        );
-
-        assert!(
-            timeout(std::time::Duration::from_millis(100), stream.next())
-                .await
-                .expect("history event should arrive")
-                .is_some()
-        );
-
-        bus.publish_record(catalog_record(10))
-            .expect("duplicate record should publish to bus");
-        assert!(
-            timeout(std::time::Duration::from_millis(50), stream.next())
-                .await
-                .is_err(),
-            "duplicate live sequence should be skipped"
-        );
-
-        bus.publish_record(catalog_record(11))
-            .expect("next record should publish to bus");
-        assert!(
-            timeout(std::time::Duration::from_millis(100), stream.next())
-                .await
-                .expect("next durable event should arrive")
-                .is_some()
-        );
-    }
-
     #[test]
     fn scan_progress_sse_payloads_are_json_without_legacy_queue_field() {
         let payload = sample_progress(7);
@@ -1413,63 +756,5 @@ mod sse_tests {
             2
         );
         assert_eq!(scan_progress_history_events(history, Some(3)).len(), 0);
-    }
-}
-
-#[cfg(test)]
-mod observability_tests {
-    use super::*;
-    use chrono::Utc;
-
-    #[test]
-    fn run_status_filter_rejects_unknown_values() {
-        assert_eq!(
-            parse_run_status_filter(Some("failed")).unwrap(),
-            Some(ScanRunStatus::Failed)
-        );
-        let err = parse_run_status_filter(Some("dead_letter")).unwrap_err();
-        assert_eq!(err.status, StatusCode::BAD_REQUEST);
-    }
-
-    #[test]
-    fn failure_dto_hides_debug_details_by_default() {
-        let now = Utc::now();
-        let dto = scan_failure_to_dto(
-            ScanRunFailureSummary {
-                run_id: Uuid::now_v7(),
-                library_id: LibraryId(Uuid::now_v7()),
-                subject_key: "/media/movies/Broken".to_string(),
-                category: "filesystem_permission".to_string(),
-                message_code: "scan.folder_permission_denied".to_string(),
-                raw_debug_details: json!({"raw_error": "permission denied"}),
-                last_error: Some("permission denied".to_string()),
-                occurrences: 1,
-                first_seen_at: now,
-                last_seen_at: now,
-                retryable: true,
-                job_id: Some(Uuid::now_v7()),
-                idempotency_key: "folder:/media/movies/Broken".to_string(),
-            },
-            false,
-        );
-
-        assert_eq!(dto.category_label, "Permission issue");
-        assert!(dto.message.contains("permissions"));
-        assert!(dto.debug.is_none());
-    }
-
-    #[test]
-    fn replay_gap_response_is_recoverable() {
-        let scan_id = Uuid::now_v7();
-        let response = scan_replay_gap_response(&ScanReplayGap {
-            scan_id,
-            requested_after_sequence: 1,
-            min_available_sequence: Some(5),
-            max_available_sequence: Some(9),
-        });
-
-        assert_eq!(response.scan_id, scan_id);
-        assert!(response.recoverable);
-        assert!(response.recovery_hint.contains("Refetch"));
     }
 }

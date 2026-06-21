@@ -621,6 +621,10 @@ pub async fn manual_match_media_handler(
                 .await
             {
                 Ok(_) => {
+                    // Send update event
+                    if let Ok(movie) = state.unit_of_work().media_refs.get_movie_reference(&id).await {
+                        state.scan_control().publish_media_event(MediaEvent::MovieUpdated { movie });
+                    }
                     Ok(Json(ApiResponse::success(
                         "Movie TMDB ID updated".to_string(),
                     )))
@@ -641,6 +645,10 @@ pub async fn manual_match_media_handler(
                     // Update all episodes in this series
                     // TODO: This should cascade to seasons and episodes
 
+                    // Send update event
+                    if let Ok(series) = state.unit_of_work().media_refs.get_series_reference(&id).await {
+                        state.scan_control().publish_media_event(MediaEvent::SeriesUpdated { series });
+                    }
                     Ok(Json(ApiResponse::success(
                         "Series TMDB ID updated".to_string(),
                     )))

@@ -7,26 +7,19 @@ use chrono::{Duration, Utc};
 use ferrex_core::domain::users::auth::{
     device::AuthDeviceStatus, domain::value_objects::SessionScope,
 };
-use ferrex_core::{
-    api::scan::{IncrementalScanStatusView, ScanQueueDepths},
-    player_prelude::{
-        ActiveScansResponse, AuthToken, AuthenticatedDevice,
-        ConfirmClaimResponse, CreateLibraryRequest, FilterIndicesRequest,
-        ImageManifestRequest, ImageManifestResponse, LatestProgressResponse,
-        Library, LibraryId, LibraryType, Media, MediaQuery,
-        MediaRootBrowseResponse, MediaWithStatus, MovieBatchFetchRequest,
-        MovieBatchId, MovieBatchSyncRequest, MovieBatchSyncResponse, Platform,
-        Role, ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
-        ScanFailureDto, ScanLifecycleStatus, ScanMetrics, ScanPageMeta,
-        ScanRecoveryRequest, ScanRecoveryResponse, ScanRunDetailResponse,
-        ScanRunDto, ScanRunEventDto, ScanRunEventsPageResponse,
-        ScanRunFailuresPageResponse, ScanRunListResponse, ScanRunMode,
-        ScanStartDisposition, ScannerHealthResponse, SeriesBundleFetchRequest,
-        SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
-        StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
-        UpdateProgressRequest, User, UserPermissions, UserPreferences,
-        UserWatchState,
-    },
+use ferrex_core::player_prelude::{
+    ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse,
+    CreateLibraryRequest, FilterIndicesRequest, ImageManifestRequest,
+    ImageManifestResponse, LatestProgressResponse, Library, LibraryId,
+    LibraryType, Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
+    MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
+    MovieBatchSyncResponse, Platform, Role, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanConfig, ScanLifecycleStatus, ScanMetrics,
+    ScanRunMode, ScanStartDisposition, SeriesBundleFetchRequest,
+    SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
+    StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
+    UpdateProgressRequest, User, UserPermissions, UserPreferences,
+    UserWatchState,
 };
 use ferrex_model::MovieReferenceBatchSize;
 use ferrex_model::image::ImageQuery;
@@ -57,12 +50,6 @@ struct InnerApiState {
     current_user: Option<User>,
     current_permissions: Option<UserPermissions>,
     playback_ticket_result: Option<Result<String, String>>,
-    scan_health: ScannerHealthResponse,
-    scan_runs: Vec<ScanRunDto>,
-    scan_run_details: HashMap<Uuid, ScanRunDetailResponse>,
-    scan_run_events: HashMap<Uuid, Vec<ScanRunEventDto>>,
-    scan_run_failures: HashMap<Uuid, Vec<ScanFailureDto>>,
-    scan_recovery_requests: Vec<ScanRecoveryRequest>,
 }
 
 impl Default for TestApiService {
@@ -93,12 +80,6 @@ impl TestApiService {
                 current_user: Some(sample_user),
                 current_permissions: Some(sample_permissions),
                 playback_ticket_result: None,
-                scan_health: empty_scan_health(),
-                scan_runs: Vec::new(),
-                scan_run_details: HashMap::new(),
-                scan_run_events: HashMap::new(),
-                scan_run_failures: HashMap::new(),
-                scan_recovery_requests: Vec::new(),
             })),
             base_url: Arc::from(base_url_string),
         }
@@ -144,52 +125,6 @@ impl TestApiService {
         if let Ok(mut guard) = self.inner.write() {
             guard.playback_ticket_result = Some(Err(message.into()));
         }
-    }
-
-    pub fn set_scan_health(&self, health: ScannerHealthResponse) {
-        if let Ok(mut guard) = self.inner.write() {
-            guard.scan_health = health;
-        }
-    }
-
-    pub fn set_scan_runs(&self, runs: Vec<ScanRunDto>) {
-        if let Ok(mut guard) = self.inner.write() {
-            guard.scan_runs = runs;
-        }
-    }
-
-    pub fn insert_scan_run_detail(&self, detail: ScanRunDetailResponse) {
-        if let Ok(mut guard) = self.inner.write() {
-            guard.scan_run_details.insert(detail.run.scan_id, detail);
-        }
-    }
-
-    pub fn insert_scan_run_events(
-        &self,
-        scan_id: Uuid,
-        events: Vec<ScanRunEventDto>,
-    ) {
-        if let Ok(mut guard) = self.inner.write() {
-            guard.scan_run_events.insert(scan_id, events);
-        }
-    }
-
-    pub fn insert_scan_run_failures(
-        &self,
-        scan_id: Uuid,
-        failures: Vec<ScanFailureDto>,
-    ) {
-        if let Ok(mut guard) = self.inner.write() {
-            guard.scan_run_failures.insert(scan_id, failures);
-        }
-    }
-
-    pub fn scan_recovery_requests(&self) -> Vec<ScanRecoveryRequest> {
-        self.inner
-            .read()
-            .expect("lock poisoned")
-            .scan_recovery_requests
-            .clone()
     }
 }
 
@@ -526,147 +461,6 @@ impl ApiService for TestApiService {
         ))
     }
 
-    async fn fetch_scanner_health(
-        &self,
-    ) -> RepositoryResult<ScannerHealthResponse> {
-        Ok(self
-            .inner
-            .read()
-            .expect("lock poisoned")
-            .scan_health
-            .clone())
-    }
-
-    async fn fetch_scan_runs(
-        &self,
-        library_id: Option<LibraryId>,
-        status: Option<String>,
-        limit: usize,
-        offset: usize,
-    ) -> RepositoryResult<ScanRunListResponse> {
-        let guard = self.inner.read().expect("lock poisoned");
-        let mut runs = guard.scan_runs.clone();
-        if let Some(library_id) = library_id {
-            runs.retain(|run| run.library_id == library_id);
-        }
-        if let Some(status) = status {
-            runs.retain(|run| run.status == status);
-        }
-        runs.sort_by(|a, b| b.last_event_at.cmp(&a.last_event_at));
-        let total = runs.len();
-        let paged = runs
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect::<Vec<_>>();
-        Ok(ScanRunListResponse {
-            page: ScanPageMeta::new(limit, offset, paged.len(), total),
-            runs: paged,
-        })
-    }
-
-    async fn fetch_scan_run_detail(
-        &self,
-        scan_id: Uuid,
-    ) -> RepositoryResult<ScanRunDetailResponse> {
-        let guard = self.inner.read().expect("lock poisoned");
-        if let Some(detail) = guard.scan_run_details.get(&scan_id) {
-            return Ok(detail.clone());
-        }
-        if let Some(run) =
-            guard.scan_runs.iter().find(|run| run.scan_id == scan_id)
-        {
-            return Ok(ScanRunDetailResponse {
-                run: run.clone(),
-                terminal_summary: serde_json::Value::Null,
-            });
-        }
-        Err(RepositoryError::NotFound {
-            entity_type: "ScanRun".into(),
-            id: scan_id.to_string(),
-        })
-    }
-
-    async fn fetch_scan_run_events(
-        &self,
-        scan_id: Uuid,
-        after_sequence: Option<u64>,
-        limit: usize,
-    ) -> RepositoryResult<ScanRunEventsPageResponse> {
-        let guard = self.inner.read().expect("lock poisoned");
-        let mut events = guard
-            .scan_run_events
-            .get(&scan_id)
-            .cloned()
-            .unwrap_or_default();
-        if let Some(after_sequence) = after_sequence {
-            events.retain(|event| event.sequence > after_sequence);
-        }
-        events.sort_by(|a, b| a.sequence.cmp(&b.sequence));
-        let total = events.len();
-        let paged = events.into_iter().take(limit).collect::<Vec<_>>();
-        Ok(ScanRunEventsPageResponse {
-            scan_id,
-            events: paged.clone(),
-            page: ScanPageMeta::new(limit, 0, paged.len(), total),
-            replay: None,
-        })
-    }
-
-    async fn fetch_scan_run_failures(
-        &self,
-        scan_id: Uuid,
-        limit: usize,
-        offset: usize,
-        include_debug: bool,
-    ) -> RepositoryResult<ScanRunFailuresPageResponse> {
-        let guard = self.inner.read().expect("lock poisoned");
-        let mut failures = guard
-            .scan_run_failures
-            .get(&scan_id)
-            .cloned()
-            .unwrap_or_default();
-        if !include_debug {
-            for failure in failures.iter_mut() {
-                failure.debug = None;
-            }
-        }
-        failures.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
-        let total = failures.len();
-        let paged = failures
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect::<Vec<_>>();
-        Ok(ScanRunFailuresPageResponse {
-            scan_id,
-            failures: paged.clone(),
-            page: ScanPageMeta::new(limit, offset, paged.len(), total),
-        })
-    }
-
-    async fn recover_scan_path(
-        &self,
-        request: ScanRecoveryRequest,
-    ) -> RepositoryResult<ScanRecoveryResponse> {
-        if let Ok(mut guard) = self.inner.write() {
-            guard.scan_recovery_requests.push(request.clone());
-        }
-        Ok(ScanRecoveryResponse {
-            library_id: request.library_id,
-            path: request.path.clone(),
-            normalized_path: request.path,
-            job_id: Uuid::now_v7(),
-            accepted: true,
-            merged_into: None,
-            idempotency_key: request
-                .correlation_id
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| Uuid::now_v7().to_string()),
-            message: "Scan recovery queued.".into(),
-        })
-    }
-
     async fn browse_media_root(
         &self,
         _path: Option<&str>,
@@ -948,23 +742,6 @@ impl ApiService for TestApiService {
                 "TestApiService::fetch_playback_ticket not implemented".into(),
             )),
         }
-    }
-}
-
-fn empty_scan_health() -> ScannerHealthResponse {
-    ScannerHealthResponse {
-        queue_depths: ScanQueueDepths {
-            folder_scan: 0,
-            manifest_scan: 0,
-            analyze: 0,
-            metadata: 0,
-            index: 0,
-            image_fetch: 0,
-        },
-        active_scans: 0,
-        retained_runs: 0,
-        failed_runs: 0,
-        incremental: IncrementalScanStatusView::default(),
     }
 }
 

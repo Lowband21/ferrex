@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -18,13 +17,7 @@ use ferrex_core::domain::scan::actors::image_fetch::ImageFetchActor;
 use ferrex_core::domain::scan::actors::index::{
     IndexCommand, IndexerActor, IndexingChange, IndexingOutcome,
 };
-use ferrex_core::database::repositories::{
-    manifest::PostgresManifestRepository, media::PostgresMediaRepository,
-};
 use ferrex_core::domain::scan::actors::library::*;
-use ferrex_core::domain::scan::{
-    ManifestScope, ManifestWalkLimits, ManifestWalker, ScannerLayoutContract,
-};
 use ferrex_core::domain::scan::actors::metadata::{
     MediaReadyForIndex, MetadataActor, MetadataCommand,
 };
@@ -34,12 +27,10 @@ use ferrex_core::domain::scan::orchestration::context::{
 };
 use ferrex_core::domain::scan::orchestration::correlation::CorrelationCache;
 use ferrex_core::domain::scan::orchestration::dispatcher::{
-    DefaultJobDispatcher, DefaultManifestScanExecutor, DispatchStatus,
-    DispatcherActors, ManifestScanExecutor,
+    DefaultJobDispatcher, DispatchStatus, DispatcherActors,
 };
 use ferrex_core::domain::scan::orchestration::job::{
-    EnqueueRequest, ImageFetchJob, JobKind, JobPayload, ManifestScanJob,
-    ManifestScanTrigger, MediaAnalyzeJob, MediaFingerprint, ScanReason,
+    ImageFetchJob, JobKind, MediaAnalyzeJob, MediaFingerprint,
 };
 use ferrex_core::domain::scan::orchestration::lease::DequeueRequest;
 use ferrex_core::domain::scan::orchestration::persistence::{
@@ -189,27 +180,27 @@ impl SeriesMetadataProvider for StubSeriesProvider {
 }
 
 #[sqlx::test(migrator = "crate::MIGRATOR")]
-async fn bulk_seed_manifest_root_reconciles_media_followups(
-    pool: PgPool,
-) -> Result<()> {
-    // Filesystem layout covers both folder and flat-root media:
+async fn bulk_seed_depth1_and_recursive_followups(pool: PgPool) -> Result<()> {
+    // Filesystem layout
     // root/
-    //   flat.mkv
-    //   X1/a.mkv
-    //   X2/b.mkv
+    //   X1/
+    //     child/
+    //     a.mkv
+    //   X2/
+    //     child/
+    //     b.mkv
     let temp = tempdir().unwrap();
     let root = temp.path().to_path_buf();
     let x1 = root.join("X1");
     let x2 = root.join("X2");
-    tokio::fs::create_dir_all(&x1).await?;
-    tokio::fs::create_dir_all(&x2).await?;
-    let flat = root.join("flat.mkv");
-    let x1_media = x1.join("a.mkv");
-    let x2_media = x2.join("b.mkv");
-    tokio::fs::write(&flat, b"flat").await?;
-    tokio::fs::write(&x1_media, b"test").await?;
-    tokio::fs::write(&x2_media, b"test").await?;
+    let x1_child = x1.join("child");
+    let x2_child = x2.join("child");
+    tokio::fs::create_dir_all(&x1_child).await?;
+    tokio::fs::create_dir_all(&x2_child).await?;
+    tokio::fs::write(x1.join("a.mkv"), b"test").await?;
+    tokio::fs::write(x2.join("b.mkv"), b"test").await?;
 
+    // Wiring
     let queue = Arc::new(PostgresQueueService::new(pool.clone()).await?);
     let events = Arc::new(InProcJobEventBus::new(128));
     let observer = Arc::new(NoopActorObserver);
@@ -229,49 +220,43 @@ async fn bulk_seed_manifest_root_reconciles_media_followups(
         correlations.clone(),
     );
 
-    let correlation_id = Uuid::now_v7();
-    let actor_events = actor
+    // Start bulk seed => depth-1 folder scan jobs only (X1, X2)
+    let _ = actor
         .handle_command(LibraryActorCommand::Start {
             mode: StartMode::Bulk,
-            correlation_id: Some(correlation_id),
+            correlation_id: None,
         })
         .await?;
 
-    let manifest_events = actor_events
-        .into_iter()
-        .filter_map(|event| match event {
-            LibraryActorEvent::EnqueueManifestScan {
-                scope,
-                priority,
-                reason,
-                trigger,
-                correlation_id,
-            } => Some((scope, priority, reason, trigger, correlation_id)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(manifest_events.len(), 1);
-    let (scope, priority, reason, trigger, observed_correlation) =
-        manifest_events.into_iter().next().unwrap();
-    assert_eq!(priority, JobPriority::P1);
-    assert_eq!(reason, ScanReason::BulkSeed);
-    assert_eq!(trigger, ManifestScanTrigger::BulkStart);
-    assert_eq!(observed_correlation, Some(correlation_id));
-    let ManifestScope::Root(root_scope) = scope.as_ref() else {
-        panic!("bulk start should enqueue a manifest root scan")
-    };
-    assert_eq!(root_scope.root_path_norm, norm(&root));
+    // Verify persistent queue contains only depth-1 immediate subfolders
+    let folder_kind = JobKind::FolderScan as i16;
+    let rows = sqlx::query!(
+        r#"
+        SELECT payload
+        FROM orchestrator_jobs
+        WHERE kind = $1 AND state = 'ready'
+        ORDER BY created_at ASC
+        "#,
+        folder_kind
+    )
+    .fetch_all(&pool)
+    .await?;
 
-    let payload = JobPayload::ManifestScan(ManifestScanJob {
-        scope: *scope,
-        scan_reason: reason,
-        enqueue_time: Utc::now(),
-        trigger,
-    });
-    let mut request = EnqueueRequest::new(priority, payload);
-    request.correlation_id = observed_correlation;
-    queue.enqueue(request).await?;
+    let expect1 = norm(&x1);
+    let expect2 = norm(&x2);
+    let mut seen = Vec::new();
+    for row in rows.iter() {
+        let payload: serde_json::Value = row.payload.clone();
+        let folder = payload["payload"]["folder_path_norm"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        seen.push(folder);
+    }
+    assert!(seen.contains(&expect1), "X1 must be enqueued at depth-1");
+    assert!(seen.contains(&expect2), "X2 must be enqueued at depth-1");
 
+    // Dispatcher with real folder actor to recurse and enqueue child scans
     let actors = DispatcherActors::new(
         Arc::new(DefaultFolderScanActor::new()) as Arc<dyn FolderScanActor>,
         Arc::new(StubAnalyze) as Arc<dyn MediaAnalyzeActor>,
@@ -286,76 +271,62 @@ async fn bulk_seed_manifest_root_reconciles_media_followups(
         Arc::new(StubSeriesProvider) as Arc<dyn SeriesMetadataProvider>,
         Arc::clone(&series_states) as Arc<dyn SeriesScanStateRepository>,
     ));
-    let manifest_repo =
-        Arc::new(PostgresManifestRepository::new(pool.clone()));
-    let manifest_media =
-        Arc::new(PostgresMediaRepository::new(pool.clone()));
-    let manifest_executor: Arc<dyn ManifestScanExecutor> = Arc::new(
-        DefaultManifestScanExecutor::new(
-            ManifestWalker::new(
-                ScannerLayoutContract::default(),
-                ManifestWalkLimits::default(),
-            ),
-            manifest_repo,
-            manifest_media,
-            Arc::clone(&queue),
-            Arc::clone(&events),
-            Arc::clone(&cursors),
-        ),
-    );
 
-    let dispatcher = Arc::new(
-        DefaultJobDispatcher::new(
-            Arc::clone(&queue),
-            Arc::clone(&events),
-            Arc::clone(&cursors),
-            Arc::clone(&series_states),
-            series_resolver,
-            actors,
-            CorrelationCache::default(),
-        )
-        .with_manifest_executor(manifest_executor),
-    );
+    let dispatcher = Arc::new(DefaultJobDispatcher::new(
+        Arc::clone(&queue),
+        Arc::clone(&events),
+        Arc::clone(&cursors),
+        Arc::clone(&series_states),
+        series_resolver,
+        actors,
+        CorrelationCache::default(),
+    ));
 
+    // Dequeue and dispatch one folder scan (either X1 or X2)
     let lease = queue
         .dequeue(DequeueRequest {
-            kind: JobKind::ManifestScan,
+            kind: JobKind::FolderScan,
             worker_id: "it-test".into(),
             lease_ttl: chrono::Duration::seconds(30),
             selector: None,
         })
         .await?
-        .expect("expected a manifest scan job to be queued");
+        .expect("expected a folder scan job to be queued");
 
     let status = dispatcher.dispatch(&lease).await;
     assert!(matches!(status, DispatchStatus::Success));
+    // Mark completed
     queue.complete(lease.lease_id).await?;
 
-    let analyze_rows = sqlx::query!(
+    // Follow-up should include a child folder scan (X1/child or X2/child)
+    let child1 = norm(&x1_child);
+    let child2 = norm(&x2_child);
+    let children = sqlx::query!(
         r#"
         SELECT payload
         FROM orchestrator_jobs
-        WHERE library_id = $1 AND kind = $2 AND state = 'ready'
-        ORDER BY created_at ASC
+        WHERE kind = $1
         "#,
-        library.id.0,
-        JobKind::MediaAnalyze as i16,
+        folder_kind
     )
     .fetch_all(&pool)
     .await?;
 
-    let mut analyze_paths = BTreeSet::new();
-    for row in analyze_rows {
-        let payload: JobPayload = serde_json::from_value(row.payload)?;
-        if let JobPayload::MediaAnalyze(job) = payload {
-            analyze_paths.insert(job.path_norm);
+    let mut child_seen = false;
+    for row in children.iter() {
+        let payload: serde_json::Value = row.payload.clone();
+        let folder = payload["payload"]["folder_path_norm"]
+            .as_str()
+            .unwrap_or("");
+        if folder == child1 || folder == child2 {
+            child_seen = true;
+            break;
         }
     }
-
-    assert_eq!(analyze_paths.len(), 3);
-    assert!(analyze_paths.contains(&norm(&flat)));
-    assert!(analyze_paths.contains(&norm(&x1_media)));
-    assert!(analyze_paths.contains(&norm(&x2_media)));
+    assert!(
+        child_seen,
+        "expected a child subfolder scan to be enqueued by dispatcher"
+    );
 
     Ok(())
 }

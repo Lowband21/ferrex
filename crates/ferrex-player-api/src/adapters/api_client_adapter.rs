@@ -19,10 +19,7 @@ use ferrex_core::player_prelude::{
     MediaWithStatus, MovieBatchFetchRequest, MovieBatchId,
     MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
-    ScanRecoveryRequest, ScanRecoveryResponse, ScanRunDetailResponse,
-    ScanRunEventsPageResponse, ScanRunFailuresPageResponse,
-    ScanRunListResponse, ScannerHealthResponse, SeasonWatchStatus,
-    SeriesBundleFetchRequest, SeriesBundleSyncRequest,
+    SeasonWatchStatus, SeriesBundleFetchRequest, SeriesBundleSyncRequest,
     SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus, SortBy, SortOrder,
     StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
     UserPermissions, UserWatchState,
@@ -51,19 +48,6 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 const FILTER_INDICES_CACHE_TTL: Duration = Duration::from_secs(30);
-
-fn query_path(path: &str, params: Vec<(&str, String)>) -> String {
-    if params.is_empty() {
-        return path.to_string();
-    }
-
-    let query = params
-        .into_iter()
-        .map(|(key, value)| format!("{}={}", key, urlencoding::encode(&value)))
-        .collect::<Vec<_>>()
-        .join("&");
-    format!("{}?{}", path, query)
-}
 
 /// Adapter that implements ApiService using the existing ApiClient
 #[derive(Debug, Clone)]
@@ -878,102 +862,6 @@ impl ApiService for ApiClientAdapter {
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
         Ok(wrapped)
-    }
-
-    async fn fetch_scanner_health(
-        &self,
-    ) -> RepositoryResult<ScannerHealthResponse> {
-        self.client
-            .get(v1::scan::HEALTH)
-            .await
-            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
-    }
-
-    async fn fetch_scan_runs(
-        &self,
-        library_id: Option<LibraryId>,
-        status: Option<String>,
-        limit: usize,
-        offset: usize,
-    ) -> RepositoryResult<ScanRunListResponse> {
-        let mut params =
-            vec![("limit", limit.to_string()), ("offset", offset.to_string())];
-        if let Some(library_id) = library_id {
-            params.push(("library_id", library_id.to_string()));
-        }
-        if let Some(status) = status {
-            params.push(("status", status));
-        }
-
-        let path = query_path(v1::scan::RUNS, params);
-        self.client
-            .get(&path)
-            .await
-            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
-    }
-
-    async fn fetch_scan_run_detail(
-        &self,
-        scan_id: uuid::Uuid,
-    ) -> RepositoryResult<ScanRunDetailResponse> {
-        let path =
-            replace_param(v1::scan::RUN_DETAILS, "{id}", scan_id.to_string());
-        self.client
-            .get(&path)
-            .await
-            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
-    }
-
-    async fn fetch_scan_run_events(
-        &self,
-        scan_id: uuid::Uuid,
-        after_sequence: Option<u64>,
-        limit: usize,
-    ) -> RepositoryResult<ScanRunEventsPageResponse> {
-        let base =
-            replace_param(v1::scan::RUN_EVENTS, "{id}", scan_id.to_string());
-        let mut params = vec![("limit", limit.to_string())];
-        if let Some(after_sequence) = after_sequence {
-            params.push(("after_sequence", after_sequence.to_string()));
-        }
-        let path = query_path(&base, params);
-        self.client
-            .get(&path)
-            .await
-            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
-    }
-
-    async fn fetch_scan_run_failures(
-        &self,
-        scan_id: uuid::Uuid,
-        limit: usize,
-        offset: usize,
-        include_debug: bool,
-    ) -> RepositoryResult<ScanRunFailuresPageResponse> {
-        let base =
-            replace_param(v1::scan::RUN_FAILURES, "{id}", scan_id.to_string());
-        let path = query_path(
-            &base,
-            vec![
-                ("limit", limit.to_string()),
-                ("offset", offset.to_string()),
-                ("debug", include_debug.to_string()),
-            ],
-        );
-        self.client
-            .get(&path)
-            .await
-            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
-    }
-
-    async fn recover_scan_path(
-        &self,
-        request: ScanRecoveryRequest,
-    ) -> RepositoryResult<ScanRecoveryResponse> {
-        self.client
-            .post(v1::scan::RECOVER, &request)
-            .await
-            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }
 
     async fn browse_media_root(

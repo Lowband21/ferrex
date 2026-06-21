@@ -7,20 +7,10 @@
 
 pub mod actors;
 pub mod fs_watch;
-pub mod manifest;
 pub mod orchestration;
 pub mod scanner;
 
 // Re-export key surfaces so downstream code can write `crate::scan::*`.
 pub use fs_watch::*;
-pub use manifest::*;
-pub use manifest::{
-    ManifestRootId, ManifestRootScope, ManifestScope, ManifestWalkLimits,
-    ManifestWalker, ScannerLayoutContract,
-};
 pub use orchestration::*;
-pub use orchestration::{
-    DefaultManifestScanExecutor, ManifestReconciliationSummary,
-    ManifestScanExecutor, ManifestScanJob, ManifestScanTrigger,
-};
 pub use scanner::*;

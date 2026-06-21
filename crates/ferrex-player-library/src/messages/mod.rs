@@ -3,16 +3,12 @@ pub mod scan_subscription;
 pub mod subscriptions;
 
 use crate::media_root_browser;
-use crate::scan_dashboard::{
-    ScanDashboardOverviewPayload, ScanDashboardRefreshReason,
-    ScanDashboardRunPayload,
-};
 use crate::types::LibrariesBootstrapPayload;
 use ferrex_core::player_prelude::Library as CoreLibrary;
 use ferrex_core::player_prelude::{
     LibraryId, LibraryMediaResponse, MediaFile, MovieBatchId,
     ScanCommandAcceptedResponse, ScanConfig, ScanMetrics, ScanProgressEvent,
-    ScanRecoveryRequest, ScanRecoveryResponse, ScanSnapshotDto, SeriesID,
+    ScanSnapshotDto, SeriesID,
 };
 use ferrex_player_api::api_types::{Library as ApiLibrary, Media, MediaID};
 use uuid::Uuid;
@@ -90,19 +86,6 @@ pub enum LibraryMessage {
     ScanMetricsLoaded(Result<ScanMetrics, String>),
     FetchScanConfig,
     ScanConfigLoaded(Result<ScanConfig, String>),
-
-    // Durable scan dashboard
-    RefreshScanDashboard(ScanDashboardRefreshReason),
-    ScanDashboardOverviewLoaded(Result<ScanDashboardOverviewPayload, String>),
-    SelectScanDashboardRun(Uuid),
-    RefreshScanDashboardRun(Uuid),
-    ScanDashboardRunLoaded {
-        scan_id: Uuid,
-        select: bool,
-        result: Result<ScanDashboardRunPayload, String>,
-    },
-    RecoverScanPath(ScanRecoveryRequest),
-    ScanRecoveryCompleted(Result<ScanRecoveryResponse, String>),
 
     // Destructive: delete and recreate library with start_scan=true
     ResetLibrary(LibraryId),
@@ -201,21 +184,6 @@ impl LibraryMessage {
             Self::PauseScan { .. } => "Library::PauseScan",
             Self::ResumeScan { .. } => "Library::ResumeScan",
             Self::CancelScan { .. } => "Library::CancelScan",
-            Self::RefreshScanDashboard(_) => "Library::RefreshScanDashboard",
-            Self::ScanDashboardOverviewLoaded(_) => {
-                "Library::ScanDashboardOverviewLoaded"
-            }
-            Self::SelectScanDashboardRun(_) => {
-                "Library::SelectScanDashboardRun"
-            }
-            Self::RefreshScanDashboardRun(_) => {
-                "Library::RefreshScanDashboardRun"
-            }
-            Self::ScanDashboardRunLoaded { .. } => {
-                "Library::ScanDashboardRunLoaded"
-            }
-            Self::RecoverScanPath(_) => "Library::RecoverScanPath",
-            Self::ScanRecoveryCompleted(_) => "Library::ScanRecoveryCompleted",
             #[cfg(feature = "demo")]
             Self::FetchDemoStatus => "Library::FetchDemoStatus",
             #[cfg(feature = "demo")]
@@ -412,62 +380,6 @@ impl std::fmt::Debug for LibraryMessage {
                 library_id,
                 scan_id,
             } => write!(f, "Library::CancelScan({}, {})", library_id, scan_id),
-            Self::RefreshScanDashboard(reason) => {
-                write!(f, "Library::RefreshScanDashboard({:?})", reason)
-            }
-            Self::ScanDashboardOverviewLoaded(result) => match result {
-                Ok(payload) => write!(
-                    f,
-                    "Library::ScanDashboardOverviewLoaded(Ok: active={} recent={})",
-                    payload.active_runs.len(),
-                    payload.recent_runs.runs.len()
-                ),
-                Err(err) => write!(
-                    f,
-                    "Library::ScanDashboardOverviewLoaded(Err: {})",
-                    err
-                ),
-            },
-            Self::SelectScanDashboardRun(scan_id) => {
-                write!(f, "Library::SelectScanDashboardRun({})", scan_id)
-            }
-            Self::RefreshScanDashboardRun(scan_id) => {
-                write!(f, "Library::RefreshScanDashboardRun({})", scan_id)
-            }
-            Self::ScanDashboardRunLoaded {
-                scan_id,
-                select,
-                result,
-            } => match result {
-                Ok(payload) => write!(
-                    f,
-                    "Library::ScanDashboardRunLoaded(scan={}, select={}, events={}, failures={})",
-                    scan_id,
-                    select,
-                    payload.events.events.len(),
-                    payload.failures.failures.len()
-                ),
-                Err(err) => write!(
-                    f,
-                    "Library::ScanDashboardRunLoaded(scan={}, select={}, err={})",
-                    scan_id, select, err
-                ),
-            },
-            Self::RecoverScanPath(request) => write!(
-                f,
-                "Library::RecoverScanPath(library={}, path={})",
-                request.library_id, request.path
-            ),
-            Self::ScanRecoveryCompleted(result) => match result {
-                Ok(response) => write!(
-                    f,
-                    "Library::ScanRecoveryCompleted(Ok: library={}, accepted={})",
-                    response.library_id, response.accepted
-                ),
-                Err(err) => {
-                    write!(f, "Library::ScanRecoveryCompleted(Err: {})", err)
-                }
-            },
             #[cfg(feature = "demo")]
             Self::FetchDemoStatus => write!(f, "Library::FetchDemoStatus"),
             #[cfg(feature = "demo")]

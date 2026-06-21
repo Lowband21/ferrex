@@ -857,8 +857,7 @@ async fn ready_job_paths(
             }
             JobPayload::ImageFetch(_)
             | JobPayload::SeriesResolve(_)
-            | JobPayload::EpisodeMatch(_)
-            | JobPayload::ManifestScan(_) => {}
+            | JobPayload::EpisodeMatch(_) => {}
         }
     }
     Ok(paths)
