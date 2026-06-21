@@ -609,8 +609,11 @@ impl ScanRunRepository for PostgresScanRunRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use tokio::sync::Mutex;
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
+    use tokio::sync::{Barrier, Mutex};
 
     #[derive(Default)]
     struct InMemoryScanRunRepository {
@@ -767,6 +770,251 @@ mod tests {
                 .scan_id,
             first.run.scan_id
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_get_or_create_active_reuses_one_run_per_library_mode() {
+        let repo = Arc::new(InMemoryScanRunRepository::default());
+        let library_id = LibraryId(Uuid::now_v7());
+        let concurrent_requests = 8usize;
+        let barrier = Arc::new(Barrier::new(concurrent_requests));
+        let mut tasks = Vec::with_capacity(concurrent_requests);
+
+        for _ in 0..concurrent_requests {
+            let repo = Arc::clone(&repo);
+            let barrier = Arc::clone(&barrier);
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                repo.get_or_create_active(
+                    NewLibraryScanRun::new(library_id, ScanRunMode::Manual)
+                        .with_scan_id(Uuid::now_v7())
+                        .with_correlation_id(Uuid::now_v7())
+                        .running(),
+                )
+                .await
+                .expect("concurrent get_or_create succeeds")
+            }));
+        }
+
+        let mut results = Vec::with_capacity(concurrent_requests);
+        for task in tasks {
+            results.push(task.await.expect("start task joins"));
+        }
+
+        let manual_scan_ids: HashSet<Uuid> =
+            results.iter().map(|result| result.run.scan_id).collect();
+        assert_eq!(manual_scan_ids.len(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| {
+                    result.disposition == ScanStartDisposition::Created
+                })
+                .count(),
+            1
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| {
+                    result.disposition == ScanStartDisposition::Reused
+                })
+                .count(),
+            concurrent_requests - 1
+        );
+
+        let manual_scan_id = *manual_scan_ids.iter().next().unwrap();
+        assert_eq!(
+            repo.load_active(library_id, ScanRunMode::Manual)
+                .await
+                .expect("load active succeeds")
+                .expect("manual run exists")
+                .scan_id,
+            manual_scan_id
+        );
+
+        let maintenance = repo
+            .get_or_create_active(
+                NewLibraryScanRun::new(library_id, ScanRunMode::Maintenance)
+                    .running(),
+            )
+            .await
+            .expect("maintenance get_or_create succeeds");
+        assert_eq!(maintenance.disposition, ScanStartDisposition::Created);
+        assert_ne!(maintenance.run.scan_id, manual_scan_id);
+
+        let active_runs =
+            repo.list_active().await.expect("list active succeeds");
+        assert_eq!(active_runs.len(), 2);
+        assert_eq!(
+            active_runs
+                .iter()
+                .filter(|run| run.mode == ScanRunMode::Manual)
+                .count(),
+            1
+        );
+        assert_eq!(
+            active_runs
+                .iter()
+                .filter(|run| run.mode == ScanRunMode::Maintenance)
+                .count(),
+            1
+        );
+    }
+
+    async fn seed_library_for_postgres_test(
+        pool: &PgPool,
+        library_id: LibraryId,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at)
+            VALUES ($1, $2, $3, 'movies', NOW(), NOW())
+            ON CONFLICT (id) DO NOTHING
+            "#,
+        )
+        .bind(library_id.to_uuid())
+        .bind(format!("Scan run dedupe test {library_id}"))
+        .bind(vec![format!("/scan-run-dedupe/{library_id}")])
+        .execute(pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!("seed library failed: {err}"))
+        })?;
+        Ok(())
+    }
+
+    async fn active_run_count(
+        pool: &PgPool,
+        library_id: LibraryId,
+        mode: ScanRunMode,
+    ) -> Result<i64> {
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM library_scan_runs
+            WHERE library_id = $1
+              AND mode = $2
+              AND status IN ('pending','running','paused')
+            "#,
+        )
+        .bind(library_id.to_uuid())
+        .bind(mode.as_str())
+        .fetch_one(pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!("active run count failed: {err}"))
+        })
+    }
+
+    #[tokio::test]
+    async fn postgres_get_or_create_active_reuses_concurrent_manual_run() {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping: DATABASE_URL not set");
+                return;
+            }
+        };
+
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping: failed to connect to DATABASE_URL ({err})"
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = crate::MIGRATOR.run(&pool).await {
+            eprintln!("skipping: migrations failed ({err})");
+            return;
+        }
+
+        let repo = Arc::new(PostgresScanRunRepository::new(pool.clone()));
+        let library_id = LibraryId(Uuid::now_v7());
+        seed_library_for_postgres_test(&pool, library_id)
+            .await
+            .expect("library seeded");
+
+        let concurrent_requests = 8usize;
+        let barrier = Arc::new(Barrier::new(concurrent_requests));
+        let mut tasks = Vec::with_capacity(concurrent_requests);
+
+        for _ in 0..concurrent_requests {
+            let repo = Arc::clone(&repo);
+            let barrier = Arc::clone(&barrier);
+            tasks.push(tokio::spawn(async move {
+                let requested_id = Uuid::now_v7();
+                barrier.wait().await;
+                repo.get_or_create_active(
+                    NewLibraryScanRun::new(library_id, ScanRunMode::Manual)
+                        .with_scan_id(requested_id)
+                        .with_correlation_id(requested_id)
+                        .running(),
+                )
+                .await
+                .expect("postgres get_or_create succeeds")
+            }));
+        }
+
+        let mut results = Vec::with_capacity(concurrent_requests);
+        for task in tasks {
+            results.push(task.await.expect("start task joins"));
+        }
+
+        let scan_ids: HashSet<Uuid> =
+            results.iter().map(|result| result.run.scan_id).collect();
+        assert_eq!(scan_ids.len(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| {
+                    result.disposition == ScanStartDisposition::Created
+                })
+                .count(),
+            1
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| {
+                    result.disposition == ScanStartDisposition::Reused
+                })
+                .count(),
+            concurrent_requests - 1
+        );
+        assert_eq!(
+            active_run_count(&pool, library_id, ScanRunMode::Manual)
+                .await
+                .expect("manual active count succeeds"),
+            1
+        );
+
+        let manual_scan_id = *scan_ids.iter().next().unwrap();
+        let maintenance = repo
+            .get_or_create_active(
+                NewLibraryScanRun::new(library_id, ScanRunMode::Maintenance)
+                    .with_scan_id(Uuid::now_v7())
+                    .running(),
+            )
+            .await
+            .expect("maintenance run starts");
+        assert_eq!(maintenance.disposition, ScanStartDisposition::Created);
+        assert_ne!(maintenance.run.scan_id, manual_scan_id);
+        assert_eq!(
+            active_run_count(&pool, library_id, ScanRunMode::Maintenance)
+                .await
+                .expect("maintenance active count succeeds"),
+            1
+        );
+
+        sqlx::query("DELETE FROM libraries WHERE id = $1")
+            .bind(library_id.to_uuid())
+            .execute(&pool)
+            .await
+            .expect("cleanup library succeeds");
     }
 
     #[tokio::test]

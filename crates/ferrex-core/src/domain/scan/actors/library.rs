@@ -794,7 +794,7 @@ mod tests {
         lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
     };
     use crate::{error::MediaError, types::LibraryType};
-    use std::fmt;
+    use std::{collections::HashSet, fmt};
 
     #[derive(Clone, Debug)]
     struct RecordedJob {
@@ -952,6 +952,22 @@ mod tests {
         })
     }
 
+    fn enqueued_folder_paths(events: &[LibraryActorEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    context, ..
+                } = event
+                {
+                    Some(context.folder_path_norm().to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     fn make_actor(
         queue: Arc<RecordingQueue>,
         root: PathBuf,
@@ -1075,6 +1091,239 @@ mod tests {
             )),
             "fs events during bulk should not enqueue additional scans"
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bulk_seed_and_watcher_burst_share_one_active_folder_scan()
+    -> Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let seeded_folder = root.join("seeded-movie");
+        std::fs::create_dir_all(&seeded_folder).unwrap();
+        let media_file = seeded_folder.join("feature.mkv");
+        std::fs::write(&media_file, b"fixture").unwrap();
+        let seeded_folder_norm = normalize_path(&seeded_folder)?;
+
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut actor = make_actor(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
+        let library_id = actor.config.library.id;
+        let scan_id = Uuid::now_v7();
+
+        let start_events = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Bulk,
+                correlation_id: Some(scan_id),
+            })
+            .await?;
+
+        assert_eq!(
+            enqueued_folder_paths(&start_events),
+            vec![seeded_folder_norm.clone()],
+            "bulk seed should enqueue the folder once"
+        );
+        assert!(actor.state.is_bulk_scanning);
+        assert_eq!(actor.state.active_folder_scans.len(), 1);
+        assert!(actor.state.is_scan_active(&seeded_folder_norm));
+
+        let burst = vec![
+            make_event(
+                &media_file,
+                FileSystemEventKind::Created,
+                library_id,
+                None,
+            )?,
+            make_event(
+                &media_file,
+                FileSystemEventKind::Modified,
+                library_id,
+                None,
+            )?,
+            make_event(
+                &seeded_folder,
+                FileSystemEventKind::Modified,
+                library_id,
+                None,
+            )?,
+        ];
+
+        let responses = actor
+            .handle_command(LibraryActorCommand::FsEvents {
+                root: LibraryRootsId(0),
+                events: burst,
+                correlation_id: Some(scan_id),
+            })
+            .await?;
+
+        assert!(
+            enqueued_folder_paths(&responses).is_empty(),
+            "watcher bursts during bulk must not enqueue duplicate folder scans"
+        );
+        assert_eq!(actor.state.outstanding_jobs.len(), 1);
+        assert_eq!(actor.state.active_folder_scans.len(), 1);
+        assert!(actor.state.is_scan_active(&seeded_folder_norm));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rehydrate_resume_does_not_reseed_existing_active_folder_jobs()
+    -> Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let seeded_folder = root.join("rehydrated-movie");
+        std::fs::create_dir_all(&seeded_folder).unwrap();
+        let seeded_folder_norm = normalize_path(&seeded_folder)?;
+
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut actor = make_actor(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
+
+        let start_events = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Bulk,
+                correlation_id: Some(Uuid::now_v7()),
+            })
+            .await?;
+        assert_eq!(
+            enqueued_folder_paths(&start_events),
+            vec![seeded_folder_norm.clone()]
+        );
+
+        let resume_events = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Resume,
+                correlation_id: Some(Uuid::now_v7()),
+            })
+            .await?;
+
+        assert!(
+            enqueued_folder_paths(&resume_events).is_empty(),
+            "rehydration/resume registration must not reseed folder jobs"
+        );
+        assert!(!actor.state.is_bulk_scanning);
+        assert_eq!(actor.state.outstanding_jobs.len(), 1);
+        assert_eq!(actor.state.active_folder_scans.len(), 1);
+        assert!(actor.state.is_scan_active(&seeded_folder_norm));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn post_bulk_maintenance_start_does_not_duplicate_folder_jobs()
+    -> Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let seeded_folder = root.join("maintenance-movie");
+        std::fs::create_dir_all(&seeded_folder).unwrap();
+        let media_file = seeded_folder.join("feature.mkv");
+        std::fs::write(&media_file, b"fixture").unwrap();
+        let seeded_folder_norm = normalize_path(&seeded_folder)?;
+
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut actor = make_actor(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
+        let library_id = actor.config.library.id;
+
+        let start_events = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Bulk,
+                correlation_id: Some(Uuid::now_v7()),
+            })
+            .await?;
+        assert_eq!(
+            enqueued_folder_paths(&start_events),
+            vec![seeded_folder_norm.clone()]
+        );
+
+        actor
+            .handle_command(LibraryActorCommand::JobCompleted {
+                job_id: JobId::new(),
+                dedupe_key: DedupeKey::FolderScan {
+                    candidate: MediaCandidate::new(
+                        library_id,
+                        seeded_folder_norm.clone(),
+                    ),
+                },
+            })
+            .await?;
+        assert!(actor.state.outstanding_jobs.is_empty());
+        assert!(actor.state.active_folder_scans.is_empty());
+
+        let first_maintenance = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Maintenance,
+                correlation_id: Some(Uuid::now_v7()),
+            })
+            .await?;
+        let duplicate_maintenance = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Maintenance,
+                correlation_id: Some(Uuid::now_v7()),
+            })
+            .await?;
+        assert!(enqueued_folder_paths(&first_maintenance).is_empty());
+        assert!(enqueued_folder_paths(&duplicate_maintenance).is_empty());
+        assert!(!actor.state.is_bulk_scanning);
+        assert!(actor.state.active_folder_scans.is_empty());
+
+        let burst = vec![
+            make_event(
+                &media_file,
+                FileSystemEventKind::Created,
+                library_id,
+                None,
+            )?,
+            make_event(
+                &media_file,
+                FileSystemEventKind::Modified,
+                library_id,
+                None,
+            )?,
+        ];
+        let responses = actor
+            .handle_command(LibraryActorCommand::FsEvents {
+                root: LibraryRootsId(0),
+                events: burst.clone(),
+                correlation_id: None,
+            })
+            .await?;
+        assert_eq!(
+            enqueued_folder_paths(&responses),
+            vec![seeded_folder_norm.clone()],
+            "maintenance watcher burst should coalesce to one folder job"
+        );
+        assert_eq!(actor.state.active_folder_scans.len(), 1);
+
+        let duplicate_responses = actor
+            .handle_command(LibraryActorCommand::FsEvents {
+                root: LibraryRootsId(0),
+                events: burst,
+                correlation_id: None,
+            })
+            .await?;
+        assert!(enqueued_folder_paths(&duplicate_responses).is_empty());
+        assert!(duplicate_responses.iter().any(|event| matches!(
+            event,
+            LibraryActorEvent::JobThrottled { .. }
+        )));
+        let active_paths: HashSet<_> =
+            actor.state.active_folder_scans.iter().cloned().collect();
+        assert_eq!(active_paths, HashSet::from([seeded_folder_norm]));
 
         Ok(())
     }
