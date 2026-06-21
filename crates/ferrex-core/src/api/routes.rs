@@ -78,10 +78,14 @@ pub mod v1 {
     pub mod intelligence {
         pub const LIBRARY_OVERVIEW: &str =
             v1_path!("/intelligence/libraries/overview");
+        pub const FACETS: &str = v1_path!("/intelligence/facets");
         pub const CANDIDATE_SEARCH: &str =
             v1_path!("/intelligence/candidates:search");
+        pub const ARTIFACT_LIST: &str = v1_path!("/intelligence/artifacts");
         pub const ARTIFACT_SEARCH: &str =
             v1_path!("/intelligence/artifacts:search");
+        pub const ARTIFACT_DETAIL: &str =
+            v1_path!("/intelligence/artifacts/{artifact_id}");
         pub const ITEM_CONTEXT: &str =
             v1_path!("/intelligence/items/{media_id}/context");
         pub const RELATED_CONTEXT: &str =

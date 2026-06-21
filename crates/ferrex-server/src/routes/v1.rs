@@ -23,6 +23,7 @@ use crate::{
     handlers::{
         admin::{dev_handlers, media_root},
         handle_websocket::websocket_handler,
+        intelligence as intelligence_handlers,
         media::{
             handle_image::{
                 get_image_blob_handler, get_image_iid_handler,
@@ -256,6 +257,43 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         //    "/folders/rescan/{folder_id}",
         //    post(trigger_folder_rescan),
         //)
+        // Intelligence query APIs
+        .route(
+            v1::intelligence::LIBRARY_OVERVIEW,
+            post(intelligence_handlers::library_overview_handler),
+        )
+        .route(
+            v1::intelligence::FACETS,
+            post(intelligence_handlers::facets_handler),
+        )
+        .route(
+            v1::intelligence::CANDIDATE_SEARCH,
+            post(intelligence_handlers::candidate_search_handler),
+        )
+        .route(
+            v1::intelligence::ARTIFACT_LIST,
+            post(intelligence_handlers::artifact_search_handler),
+        )
+        .route(
+            v1::intelligence::ARTIFACT_SEARCH,
+            post(intelligence_handlers::artifact_search_handler),
+        )
+        .route(
+            v1::intelligence::ARTIFACT_DETAIL,
+            get(intelligence_handlers::artifact_detail_handler),
+        )
+        .route(
+            v1::intelligence::ITEM_CONTEXT,
+            post(intelligence_handlers::item_context_handler),
+        )
+        .route(
+            v1::intelligence::RELATED_CONTEXT,
+            post(intelligence_handlers::related_context_handler),
+        )
+        .route(
+            v1::intelligence::RUN_AUDIT,
+            post(intelligence_handlers::run_audit_handler),
+        )
         // Query system
         .route(v1::media::QUERY, post(query_media_handler))
         // Scanning: pending-based triggers and counts
