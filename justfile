@@ -502,6 +502,14 @@ sqlx-db-destroy:
     ./scripts/dev/sqlx-db.sh destroy
 
 [no-cd]
+sqlx-dynamic-guard:
+    python3 scripts/sqlx_dynamic_guard.py
+
+[no-cd]
+sqlx-dynamic-guard-test:
+    python3 -m unittest scripts/sqlx_dynamic_guard_test.py
+
+[no-cd]
 prepare $SQLX_OFFLINE="false":
     DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx prepare --workspace -- --all-features --all-targets
 

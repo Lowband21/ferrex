@@ -162,6 +162,14 @@ repos:
         stages: [pre-push]
         always_run: true
 
+      - id: sqlx-dynamic-guard
+        name: SQLx dynamic API guard
+        entry: python3 scripts/sqlx_dynamic_guard.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
+
       - id: sqlx-prepare-check
         name: sqlx prepare --check (offline)
         language: system
