@@ -18,6 +18,7 @@ use ferrex_core::api::types::{
     ScannerHealthResponse, StartScanRequest, display_text_for_scan_failure,
     display_text_for_scan_status,
 };
+use ferrex_core::database::repository_ports::catalog_events::CatalogEventRecord;
 use ferrex_core::domain::scan::manifest::{
     DEFAULT_MANIFEST_WALK_BATCH_LIMIT, DEFAULT_MANIFEST_WALK_MAX_DEPTH,
     DEFAULT_MANIFEST_WALK_PARTITION_LIMIT, ManifestDiagnosticReason,
@@ -919,42 +920,80 @@ pub async fn media_events_sse_handler(
     State(state): State<AppState>,
     Query(query): Query<MediaEventsQuery>,
     headers: HeaderMap,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+) -> Result<
+    Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>,
+    ScanHttpError,
+> {
     let resume_from = query.last_sequence.or_else(|| {
         headers
             .get(LAST_EVENT_ID_HEADER)
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u64>().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok())
     });
 
     let scan_control = state.scan_control();
     let receiver = scan_control.subscribe_catalog_events();
+    let uow = state.unit_of_work();
 
     let history = match resume_from {
         Some(sequence) => {
-            scan_control.catalog_event_history_since_sequence(sequence)
+            uow.catalog_events.list_after_sequence(sequence).await
         }
         None => {
-            let now = std::time::Instant::now();
+            let replay_seconds = MEDIA_EVENT_REPLAY_WINDOW.as_secs() as i64;
             let cutoff =
-                now.checked_sub(MEDIA_EVENT_REPLAY_WINDOW).unwrap_or(now);
-            scan_control.catalog_event_history_since_instant(cutoff)
+                chrono::Utc::now() - chrono::Duration::seconds(replay_seconds);
+            uow.catalog_events.list_since(cutoff).await
         }
-    };
+    }
+    .map_err(|err| {
+        ScanHttpError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to replay catalog events: {err}"),
+        )
+    })?;
 
-    let mut history_last_sequence = resume_from.unwrap_or(0);
+    let stream =
+        catalog_events_stream_from_parts(history, Some(receiver), resume_from);
+    Ok(Sse::new(stream).keep_alive(default_keep_alive()))
+}
+
+fn catalog_events_stream_from_parts(
+    history: Vec<CatalogEventRecord>,
+    receiver: Option<tokio::sync::broadcast::Receiver<CatalogEventFrame>>,
+    last_sequence: Option<u64>,
+) -> Pin<
+    Box<
+        dyn tokio_stream::Stream<Item = Result<Event, Infallible>>
+            + Send
+            + 'static,
+    >,
+> {
+    let mut history_last_sequence = last_sequence.unwrap_or(0);
     let history_events = history
         .into_iter()
-        .filter_map(|frame| {
-            history_last_sequence = history_last_sequence.max(frame.sequence);
-            catalog_frame_to_sse(frame)
+        .filter_map(|record| {
+            if record.sequence <= history_last_sequence {
+                return None;
+            }
+
+            history_last_sequence = history_last_sequence.max(record.sequence);
+            CatalogEventFrame::try_from(record)
+                .ok()
+                .and_then(catalog_frame_to_sse)
         })
         .map(Ok::<Event, Infallible>)
         .collect::<Vec<_>>();
     let history_stream = tokio_stream::iter(history_events);
 
+    let Some(receiver) = receiver else {
+        return Box::pin(history_stream);
+    };
+
     // Stream catalog invalidation events for the `/events/media` SSE route.
-    let stream = async_stream::stream! {
+    // Frames with a durable sequence come from committed catalog_events rows;
+    // live-only wake-ups do not advance the client's replay cursor.
+    let live_stream = async_stream::stream! {
         let mut live = BroadcastStream::new(receiver);
         use tokio_stream::StreamExt;
 
@@ -962,10 +1001,12 @@ pub async fn media_events_sse_handler(
         while let Some(item) = live.next().await {
             match item {
                 Ok(frame) => {
-                    if frame.sequence <= last_seen_sequence {
-                        continue;
+                    if let Some(sequence) = frame.sequence {
+                        if sequence <= last_seen_sequence {
+                            continue;
+                        }
+                        last_seen_sequence = sequence;
                     }
-                    last_seen_sequence = frame.sequence;
                     //let event = maybe_prepare_and_refresh(&state, event).await;
                     if let Some(sse) = catalog_frame_to_sse(frame) {
                         yield Ok::<Event, Infallible>(sse);
@@ -978,8 +1019,7 @@ pub async fn media_events_sse_handler(
         }
     };
 
-    let stream = history_stream.chain(stream);
-    Sse::new(stream).keep_alive(default_keep_alive())
+    Box::pin(history_stream.chain(live_stream))
 }
 
 fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
@@ -996,10 +1036,11 @@ fn catalog_frame_to_sse(frame: CatalogEventFrame) -> Option<Event> {
     let name = frame.event.sse_event_type().event_name();
 
     encode_catalog_event(&frame.event).map(|data| {
-        Event::default()
-            .event(name)
-            .id(frame.sequence.to_string())
-            .data(data)
+        let mut event = Event::default().event(name).data(data);
+        if let Some(sequence) = frame.sequence {
+            event = event.id(sequence.to_string());
+        }
+        event
     })
 }
 
@@ -1139,6 +1180,72 @@ mod sse_tests {
             event: ScanEventKind::Progress,
             payload: sample_progress(sequence),
         }
+    }
+
+    fn catalog_record(sequence: u64) -> CatalogEventRecord {
+        use ferrex_core::database::repository_ports::catalog_events::CatalogEventKind;
+        use ferrex_core::types::MovieBatchId;
+
+        let library_id = LibraryId(Uuid::from_u128(1));
+        let batch_id = MovieBatchId::new(2).unwrap();
+        CatalogEventRecord {
+            sequence,
+            kind: CatalogEventKind::MovieBatchFinalized,
+            library_id,
+            entity_kind: "movie_batch".to_string(),
+            entity_id: None,
+            movie_batch_id: Some(batch_id),
+            payload: json!({
+                "library_id": library_id.to_uuid(),
+                "batch_id": batch_id.as_u32(),
+                "version": 1,
+            }),
+            idempotency_key: format!(
+                "catalog:movie_batch_finalized:{library_id}:{batch_id}:1"
+            ),
+            occurred_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn media_events_stream_replays_history_and_skips_duplicate_live_sequence()
+     {
+        use crate::infra::scan::catalog_event_bus::CatalogEventBus;
+        use tokio::time::timeout;
+        use tokio_stream::StreamExt as _;
+
+        let bus = CatalogEventBus::new(8);
+        let receiver = bus.subscribe();
+        let mut stream = catalog_events_stream_from_parts(
+            vec![catalog_record(10)],
+            Some(receiver),
+            Some(9),
+        );
+
+        assert!(
+            timeout(std::time::Duration::from_millis(100), stream.next())
+                .await
+                .expect("history event should arrive")
+                .is_some()
+        );
+
+        bus.publish_record(catalog_record(10))
+            .expect("duplicate record should publish to bus");
+        assert!(
+            timeout(std::time::Duration::from_millis(50), stream.next())
+                .await
+                .is_err(),
+            "duplicate live sequence should be skipped"
+        );
+
+        bus.publish_record(catalog_record(11))
+            .expect("next record should publish to bus");
+        assert!(
+            timeout(std::time::Duration::from_millis(100), stream.next())
+                .await
+                .expect("next durable event should arrive")
+                .is_some()
+        );
     }
 
     #[test]

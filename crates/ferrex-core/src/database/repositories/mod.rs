@@ -1,5 +1,6 @@
 //! PostgreSQL-backed repository implementations.
 
+pub mod catalog_events;
 pub mod file_watch;
 pub mod folder_inventory;
 mod fuzzy_title_search;
