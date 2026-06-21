@@ -354,38 +354,31 @@ impl MediaEventState {
                 Some(LibraryMessage::MediaDeleted(id))
             }
 
-            // The media SSE can temporarily carry scan telemetry frames while
-            // the server contract is being split. Per-run scan subscriptions
-            // drive live progress and terminal dashboard refreshes, so the
-            // mixed media stream must not schedule overview HTTP refreshes per
-            // scan frame.
+            // Scan events are already handled by scan subscription
             MediaEvent::ScanStarted { scan_id, .. } => {
                 log::debug!(
-                    "Ignoring ScanStarted media event {} on media SSE",
+                    "Ignoring ScanStarted event {} - handled by scan subscription",
                     scan_id
                 );
                 None
             }
             MediaEvent::ScanCompleted { scan_id, .. } => {
                 log::debug!(
-                    "Ignoring ScanCompleted media event {} on media SSE",
+                    "Ignoring ScanCompleted event {} - handled by scan subscription",
                     scan_id
                 );
                 None
             }
             MediaEvent::ScanProgress { scan_id, .. } => {
                 log::debug!(
-                    "Ignoring ScanProgress media event {} on media SSE",
+                    "Ignoring ScanProgress event {} - handled by scan subscription",
                     scan_id
                 );
                 None
             }
             MediaEvent::ScanFailed { scan_id, error, .. } => {
-                log::warn!(
-                    "Ignoring ScanFailed media event {} on media SSE: {}",
-                    scan_id,
-                    error
-                );
+                log::error!("Scan {} failed: {}", scan_id, error);
+                // Could emit a scan failed message if needed
                 None
             }
         }
@@ -442,70 +435,13 @@ impl LibraryMessage {
 mod tests {
     use super::*;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    use ferrex_core::player_prelude::{
-        LibraryId, MediaID, MovieBatchId, MovieID, ScanEventMetadata,
-        ScanProgressEvent, ScanStageLatencySummary, SeriesID,
-    };
-    use ferrex_player_api::{
-        services::api::ApiService, testing::TestApiService,
-    };
+    use ferrex_core::player_prelude::{MediaID, MovieID};
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;
-    use std::sync::Arc;
 
     fn sample_event() -> MediaEvent {
         MediaEvent::MediaDeleted {
             id: MediaID::Movie(MovieID::new()),
-        }
-    }
-
-    fn sample_scan_metadata(library_id: LibraryId) -> ScanEventMetadata {
-        ScanEventMetadata {
-            version: "1".into(),
-            correlation_id: uuid::Uuid::now_v7(),
-            idempotency_key: "scan-event".into(),
-            library_id,
-        }
-    }
-
-    fn sample_scan_progress(
-        scan_id: uuid::Uuid,
-        library_id: LibraryId,
-    ) -> ScanProgressEvent {
-        sample_scan_progress_with_sequence(scan_id, library_id, 1)
-    }
-
-    fn sample_scan_progress_with_sequence(
-        scan_id: uuid::Uuid,
-        library_id: LibraryId,
-        sequence: u64,
-    ) -> ScanProgressEvent {
-        ScanProgressEvent {
-            version: "1".into(),
-            scan_id,
-            library_id,
-            status: "running".into(),
-            completed_items: sequence.min(10),
-            total_items: 10,
-            validated_items: sequence.min(10),
-            known_unchanged_items: 0,
-            skipped_items: 0,
-            failed_items: 0,
-            needs_attention_items: 0,
-            retrying_items: 0,
-            sequence,
-            current_path: Some(format!("/media/movie-{sequence}.mkv")),
-            path_key: None,
-            p95_stage_latencies_ms: ScanStageLatencySummary {
-                scan: 1,
-                analyze: 2,
-                index: 3,
-            },
-            correlation_id: scan_id,
-            idempotency_key: format!("scan-progress-{sequence}"),
-            emitted_at: chrono::Utc::now(),
-            terminal_at: None,
-            reason_details: Vec::new(),
         }
     }
 
@@ -526,148 +462,5 @@ mod tests {
 
         let decoded = decode_media_event(&json).expect("decode json");
         assert_eq!(decoded, event);
-    }
-
-    #[test]
-    fn scan_media_events_are_ignored_on_media_sse() {
-        let library_id = LibraryId::new();
-        let scan_id = uuid::Uuid::now_v7();
-        let api: Arc<dyn ApiService> = Arc::new(TestApiService::default());
-        let state = MediaEventState::new("http://localhost".into(), api);
-
-        let scan_events = [
-            MediaEvent::ScanStarted {
-                scan_id,
-                metadata: sample_scan_metadata(library_id),
-            },
-            MediaEvent::ScanProgress {
-                scan_id,
-                progress: sample_scan_progress(scan_id, library_id),
-            },
-            MediaEvent::ScanCompleted {
-                scan_id,
-                metadata: sample_scan_metadata(library_id),
-            },
-            MediaEvent::ScanFailed {
-                scan_id,
-                error: "scan failed".into(),
-                metadata: sample_scan_metadata(library_id),
-            },
-        ];
-
-        for event in scan_events {
-            assert!(
-                state.convert_media_event(event).is_none(),
-                "scan media SSE events must not request dashboard refreshes"
-            );
-        }
-    }
-
-    #[test]
-    fn catalog_media_events_survive_high_volume_scan_progress() {
-        let library_id = LibraryId::new();
-        let scan_id = uuid::Uuid::now_v7();
-        let batch_id = MovieBatchId::new(7).expect("valid batch id");
-        let series_id = SeriesID::new();
-        let api: Arc<dyn ApiService> = Arc::new(TestApiService::default());
-        let state = MediaEventState::new("http://localhost".into(), api);
-
-        let mut movie_fetches = Vec::new();
-        let mut series_fetches = Vec::new();
-        let mut dashboard_refreshes = 0usize;
-
-        for sequence in 1..=1_000 {
-            let mut events = vec![MediaEvent::ScanProgress {
-                scan_id,
-                progress: sample_scan_progress_with_sequence(
-                    scan_id, library_id, sequence,
-                ),
-            }];
-
-            if sequence == 250 {
-                events.push(MediaEvent::MovieBatchFinalized {
-                    library_id,
-                    batch_id,
-                });
-            }
-            if sequence == 750 {
-                events.push(MediaEvent::SeriesBundleFinalized {
-                    library_id,
-                    series_id,
-                });
-            }
-
-            for event in events {
-                let Some(message) = state.convert_media_event(event) else {
-                    continue;
-                };
-
-                match message {
-                    LibraryMessage::FetchMovieBatch {
-                        library_id,
-                        batch_id,
-                    } => movie_fetches.push((library_id, batch_id)),
-                    LibraryMessage::FetchSeriesBundle {
-                        library_id,
-                        series_id,
-                    } => series_fetches.push((library_id, series_id)),
-                    LibraryMessage::RefreshScanDashboard(_)
-                    | LibraryMessage::RefreshScanDashboardRun(_) => {
-                        dashboard_refreshes += 1;
-                    }
-                    other => panic!(
-                        "unexpected media subscription message: {}",
-                        other.name()
-                    ),
-                }
-            }
-        }
-
-        assert_eq!(movie_fetches, vec![(library_id, batch_id)]);
-        assert_eq!(series_fetches, vec![(library_id, series_id)]);
-        assert_eq!(
-            dashboard_refreshes, 0,
-            "scan progress on the media stream must not trigger dashboard refreshes"
-        );
-    }
-
-    #[test]
-    fn catalog_media_events_still_request_targeted_updates() {
-        let library_id = LibraryId::new();
-        let batch_id = MovieBatchId::new(7).expect("valid batch id");
-        let series_id = SeriesID::new();
-        let deleted_id = MediaID::Movie(MovieID::new());
-        let api: Arc<dyn ApiService> = Arc::new(TestApiService::default());
-        let state = MediaEventState::new("http://localhost".into(), api);
-
-        assert!(matches!(
-            state.convert_media_event(MediaEvent::MovieBatchFinalized {
-                library_id,
-                batch_id,
-            }),
-            Some(LibraryMessage::FetchMovieBatch {
-                library_id: message_library_id,
-                batch_id: message_batch_id,
-            }) if message_library_id == library_id
-                && message_batch_id == batch_id
-        ));
-
-        assert!(matches!(
-            state.convert_media_event(MediaEvent::SeriesBundleFinalized {
-                library_id,
-                series_id,
-            }),
-            Some(LibraryMessage::FetchSeriesBundle {
-                library_id: message_library_id,
-                series_id: message_series_id,
-            }) if message_library_id == library_id
-                && message_series_id == series_id
-        ));
-
-        assert!(matches!(
-            state.convert_media_event(MediaEvent::MediaDeleted { id: deleted_id }),
-            Some(LibraryMessage::MediaDeleted(message_id))
-                if message_id == deleted_id
-        ));
     }
 }

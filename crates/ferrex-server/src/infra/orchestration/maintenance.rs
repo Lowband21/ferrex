@@ -3,12 +3,10 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use ferrex_core::api::types::ScanRunMode;
-use ferrex_core::database::repositories::manifest::PostgresManifestRepository;
-use ferrex_core::database::repository_ports::scan_observability::ScanRunRetentionPolicy;
 use ferrex_core::domain::scan::orchestration::{
     JobEvent, JobEventPayload, JobId, JobKind, MaintenanceLibrary,
     MaintenancePlanningLimits, config::MaintenanceConfig,
-    plan_manifest_maintenance_sweep,
+    plan_maintenance_sweep,
 };
 use ferrex_core::types::LibraryId;
 use tokio::sync::Mutex;
@@ -88,7 +86,6 @@ impl MaintenanceScheduler {
                 }
                 _ = ticker.tick() => {
                     self.expire_stalled_runs().await;
-                    self.prune_retained_scan_runs(Utc::now()).await;
                     self.schedule_due_libraries().await;
                 }
                 event = events.recv() => {
@@ -139,13 +136,9 @@ impl MaintenanceScheduler {
                 continue;
             }
 
-            let manifest = PostgresManifestRepository::new(
-                self.orchestrator.runtime.queue().pool().clone(),
-            );
-            let plan = match plan_manifest_maintenance_sweep(
+            let plan = match plan_maintenance_sweep(
                 &maintenance_library,
                 self.orchestrator.cursors.as_ref(),
-                &manifest,
                 limits,
                 now,
             )
@@ -275,23 +268,23 @@ impl MaintenanceScheduler {
     async fn observe_job_event(&self, event: JobEvent) {
         let (job_id, terminal_failure) = match event.payload {
             JobEventPayload::Completed {
-                kind: JobKind::FolderScan | JobKind::ManifestScan,
+                kind: JobKind::FolderScan,
                 job_id,
                 ..
             } => (job_id, false),
             JobEventPayload::DeadLettered {
-                kind: JobKind::FolderScan | JobKind::ManifestScan,
+                kind: JobKind::FolderScan,
                 job_id,
                 ..
             } => (job_id, true),
             JobEventPayload::Failed {
-                kind: JobKind::FolderScan | JobKind::ManifestScan,
+                kind: JobKind::FolderScan,
                 job_id,
                 retryable: false,
                 ..
             } => (job_id, true),
             JobEventPayload::Failed {
-                kind: JobKind::FolderScan | JobKind::ManifestScan,
+                kind: JobKind::FolderScan,
                 ..
             } => return,
             _ => return,
@@ -376,37 +369,6 @@ impl MaintenanceScheduler {
                 "maintenance sweep stalled before terminal state; last_scan not updated"
             );
             self.backoff(library_id, now).await;
-        }
-    }
-
-    async fn prune_retained_scan_runs(&self, now: DateTime<Utc>) {
-        let retention_days = self.config.scan_run_retention_days;
-        if retention_days == 0 {
-            return;
-        }
-
-        let terminal_before =
-            now - ChronoDuration::days(i64::from(retention_days));
-        match self
-            .orchestrator
-            .unit_of_work
-            .scan_observability
-            .prune(ScanRunRetentionPolicy { terminal_before })
-            .await
-        {
-            Ok(0) => {}
-            Ok(pruned_runs) => info!(
-                pruned_runs,
-                retention_days,
-                terminal_before = %terminal_before,
-                "pruned retained scan observability runs"
-            ),
-            Err(err) => warn!(
-                error = %err,
-                retention_days,
-                terminal_before = %terminal_before,
-                "failed to prune retained scan observability runs"
-            ),
         }
     }
 

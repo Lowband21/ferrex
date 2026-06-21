@@ -10,20 +10,13 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Duration, Utc};
 use tokio::fs;
 
-use crate::database::repository_ports::manifest::{
-    ManifestPartitionCursorRecord, ManifestRepository,
-};
 use crate::domain::scan::actors::folder::is_media_file_path;
-use crate::domain::scan::manifest::{
-    ManifestPartitionScope, ManifestRootId, ManifestRootScope, ManifestScope,
-};
 use crate::domain::scan::orchestration::context::{
     FolderScanContext, MovieFolderScanContext, MovieRootPath, SeasonFolderPath,
     SeasonFolderScanContext, SeriesFolderScanContext, SeriesRootPath,
 };
 use crate::domain::scan::orchestration::job::{
-    EnqueueRequest, FolderScanJob, JobPayload, JobPriority, ManifestScanJob,
-    ManifestScanTrigger, ScanReason,
+    EnqueueRequest, FolderScanJob, JobPayload, JobPriority, ScanReason,
 };
 use crate::domain::scan::orchestration::scan_cursor::{
     ScanCursorRepository, normalize_path,
@@ -218,103 +211,6 @@ where
     Ok(plan)
 }
 
-/// Build bounded manifest-backed maintenance work for one due library.
-///
-/// This reuses the legacy cursor/folder planner for due-ness and counters, then
-/// schedules root manifest scans (so flat-root media and zero-folder roots are
-/// observed) plus stale manifest partitions from previous runs or legacy scan
-/// cursors.
-pub async fn plan_manifest_maintenance_sweep<C, M>(
-    library: &MaintenanceLibrary,
-    cursors: &C,
-    manifest: &M,
-    limits: MaintenancePlanningLimits,
-    now: DateTime<Utc>,
-) -> Result<MaintenancePlan>
-where
-    C: ScanCursorRepository + ?Sized,
-    M: ManifestRepository + ?Sized,
-{
-    let legacy_plan =
-        plan_maintenance_sweep(library, cursors, limits, now).await?;
-    let mut plan = MaintenancePlan::empty(library.id, legacy_plan.due);
-    plan.stale_cursor_count = legacy_plan.stale_cursor_count;
-    plan.new_root_folder_count = legacy_plan.new_root_folder_count;
-    plan.skipped_root_entries = legacy_plan.skipped_root_entries;
-    plan.errors = legacy_plan.errors;
-    if !plan.due {
-        return Ok(plan);
-    }
-
-    let mut planned_manifest_scopes = HashSet::new();
-
-    for (idx, root) in library.paths.iter().enumerate() {
-        if plan.requests.len() >= limits.max_jobs_per_library {
-            break;
-        }
-        let root_id = match u16::try_from(idx) {
-            Ok(root_id) => root_id,
-            Err(_) => {
-                plan.errors.push(format!(
-                    "library {} has more than {} manifest roots",
-                    library.id,
-                    u16::MAX
-                ));
-                continue;
-            }
-        };
-        let root_norm = normalize_path(root)
-            .unwrap_or_else(|_| root.to_string_lossy().to_string());
-        let scope = ManifestScope::Root(ManifestRootScope {
-            library_id: library.id,
-            library_type: library.library_type,
-            root_id: ManifestRootId(root_id),
-            root_path_norm: root_norm,
-        });
-        let key = manifest_maintenance_scope_key(&scope);
-        if planned_manifest_scopes.insert(key) {
-            plan.requests.push(manifest_request(
-                scope,
-                ScanReason::MaintenanceSweep,
-                ManifestScanTrigger::Maintenance,
-                now,
-            ));
-        }
-    }
-
-    if plan.requests.len() < limits.max_jobs_per_library {
-        let older_than = now - library.scan_interval();
-        let remaining = limits
-            .max_jobs_per_library
-            .saturating_sub(plan.requests.len())
-            .min(u32::MAX as usize) as u32;
-        let stale_partitions = manifest
-            .list_stale_partitions(library.id, older_than, remaining)
-            .await?;
-        plan.stale_cursor_count = plan
-            .stale_cursor_count
-            .saturating_add(stale_partitions.len());
-
-        for cursor in stale_partitions {
-            if plan.requests.len() >= limits.max_jobs_per_library {
-                break;
-            }
-            let scope = manifest_scope_from_cursor(cursor);
-            let key = manifest_maintenance_scope_key(&scope);
-            if planned_manifest_scopes.insert(key) {
-                plan.requests.push(manifest_request(
-                    scope,
-                    ScanReason::MaintenanceSweep,
-                    ManifestScanTrigger::Maintenance,
-                    now,
-                ));
-            }
-        }
-    }
-
-    Ok(plan)
-}
-
 fn maintenance_request(
     library: &MaintenanceLibrary,
     folder_path_norm: String,
@@ -331,62 +227,6 @@ fn maintenance_request(
         JobPriority::P2,
         JobPayload::FolderScan(job),
     ))
-}
-
-fn manifest_request(
-    scope: ManifestScope,
-    scan_reason: ScanReason,
-    trigger: ManifestScanTrigger,
-    now: DateTime<Utc>,
-) -> EnqueueRequest {
-    EnqueueRequest::new(
-        JobPriority::P2,
-        JobPayload::ManifestScan(ManifestScanJob {
-            scope,
-            scan_reason,
-            enqueue_time: now,
-            trigger,
-        }),
-    )
-}
-
-fn manifest_scope_from_cursor(
-    cursor: ManifestPartitionCursorRecord,
-) -> ManifestScope {
-    let root = ManifestRootScope {
-        library_id: cursor.library_id,
-        library_type: cursor.library_type,
-        root_id: ManifestRootId(cursor.root_id),
-        root_path_norm: cursor.root_path_norm,
-    };
-
-    match cursor.partition_id {
-        Some(partition_id) => {
-            ManifestScope::Partition(ManifestPartitionScope {
-                root,
-                partition_id,
-                prefix_norm: cursor.prefix_norm,
-            })
-        }
-        None => ManifestScope::Root(root),
-    }
-}
-
-fn manifest_maintenance_scope_key(scope: &ManifestScope) -> String {
-    match scope {
-        ManifestScope::Root(root) => {
-            format!("root:{}:{}", root.root_id.0, root.root_path_norm)
-        }
-        ManifestScope::Partition(partition) => format!(
-            "partition:{}:{}:{}",
-            partition.root.root_id.0,
-            partition.partition_id.0,
-            partition
-                .prefix_norm
-                .as_deref()
-                .unwrap_or(partition.root.root_path_norm.as_str())
-        ),
-    }
 }
 
 /// Reconstruct the scan context for a persisted cursor or root child.
@@ -604,14 +444,6 @@ async fn discover_new_root_folders(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::repository_ports::manifest::{
-        ManifestBackfillSummary, ManifestBatchUpsertSummary,
-        ManifestDeferredWatchHintFilter, ManifestDeferredWatchHintInput,
-        ManifestDeferredWatchHintRecord, ManifestDeferredWatchHintStatus,
-        ManifestDiagnosticFilter, ManifestDiagnosticRecord,
-        ManifestMissingEntryRecord, ManifestRunCompletion,
-    };
-    use crate::domain::scan::manifest::{ManifestPartitionId, ManifestRun};
     use crate::domain::scan::orchestration::scan_cursor::ScanCursor;
     use async_trait::async_trait;
     use std::sync::Arc;
@@ -626,125 +458,6 @@ mod tests {
     impl FakeCursorRepository {
         async fn insert(&self, cursor: ScanCursor) {
             self.cursors.lock().await.push(cursor);
-        }
-    }
-
-    #[derive(Clone, Default)]
-    struct FakeManifestRepository {
-        stale_partitions: Arc<Mutex<Vec<ManifestPartitionCursorRecord>>>,
-    }
-
-    impl FakeManifestRepository {
-        async fn insert_stale_partition(
-            &self,
-            cursor: ManifestPartitionCursorRecord,
-        ) {
-            self.stale_partitions.lock().await.push(cursor);
-        }
-    }
-
-    #[async_trait]
-    impl ManifestRepository for FakeManifestRepository {
-        async fn start_run(&self, run: ManifestRun) -> Result<ManifestRun> {
-            Ok(run)
-        }
-
-        async fn upsert_batch_entries(
-            &self,
-            _run_id: Uuid,
-            _batch: &crate::domain::scan::manifest::ManifestEntryBatch,
-        ) -> Result<ManifestBatchUpsertSummary> {
-            Ok(ManifestBatchUpsertSummary::default())
-        }
-
-        async fn complete_run(
-            &self,
-            completion: ManifestRunCompletion,
-        ) -> Result<ManifestRun> {
-            Ok(ManifestRun {
-                run_id: completion.run_id,
-                scope: ManifestScope::Root(ManifestRootScope {
-                    library_id: LibraryId::new(),
-                    library_type: LibraryType::Movies,
-                    root_id: ManifestRootId(0),
-                    root_path_norm: String::new(),
-                }),
-                status: completion.status,
-                started_at: completion.completed_at,
-                completed_at: Some(completion.completed_at),
-                entries_seen: completion.entries_seen,
-                diagnostics_seen: completion.diagnostics_seen,
-            })
-        }
-
-        async fn mark_missing_entries_after_successful_run(
-            &self,
-            _run_id: Uuid,
-        ) -> Result<Vec<ManifestMissingEntryRecord>> {
-            Ok(Vec::new())
-        }
-
-        async fn list_stale_partitions(
-            &self,
-            library_id: LibraryId,
-            older_than: DateTime<Utc>,
-            limit: u32,
-        ) -> Result<Vec<ManifestPartitionCursorRecord>> {
-            let mut rows = self
-                .stale_partitions
-                .lock()
-                .await
-                .iter()
-                .filter(|cursor| {
-                    cursor.library_id == library_id
-                        && cursor
-                            .last_successful_at
-                            .map(|at| at < older_than)
-                            .unwrap_or(true)
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            rows.truncate(limit as usize);
-            Ok(rows)
-        }
-
-        async fn list_diagnostics(
-            &self,
-            _filter: ManifestDiagnosticFilter,
-        ) -> Result<Vec<ManifestDiagnosticRecord>> {
-            Ok(Vec::new())
-        }
-
-        async fn upsert_deferred_watch_hint(
-            &self,
-            _hint: ManifestDeferredWatchHintInput,
-        ) -> Result<ManifestDeferredWatchHintRecord> {
-            Err(MediaError::Internal(
-                "fake manifest deferred hints are not used".into(),
-            ))
-        }
-
-        async fn list_deferred_watch_hints(
-            &self,
-            _filter: ManifestDeferredWatchHintFilter,
-        ) -> Result<Vec<ManifestDeferredWatchHintRecord>> {
-            Ok(Vec::new())
-        }
-
-        async fn update_deferred_watch_hint_status(
-            &self,
-            _id: Uuid,
-            _status: ManifestDeferredWatchHintStatus,
-            _last_error: Option<String>,
-        ) -> Result<Option<ManifestDeferredWatchHintRecord>> {
-            Ok(None)
-        }
-
-        async fn backfill_legacy_manifest_state(
-            &self,
-            _library_id: Option<LibraryId>,
-        ) -> Result<ManifestBackfillSummary> {
-            Ok(ManifestBackfillSummary::default())
         }
     }
 
@@ -826,34 +539,6 @@ mod tests {
             enabled: true,
             auto_scan: true,
             watch_for_changes,
-        }
-    }
-
-    fn stale_manifest_cursor(
-        library: &MaintenanceLibrary,
-        root_path_norm: String,
-        prefix_norm: String,
-        last_successful_at: DateTime<Utc>,
-    ) -> ManifestPartitionCursorRecord {
-        ManifestPartitionCursorRecord {
-            library_id: library.id,
-            library_type: library.library_type,
-            root_id: 0,
-            root_path_norm,
-            partition_key: "partition-7".into(),
-            partition_id: Some(ManifestPartitionId(7)),
-            prefix_norm: Some(prefix_norm),
-            last_successful_run_id: Some(Uuid::now_v7()),
-            last_successful_at: Some(last_successful_at),
-            last_observed_at: Some(last_successful_at),
-            entries_seen: 0,
-            diagnostics_seen: 0,
-            supported_media_seen: 0,
-            first_path_norm: None,
-            last_path_norm: None,
-            legacy_scan_path_hash: None,
-            backfilled_from_legacy: false,
-            updated_at: last_successful_at,
         }
     }
 
@@ -948,134 +633,5 @@ mod tests {
             panic!("expected folder scan")
         };
         assert!(job.context.folder_path_norm().ends_with("Stale Movie"));
-    }
-
-    #[tokio::test]
-    async fn manifest_plan_enqueues_root_scan_for_flat_root_media() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path().to_path_buf();
-        std::fs::write(root.join("flat-root.mkv"), b"movie")
-            .expect("flat media");
-        let now = Utc::now();
-        let library = test_library(root.clone(), None, true);
-        let cursors = FakeCursorRepository::default();
-        let manifest = FakeManifestRepository::default();
-
-        let plan = plan_manifest_maintenance_sweep(
-            &library,
-            &cursors,
-            &manifest,
-            MaintenancePlanningLimits::new(4, 16),
-            now,
-        )
-        .await
-        .expect("manifest plan");
-
-        assert!(plan.due);
-        assert_eq!(plan.requests.len(), 1);
-        assert!(plan.requests.iter().all(|request| {
-            matches!(request.payload, JobPayload::ManifestScan(_))
-        }));
-        let JobPayload::ManifestScan(job) = &plan.requests[0].payload else {
-            panic!("expected manifest scan")
-        };
-        assert_eq!(job.scan_reason, ScanReason::MaintenanceSweep);
-        assert_eq!(job.trigger, ManifestScanTrigger::Maintenance);
-        let ManifestScope::Root(scope) = &job.scope else {
-            panic!("flat-root maintenance should scan the manifest root")
-        };
-        assert_eq!(scope.root_path_norm, normalize_path(&root).unwrap());
-    }
-
-    #[tokio::test]
-    async fn manifest_plan_prioritizes_root_scan_when_legacy_folders_fill_limit()
-     {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path().to_path_buf();
-        std::fs::create_dir_all(root.join("Top Level Movie"))
-            .expect("movie dir");
-        std::fs::write(root.join("flat-root.mkv"), b"movie")
-            .expect("flat media");
-        let now = Utc::now();
-        let library = test_library(root.clone(), None, true);
-        let cursors = FakeCursorRepository::default();
-        let manifest = FakeManifestRepository::default();
-
-        let plan = plan_manifest_maintenance_sweep(
-            &library,
-            &cursors,
-            &manifest,
-            MaintenancePlanningLimits::new(1, 16),
-            now,
-        )
-        .await
-        .expect("manifest plan");
-
-        assert_eq!(plan.requests.len(), 1);
-        assert!(matches!(
-            plan.requests[0].payload,
-            JobPayload::ManifestScan(_)
-        ));
-        let JobPayload::ManifestScan(job) = &plan.requests[0].payload else {
-            panic!("expected manifest scan")
-        };
-        assert!(matches!(job.scope, ManifestScope::Root(_)));
-    }
-
-    #[tokio::test]
-    async fn manifest_plan_includes_stale_manifest_partitions() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path().to_path_buf();
-        let stale_partition = root.join("Stale Movie");
-        std::fs::create_dir_all(&stale_partition).expect("stale dir");
-        let now = Utc::now();
-        let library =
-            test_library(root.clone(), Some(now - Duration::minutes(61)), true);
-        let root_norm = normalize_path(&root).expect("root norm");
-        let stale_norm = normalize_path(&stale_partition).expect("stale norm");
-        let cursors = FakeCursorRepository::default();
-        let manifest = FakeManifestRepository::default();
-        manifest
-            .insert_stale_partition(stale_manifest_cursor(
-                &library,
-                root_norm.clone(),
-                stale_norm.clone(),
-                now - Duration::minutes(120),
-            ))
-            .await;
-
-        let plan = plan_manifest_maintenance_sweep(
-            &library,
-            &cursors,
-            &manifest,
-            MaintenancePlanningLimits::new(4, 16),
-            now,
-        )
-        .await
-        .expect("manifest plan");
-
-        assert!(plan.requests.iter().all(|request| {
-            matches!(request.payload, JobPayload::ManifestScan(_))
-        }));
-        assert!(plan.requests.iter().any(|request| {
-            matches!(
-                &request.payload,
-                JobPayload::ManifestScan(ManifestScanJob {
-                    scope: ManifestScope::Root(scope),
-                    trigger: ManifestScanTrigger::Maintenance,
-                    ..
-                }) if scope.root_path_norm == root_norm
-            )
-        }));
-        assert!(plan.requests.iter().any(|request| {
-            matches!(
-                &request.payload,
-                JobPayload::ManifestScan(ManifestScanJob {
-                    scope: ManifestScope::Partition(scope),
-                    trigger: ManifestScanTrigger::Maintenance,
-                    ..
-                }) if scope.prefix_norm.as_deref() == Some(stale_norm.as_str())
-            )
-        }));
     }
 }

@@ -13,20 +13,10 @@ use std::{
     },
 };
 
-use ferrex_core::api::{
-    IncrementalScanStatusView, ManifestDeferredWatchHintsHealthView,
-    ManifestDiagnosticCodeCountView, ManifestRunStatusCountsView,
-    ManifestScanHealthView, ScanQueueDepths,
-};
+use ferrex_core::api::{IncrementalScanStatusView, ScanQueueDepths};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
-use ferrex_core::database::repositories::{
-    manifest::PostgresManifestRepository, media::PostgresMediaRepository,
-};
-use ferrex_core::database::repository_ports::manifest::{
-    ManifestDeferredWatchHintFilter, ManifestDeferredWatchHintStatus,
-    ManifestRepository,
-};
+use ferrex_core::database::repositories::media::PostgresMediaRepository;
 use ferrex_core::domain::scan::actors::provider::TmdbMetadataActor;
 use ferrex_core::domain::scan::actors::{
     DefaultFolderScanActor, DefaultLibraryActor, LibraryActorCommand,
@@ -43,18 +33,12 @@ use ferrex_core::domain::scan::orchestration::{
     budget::InMemoryBudget,
     config::OrchestratorConfig,
     correlation::CorrelationCache,
-    dispatcher::{
-        DefaultJobDispatcher, DefaultManifestScanExecutor, DispatcherActors,
-        JobDispatcher,
-    },
+    dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
     events::{
         JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
         stable_path_key,
     },
-    job::{
-        EnqueueRequest, JobHandle, JobKind, JobPriority, ManifestScanJob,
-        ManifestScanTrigger, ScanReason,
-    },
+    job::{EnqueueRequest, JobHandle, JobKind, JobPriority},
     lease::{DequeueRequest, JobLease},
     queue::QueueService,
     runtime::{
@@ -69,10 +53,8 @@ use ferrex_core::domain::scan::orchestration::{
 };
 use ferrex_core::domain::scan::{
     FileChangeEventBus, FsWatchConfig, FsWatchObserver, FsWatchService,
-    ManifestPartitionId, ManifestPartitionScope, ManifestRootId,
-    ManifestRootScope, ManifestScope, ManifestWalkLimits, ManifestWalker,
     PostgresCursorRepository, PostgresFileChangeEventBus, PostgresQueueService,
-    ScannerLayoutContract, SeriesScanStateRepository,
+    SeriesScanStateRepository,
 };
 use ferrex_core::error::{MediaError, Result};
 use ferrex_core::infra::media::{
@@ -80,7 +62,7 @@ use ferrex_core::infra::media::{
 };
 use ferrex_core::types::LibraryId;
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
 mod maintenance;
 
@@ -124,11 +106,6 @@ struct CursorHealth {
     oldest_cursor_staleness_ms: Option<u64>,
 }
 
-#[derive(Debug, Default)]
-struct ManifestHealth {
-    view: ManifestScanHealthView,
-}
-
 pub struct ScanOrchestrator {
     runtime: Arc<
         OrchestratorRuntime<
@@ -164,26 +141,8 @@ impl ScanOrchestrator {
         budget: Arc<InMemoryBudget>,
         file_filters: ScannerFileFilterPolicy,
     ) -> Result<Self> {
-        // A bulk scan can emit tens of thousands of job/domain events in a
-        // short burst (folder, analysis, metadata, index, and image work).
-        // Keep enough ring-buffer headroom that scan progress observers do not
-        // miss downstream jobs and finalize the run from stale counters.
-        let events = Arc::new(InProcJobEventBus::new(65_536));
+        let events = Arc::new(InProcJobEventBus::new(256));
         let correlations = CorrelationCache::default();
-        let manifest_contract = ScannerLayoutContract::new(
-            file_filters
-                .media_extensions()
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-            file_filters
-                .ignored_extensions()
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-            file_filters
-                .ignored_path_patterns()
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-        );
         let actors = Arc::new(ActorSystem::new(
             Arc::clone(&tmdb),
             Arc::clone(&image_service),
@@ -213,21 +172,6 @@ impl ScanOrchestrator {
 
         let delta_repo =
             Arc::new(PostgresMediaRepository::new(queue.pool().clone()));
-        let manifest_repo =
-            Arc::new(PostgresManifestRepository::new(queue.pool().clone()));
-        let manifest_media =
-            Arc::new(PostgresMediaRepository::new(queue.pool().clone()));
-        let manifest_executor = Arc::new(DefaultManifestScanExecutor::new(
-            ManifestWalker::new(
-                manifest_contract,
-                ManifestWalkLimits::default(),
-            ),
-            manifest_repo,
-            manifest_media,
-            Arc::clone(&queue),
-            Arc::clone(&events),
-            Arc::clone(&cursors),
-        ));
         let dispatcher: Arc<dyn JobDispatcher> = Arc::new(
             DefaultJobDispatcher::new(
                 Arc::clone(&queue),
@@ -238,8 +182,7 @@ impl ScanOrchestrator {
                 dispatcher_actors,
                 correlations.clone(),
             )
-            .with_delta_repository(delta_repo)
-            .with_manifest_executor(manifest_executor),
+            .with_delta_repository(delta_repo),
         );
 
         let watch_cfg = config.watch.clone();
@@ -321,113 +264,6 @@ impl ScanOrchestrator {
             .await
     }
 
-    pub async fn recover_library_scan_state(
-        &self,
-        library_id: LibraryId,
-        correlation_id: uuid::Uuid,
-    ) -> Result<()> {
-        self.command_library(
-            library_id,
-            LibraryActorCommand::RecoverStuckScan {
-                correlation_id: Some(correlation_id),
-            },
-        )
-        .await?;
-
-        if let Err(err) =
-            self.watchers.replay_unprocessed_events(library_id).await
-        {
-            warn!(
-                library = %library_id,
-                error = %err,
-                "failed to replay durable watch events during scan recovery"
-            );
-        }
-
-        self.replay_manifest_deferred_hints(library_id, correlation_id)
-            .await
-    }
-
-    async fn replay_manifest_deferred_hints(
-        &self,
-        library_id: LibraryId,
-        correlation_id: uuid::Uuid,
-    ) -> Result<()> {
-        let library = self
-            .unit_of_work
-            .libraries
-            .get_library_reference(library_id.0)
-            .await?;
-        let repo = PostgresManifestRepository::new(
-            self.runtime.queue().pool().clone(),
-        );
-        let hints = repo
-            .list_deferred_watch_hints(ManifestDeferredWatchHintFilter {
-                library_id: Some(library_id),
-                status: Some(ManifestDeferredWatchHintStatus::Pending),
-                available_before: Some(chrono::Utc::now()),
-                limit: Some(256),
-            })
-            .await?;
-
-        for hint in hints {
-            let root = ManifestRootScope {
-                library_id,
-                library_type: library.library_type,
-                root_id: ManifestRootId(hint.root_id),
-                root_path_norm: hint.root_path_norm.clone(),
-            };
-            let scope = if hint.path_norm == hint.root_path_norm
-                || hint.hint_kind == "overflow"
-            {
-                ManifestScope::Root(root)
-            } else {
-                ManifestScope::Partition(ManifestPartitionScope {
-                    root,
-                    partition_id: ManifestPartitionId(
-                        (hint.id.as_u128() & u128::from(u16::MAX)) as u16,
-                    ),
-                    prefix_norm: Some(hint.path_norm.clone()),
-                })
-            };
-            let mut request = EnqueueRequest::new(
-                JobPriority::P0,
-                ferrex_core::domain::scan::orchestration::JobPayload::ManifestScan(
-                    ManifestScanJob {
-                        scope,
-                        scan_reason: ScanReason::HotChange,
-                        enqueue_time: chrono::Utc::now(),
-                        trigger: ManifestScanTrigger::Recovery,
-                    },
-                ),
-            );
-            request.correlation_id = Some(correlation_id);
-            match self.enqueue(request).await {
-                Ok(_) => {
-                    let _ = repo
-                        .update_deferred_watch_hint_status(
-                            hint.id,
-                            ManifestDeferredWatchHintStatus::Applied,
-                            None,
-                        )
-                        .await;
-                }
-                Err(err) => {
-                    let _ = repo
-                        .update_deferred_watch_hint_status(
-                            hint.id,
-                            ManifestDeferredWatchHintStatus::Pending,
-                            Some(err.to_string()),
-                        )
-                        .await;
-                    return Err(err);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn cursor_repository(&self) -> Arc<PostgresCursorRepository> {
         Arc::clone(&self.cursors)
     }
@@ -488,7 +324,6 @@ impl ScanOrchestrator {
             self.watch_observer.snapshot();
         let file_watch = self.file_watch_health().await?;
         let cursor = self.cursor_health().await?;
-        let manifest = self.manifest_health(&libraries).await?;
 
         Ok(IncrementalScanStatusView {
             enabled_libraries,
@@ -508,12 +343,6 @@ impl ScanOrchestrator {
             stale_cursor_libraries: cursor.stale_cursor_libraries,
             stale_cursors: cursor.stale_cursors,
             oldest_cursor_staleness_ms: cursor.oldest_cursor_staleness_ms,
-            manifest_stale_partitions: manifest.view.stale_partitions,
-            manifest_pending_watch_hints: manifest
-                .view
-                .deferred_watch_hints
-                .pending,
-            manifest: manifest.view,
         })
     }
 
@@ -578,165 +407,6 @@ impl ScanOrchestrator {
             oldest_cursor_staleness_ms: row
                 .oldest_cursor_staleness_ms
                 .map(|value| value.max(0) as u64),
-        })
-    }
-
-    async fn manifest_health(
-        &self,
-        _libraries: &[ferrex_core::types::library::Library],
-    ) -> Result<ManifestHealth> {
-        let queue = self.runtime.queue();
-        let pool = queue.pool();
-
-        let mut run_counts = ManifestRunStatusCountsView::default();
-        for row in sqlx::query!(
-            r#"
-            SELECT status AS "status!", COUNT(*)::bigint AS "count!"
-            FROM manifest_runs
-            GROUP BY status
-            "#
-        )
-        .fetch_all(pool)
-        .await?
-        {
-            let count = nonnegative_i64_to_u64(row.count);
-            match row.status.as_str() {
-                "pending" => run_counts.pending = count,
-                "running" => run_counts.running = count,
-                "completed" => run_counts.completed = count,
-                "completed_with_diagnostics" => {
-                    run_counts.completed_with_diagnostics = count;
-                }
-                "failed" => run_counts.failed = count,
-                "canceled" => run_counts.canceled = count,
-                "stalled" => run_counts.stalled = count,
-                _ => {}
-            }
-        }
-
-        let deferred_row = sqlx::query!(
-            r#"
-            SELECT
-                COUNT(*) FILTER (WHERE status = 'pending')::bigint AS "pending!",
-                COUNT(*) FILTER (WHERE status = 'applied')::bigint AS "applied!",
-                COUNT(*) FILTER (WHERE status = 'dropped')::bigint AS "dropped!",
-                COUNT(*)::bigint AS "total!",
-                (EXTRACT(EPOCH FROM (
-                    NOW() - (MIN(created_at) FILTER (WHERE status = 'pending'))
-                )) * 1000)::bigint AS oldest_pending_lag_ms
-            FROM manifest_deferred_watch_hints
-            "#
-        )
-        .fetch_one(pool)
-        .await?;
-        let deferred_watch_hints = ManifestDeferredWatchHintsHealthView {
-            pending: nonnegative_i64_to_u64(deferred_row.pending),
-            applied: nonnegative_i64_to_u64(deferred_row.applied),
-            dropped: nonnegative_i64_to_u64(deferred_row.dropped),
-            total: nonnegative_i64_to_u64(deferred_row.total),
-            oldest_pending_lag_ms: optional_nonnegative_i64_to_u64(
-                deferred_row.oldest_pending_lag_ms,
-            ),
-        };
-
-        let stale_row = sqlx::query!(
-            r#"
-            WITH stale AS (
-                SELECT c.last_successful_at, c.updated_at
-                FROM manifest_partition_cursors c
-                JOIN libraries l ON l.id = c.library_id
-                WHERE l.enabled = true
-                  AND l.auto_scan = true
-                  AND (
-                      c.last_successful_at IS NULL
-                      OR c.last_successful_at < NOW() - (
-                          GREATEST(l.scan_interval_minutes, 1)::text || ' minutes'
-                      )::interval
-                  )
-            )
-            SELECT
-                COUNT(*)::bigint AS "stale_partitions!",
-                (EXTRACT(EPOCH FROM (
-                    NOW() - MIN(COALESCE(last_successful_at, updated_at))
-                )) * 1000)::bigint AS oldest_manifest_lag_ms
-            FROM stale
-            "#
-        )
-        .fetch_one(pool)
-        .await?;
-        let stale_partitions =
-            nonnegative_i64_to_u64(stale_row.stale_partitions);
-        let oldest_manifest_lag_ms =
-            optional_nonnegative_i64_to_u64(stale_row.oldest_manifest_lag_ms);
-
-        let stall_timeout_ms = i64::try_from(
-            self.runtime.config().maintenance.run_stall_timeout_ms,
-        )
-        .unwrap_or(i64::MAX);
-        let stuck_row = sqlx::query!(
-            r#"
-            SELECT
-                COUNT(*) FILTER (
-                    WHERE status IN ('pending', 'running')
-                      AND started_at < NOW() - ($1::bigint * interval '1 millisecond')
-                )::bigint AS "stuck_runs!",
-                COUNT(DISTINCT library_id) FILTER (
-                    WHERE status IN ('pending', 'running')
-                      AND started_at < NOW() - ($1::bigint * interval '1 millisecond')
-                )::bigint AS "stuck_libraries!"
-            FROM manifest_runs
-            "#,
-            stall_timeout_ms
-        )
-        .fetch_one(pool)
-        .await?;
-        let stuck_runs = nonnegative_i64_to_u64(stuck_row.stuck_runs);
-        let stuck_libraries = nonnegative_i64_to_u64(stuck_row.stuck_libraries);
-
-        let mut diagnostics_by_code = Vec::new();
-        for row in sqlx::query!(
-            r#"
-            SELECT
-                code AS "code!",
-                COUNT(*)::bigint AS "count!",
-                COUNT(*) FILTER (WHERE severity = 'info')::bigint AS "info!",
-                COUNT(*) FILTER (WHERE severity = 'warning')::bigint AS "warnings!",
-                COUNT(*) FILTER (WHERE severity = 'error')::bigint AS "errors!",
-                MAX(created_at) AS latest_at
-            FROM manifest_diagnostics
-            GROUP BY code
-            ORDER BY COUNT(*) DESC, code ASC
-            LIMIT 64
-            "#
-        )
-        .fetch_all(pool)
-        .await?
-        {
-            diagnostics_by_code.push(ManifestDiagnosticCodeCountView {
-                code: row.code,
-                count: nonnegative_i64_to_u64(row.count),
-                info: nonnegative_i64_to_u64(row.info),
-                warnings: nonnegative_i64_to_u64(row.warnings),
-                errors: nonnegative_i64_to_u64(row.errors),
-                latest_at: row.latest_at,
-            });
-        }
-
-        let recovery_required = stale_partitions > 0
-            || deferred_watch_hints.pending > 0
-            || stuck_runs > 0;
-
-        Ok(ManifestHealth {
-            view: ManifestScanHealthView {
-                run_counts,
-                deferred_watch_hints,
-                diagnostics_by_code,
-                stale_partitions,
-                oldest_manifest_lag_ms,
-                stuck_runs,
-                stuck_libraries,
-                recovery_required,
-            },
         })
     }
 
@@ -944,21 +614,12 @@ impl ScanOrchestrator {
         let queue = self.runtime.queue();
         Ok(ferrex_core::api::scan::ScanQueueDepths {
             folder_scan: queue.queue_depth(JobKind::FolderScan).await?,
-            manifest_scan: queue.queue_depth(JobKind::ManifestScan).await?,
             analyze: queue.queue_depth(JobKind::MediaAnalyze).await?,
             metadata: queue.queue_depth(JobKind::MetadataEnrich).await?,
             index: queue.queue_depth(JobKind::IndexUpsert).await?,
             image_fetch: queue.queue_depth(JobKind::ImageFetch).await?,
         })
     }
-}
-
-fn nonnegative_i64_to_u64(value: i64) -> u64 {
-    value.max(0) as u64
-}
-
-fn optional_nonnegative_i64_to_u64(value: Option<i64>) -> Option<u64> {
-    value.map(nonnegative_i64_to_u64)
 }
 
 impl ScanOrchestrator {

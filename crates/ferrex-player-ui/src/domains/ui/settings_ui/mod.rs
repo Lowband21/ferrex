@@ -1,6 +1,6 @@
 pub mod update;
 
-use ferrex_core::player_prelude::{ScanRecoveryRequest, UserScale};
+use ferrex_core::player_prelude::UserScale;
 use ferrex_model::{Library, LibraryId};
 pub use update::update_settings_ui;
 
@@ -208,13 +208,8 @@ pub enum SettingsUiMessage {
     PauseLibraryScan(LibraryId, Uuid), // Proxy for Library::PauseScan
     ResumeLibraryScan(LibraryId, Uuid), // Proxy for Library::ResumeScan
     CancelLibraryScan(LibraryId, Uuid), // Proxy for Library::CancelScan
-    // Scanner diagnostics + admin actions
-    FetchScanMetrics,     // Proxy for Library::FetchScanMetrics
-    RefreshScanDashboard, // Proxy for Library::RefreshScanDashboard
-    SelectScanDashboardRun(Uuid), // Proxy for Library::SelectScanDashboardRun
-    RefreshScanDashboardRun(Uuid), // Proxy for Library::RefreshScanDashboardRun
-    RecoverScanPath(ScanRecoveryRequest), // Proxy for Library::RecoverScanPath
-    CopyScannerDiagnostic(String), // Clipboard helper for diagnostic IDs
+    // Scanner metrics + admin actions
+    FetchScanMetrics, // Proxy for Library::FetchScanMetrics
     ResetLibrary(LibraryId), // Proxy for Library::ResetLibrary
 }
 
@@ -352,11 +347,6 @@ impl SettingsUiMessage {
             Self::ResumeLibraryScan(_, _) => "UI::ResumeLibraryScan",
             Self::CancelLibraryScan(_, _) => "UI::CancelLibraryScan",
             Self::FetchScanMetrics => "UI::FetchScanMetrics",
-            Self::RefreshScanDashboard => "UI::RefreshScanDashboard",
-            Self::SelectScanDashboardRun(_) => "UI::SelectScanDashboardRun",
-            Self::RefreshScanDashboardRun(_) => "UI::RefreshScanDashboardRun",
-            Self::RecoverScanPath(_) => "UI::RecoverScanPath",
-            Self::CopyScannerDiagnostic(_) => "UI::CopyScannerDiagnostic",
             Self::ResetLibrary(_) => "UI::ResetLibrary",
         }
     }
@@ -531,25 +521,6 @@ impl std::fmt::Debug for SettingsUiMessage {
             }
             SettingsUiMessage::FetchScanMetrics => {
                 write!(f, "UI::FetchScanMetrics")
-            }
-            SettingsUiMessage::RefreshScanDashboard => {
-                write!(f, "UI::RefreshScanDashboard")
-            }
-            SettingsUiMessage::SelectScanDashboardRun(scan_id) => {
-                write!(f, "UI::SelectScanDashboardRun({})", scan_id)
-            }
-            SettingsUiMessage::RefreshScanDashboardRun(scan_id) => {
-                write!(f, "UI::RefreshScanDashboardRun({})", scan_id)
-            }
-            SettingsUiMessage::RecoverScanPath(request) => {
-                write!(
-                    f,
-                    "UI::RecoverScanPath(library={}, path={})",
-                    request.library_id, request.path
-                )
-            }
-            SettingsUiMessage::CopyScannerDiagnostic(_) => {
-                write!(f, "UI::CopyScannerDiagnostic")
             }
             SettingsUiMessage::ResetLibrary(id) => {
                 write!(f, "UI::ResetLibrary({})", id)

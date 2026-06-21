@@ -67,12 +67,6 @@ impl FromStr for ScanSseEventType {
     }
 }
 
-/// SSE event names for catalog/media invalidation payloads.
-///
-/// New server-side publishers should use a catalog-only event type rather than
-/// publishing scan telemetry through this model. `Scan` remains for legacy
-/// decode compatibility with older `/events/media` payloads; live scan progress
-/// belongs on the per-run scan progress SSE stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]

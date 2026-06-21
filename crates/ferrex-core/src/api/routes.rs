@@ -158,12 +158,6 @@ pub mod v1 {
         pub const PROGRESS_STREAM: &str = v1_path!("/scan/{id}/progress");
         pub const METRICS: &str = v1_path!("/scan/metrics");
         pub const CONFIG: &str = v1_path!("/scan/config");
-        pub const RUNS: &str = v1_path!("/scan/runs");
-        pub const RUN_DETAILS: &str = v1_path!("/scan/runs/{id}");
-        pub const RUN_EVENTS: &str = v1_path!("/scan/runs/{id}/events");
-        pub const RUN_FAILURES: &str = v1_path!("/scan/runs/{id}/failures");
-        pub const HEALTH: &str = v1_path!("/scan/health");
-        pub const RECOVER: &str = v1_path!("/scan/recover");
     }
 
     pub mod events {

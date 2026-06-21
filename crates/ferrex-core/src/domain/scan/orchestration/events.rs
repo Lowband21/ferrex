@@ -82,15 +82,11 @@ pub enum JobEventPayload {
         kind: JobKind,
         priority: JobPriority,
         retryable: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
     },
     DeadLettered {
         job_id: JobId,
         kind: JobKind,
         priority: JobPriority,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
     },
     ThroughputTick {
         queue_depths: Vec<(JobKind, usize)>,
@@ -168,9 +164,6 @@ pub enum ScanEvent {
         context: Box<FolderScanContext>,
         /// Why this folder should be scanned; used to determine priority
         reason: ScanReason,
-        /// Correlates child folder work back to the scan run that discovered it.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        correlation_id: Option<Uuid>,
     },
     MediaFileDiscovered(Box<MediaFileDiscovered>),
     FolderScanCompleted(FolderScanSummary),
@@ -255,20 +248,6 @@ pub fn stable_path_key(payload: &JobPayload) -> Option<SubjectKey> {
         }
         JobPayload::EpisodeMatch(job) => {
             SubjectKey::path(job.path_norm.clone()).ok()
-        }
-        JobPayload::ManifestScan(job) => {
-            let path = match &job.scope {
-                crate::domain::scan::manifest::ManifestScope::Root(root) => {
-                    root.root_path_norm.clone()
-                }
-                crate::domain::scan::manifest::ManifestScope::Partition(
-                    partition,
-                ) => partition
-                    .prefix_norm
-                    .clone()
-                    .unwrap_or_else(|| partition.root.root_path_norm.clone()),
-            };
-            SubjectKey::path(path).ok()
         }
     }
 }

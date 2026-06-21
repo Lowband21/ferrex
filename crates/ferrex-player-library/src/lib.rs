@@ -9,15 +9,13 @@ pub mod media_root_browser;
 pub mod messages;
 pub mod repo_snapshot;
 pub mod repository;
-pub mod scan_dashboard;
 pub mod server;
 pub mod types;
 pub mod update;
 pub mod update_handlers;
 
 use self::{
-    media_root_browser::State as MediaRootBrowserState,
-    scan_dashboard::ScanDashboardState, types::LibraryFormData,
+    media_root_browser::State as MediaRootBrowserState, types::LibraryFormData,
 };
 use ferrex_core::player_prelude::{
     Library, LibraryId, LibraryMediaCache, ScanCommandAcceptedResponse,
@@ -86,7 +84,6 @@ pub struct LibraryDomainState {
 
     pub scan_metrics: Option<ScanMetrics>,
     pub scan_config: Option<ScanConfig>,
-    pub scan_dashboard: ScanDashboardState,
     pub media_root_browser: MediaRootBrowserState,
 
     pub api_service: Option<Arc<dyn ApiService>>,
@@ -131,7 +128,6 @@ impl LibraryDomainState {
             load_state: LibrariesLoadState::NotStarted,
             scan_metrics: None,
             scan_config: None,
-            scan_dashboard: ScanDashboardState::default(),
             media_root_browser: MediaRootBrowserState::default(),
             api_service,
             libraries: Vec::new(),
@@ -447,7 +443,6 @@ impl LibraryDomain {
         if event.is_database_cleared() || event.is_clear_libraries() {
             self.state.library_media_cache.clear();
             self.state.clear_scan_tracking();
-            self.state.scan_dashboard.clear();
             self.state.load_state = LibrariesLoadState::NotStarted;
         }
         DomainTask::none()

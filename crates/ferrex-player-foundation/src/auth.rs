@@ -151,7 +151,7 @@ impl Default for DeviceTrustPolicyResponse {
 }
 
 /// Device authentication status returned by device auth endpoints.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DeviceAuthStatus {
     /// Whether the current device is registered with the server.
@@ -166,6 +166,18 @@ pub struct DeviceAuthStatus {
     /// Current remember-device/trust policy.
     #[cfg_attr(feature = "serde", serde(default))]
     pub device_trust_policy: DeviceTrustPolicyResponse,
+}
+
+impl Default for DeviceAuthStatus {
+    fn default() -> Self {
+        Self {
+            device_registered: false,
+            has_pin: false,
+            remaining_attempts: None,
+            pin_policy: PinPolicyResponse::default(),
+            device_trust_policy: DeviceTrustPolicyResponse::default(),
+        }
+    }
 }
 
 /// Server setup status shared by setup endpoints and clients.

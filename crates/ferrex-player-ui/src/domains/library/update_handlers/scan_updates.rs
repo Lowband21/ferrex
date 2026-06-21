@@ -3,12 +3,9 @@ use crate::domains::library::server;
 use crate::state::State;
 use ferrex_core::player_prelude::{
     LibraryId, ScanLifecycleStatus, ScanPathReasonCategory,
-    ScanPathReasonDetail, ScanProgressEvent, ScanRecoveryRequest, ScanRunMode,
-    ScanSnapshotDto,
+    ScanPathReasonDetail, ScanProgressEvent, ScanRunMode, ScanSnapshotDto,
 };
-use ferrex_player_library::scan_dashboard::ScanDashboardRefreshReason;
 use iced::Task;
-use std::time::Instant;
 use uuid::Uuid;
 
 pub fn handle_scan_library(
@@ -168,111 +165,10 @@ pub fn handle_fetch_scan_config(state: &mut State) -> Task<LibraryMessage> {
     )
 }
 
-pub fn handle_refresh_scan_dashboard(
-    state: &mut State,
-    reason: ScanDashboardRefreshReason,
-) -> Task<LibraryMessage> {
-    if !state
-        .domains
-        .library
-        .state
-        .scan_dashboard
-        .try_begin_overview_load(reason, Instant::now())
-    {
-        log::debug!(
-            "Skipping scan dashboard overview refresh for {:?}: request deduped or rate limited",
-            reason
-        );
-        return Task::none();
-    }
-
-    let api = state.api_service.clone();
-    Task::perform(
-        async move {
-            server::scan::fetch_scan_dashboard_overview(api)
-                .await
-                .map_err(|e| e.to_string())
-        },
-        LibraryMessage::ScanDashboardOverviewLoaded,
-    )
-}
-
-pub fn handle_select_scan_dashboard_run(
-    state: &mut State,
-    scan_id: Uuid,
-) -> Task<LibraryMessage> {
-    state
-        .domains
-        .library
-        .state
-        .scan_dashboard
-        .begin_run_load(scan_id);
-    handle_fetch_scan_dashboard_run(state, scan_id, true)
-}
-
-pub fn handle_refresh_scan_dashboard_run(
-    state: &mut State,
-    scan_id: Uuid,
-) -> Task<LibraryMessage> {
-    if state.domains.library.state.scan_dashboard.selected_run_id
-        == Some(scan_id)
-    {
-        state
-            .domains
-            .library
-            .state
-            .scan_dashboard
-            .begin_run_load(scan_id);
-    }
-    handle_fetch_scan_dashboard_run(state, scan_id, false)
-}
-
-fn handle_fetch_scan_dashboard_run(
-    state: &State,
-    scan_id: Uuid,
-    select: bool,
-) -> Task<LibraryMessage> {
-    let api = state.api_service.clone();
-    Task::perform(
-        async move {
-            server::scan::fetch_scan_dashboard_run(api, scan_id)
-                .await
-                .map_err(|e| e.to_string())
-        },
-        move |result| LibraryMessage::ScanDashboardRunLoaded {
-            scan_id,
-            select,
-            result,
-        },
-    )
-}
-
-pub fn handle_recover_scan_path(
-    state: &mut State,
-    request: ScanRecoveryRequest,
-) -> Task<LibraryMessage> {
-    let api = state.api_service.clone();
-    Task::perform(
-        async move {
-            server::scan::recover_scan_path(api, request)
-                .await
-                .map_err(|e| e.to_string())
-        },
-        LibraryMessage::ScanRecoveryCompleted,
-    )
-}
-
 pub fn apply_active_scan_snapshot(
     state: &mut State,
     snapshots: Vec<ScanSnapshotDto>,
 ) {
-    state
-        .domains
-        .library
-        .state
-        .scan_dashboard
-        .apply_active_snapshots(&snapshots);
-
     if snapshots.is_empty() {
         log::debug!("Active scan snapshot list empty");
     } else {
@@ -319,13 +215,6 @@ pub fn apply_scan_progress_frame(state: &mut State, frame: ScanProgressEvent) {
         frame.completed_items,
         frame.total_items
     );
-
-    state
-        .domains
-        .library
-        .state
-        .scan_dashboard
-        .apply_progress_frame(&frame);
 
     if !state
         .domains

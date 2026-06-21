@@ -42,16 +42,18 @@ pub struct ScannerConfig {
     /// declares the bulk scan complete. Shorter windows flip to maintenance
     /// faster; longer windows help when the filesystem reports changes slowly.
     pub quiescence_window_ms: u64,
-    /// File extensions treated as video assets by the scanner and manifest
-    /// layout contract. Defaults mirror the core's built-in allow-list; values
-    /// are normalized to lowercase without a leading dot.
+    /// File extensions treated as video assets by the scanner.
+    /// Defaults mirror the core's built-in allow-list; values are normalized to
+    /// lowercase without a leading dot.
     #[serde(default = "default_video_extensions")]
     pub video_extensions: Vec<String>,
     /// File extensions to ignore even if they appear in a library folder.
     /// Useful for noisy network mounts that emit temporary sidecar files.
     #[serde(default)]
     pub ignored_extensions: Vec<String>,
-    /// Shell-style path patterns skipped before layout classification.
+    /// Path fragments to document operator ignore policy. These are exposed in
+    /// config responses for observability while extension filters are the
+    /// scanner-enforced filter surface today.
     #[serde(default)]
     pub ignored_path_patterns: Vec<String>,
 }
