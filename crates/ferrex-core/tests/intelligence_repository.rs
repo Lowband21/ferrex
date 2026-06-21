@@ -194,6 +194,99 @@ async fn refresh_upserts_available_media_rows(pool: PgPool) {
         scripts("test_libraries", "intelligence_base")
     )
 )]
+async fn metadata_refresh_updates_revision_rows_and_dependent_artifacts(
+    pool: PgPool,
+) {
+    let repo = repo(&pool);
+    let arrival = Uuid::parse_str(MOVIE_ARRIVAL).unwrap();
+
+    repo.refresh_media_read_model(lib_a(), movie_from_str(MOVIE_ARRIVAL), None)
+        .await
+        .unwrap();
+    let (revision_before, summary_before): (i64, Option<String>) =
+        sqlx::query_as(
+            "SELECT source_revision, summary FROM intelligence_media_context \
+             WHERE media_id = $1 AND user_id IS NULL AND context_kind = 'metadata'",
+        )
+        .bind(arrival)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(summary_before.unwrap().contains("linguist"));
+
+    let artifact_id = repo
+        .upsert_artifact(IntelligenceArtifactUpsert {
+            artifact_id: None,
+            kind: IntelligenceArtifactKind::Summary,
+            scope: IntelligenceArtifactScope::Global,
+            library_id: Some(lib_a()),
+            media_id: Some(movie_from_str(MOVIE_ARRIVAL)),
+            run_id: None,
+            supersedes_artifact_id: None,
+            title: "Arrival generated summary".to_string(),
+            summary: Some("Old generated context".to_string()),
+            excerpt: None,
+            content: json!({"body": "old"}),
+            metadata: json!({}),
+            source_revision: revision_before,
+        })
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE movie_metadata SET overview = $2 WHERE movie_id = $1")
+        .bind(arrival)
+        .bind("A revised linguistic first-contact summary for refresh testing.")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    repo.refresh_media_read_model(lib_a(), movie_from_str(MOVIE_ARRIVAL), None)
+        .await
+        .unwrap();
+
+    let (revision_after, summary_after): (i64, Option<String>) =
+        sqlx::query_as(
+            "SELECT source_revision, summary FROM intelligence_media_context \
+             WHERE media_id = $1 AND user_id IS NULL AND context_kind = 'metadata'",
+        )
+        .bind(arrival)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(revision_after > revision_before);
+    assert!(summary_after.unwrap().contains("revised linguistic"));
+
+    let search_text: String = sqlx::query_scalar(
+        "SELECT search_text FROM intelligence_search_documents \
+         WHERE media_id = $1 AND user_id IS NULL AND document_kind = 'combined'",
+    )
+    .bind(arrival)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(search_text.contains("revised linguistic"));
+
+    let (status, invalidated, reason): (String, bool, Option<String>) =
+        sqlx::query_as(
+            "SELECT status::text, invalidated_at IS NOT NULL, invalidation_reason \
+             FROM intelligence_artifacts WHERE id = $1",
+        )
+        .bind(artifact_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "invalidated");
+    assert!(invalidated);
+    assert_eq!(reason.as_deref(), Some("media_metadata_changed"));
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(
+        path = "../fixtures",
+        scripts("test_libraries", "intelligence_base")
+    )
+)]
 async fn refresh_is_deterministic_across_runs(pool: PgPool) {
     let repo = repo(&pool);
     repo.refresh_library_read_models(lib_a(), None)
@@ -566,6 +659,93 @@ async fn artifact_upsert_list_get_invalidate_global_and_user(pool: PgPool) {
         scripts("test_libraries", "intelligence_base")
     )
 )]
+async fn superseded_artifact_records_invalidation_metadata_and_keeps_sources(
+    pool: PgPool,
+) {
+    let repo = repo(&pool);
+
+    let old_id = repo
+        .upsert_artifact(IntelligenceArtifactUpsert {
+            artifact_id: None,
+            kind: IntelligenceArtifactKind::Summary,
+            scope: IntelligenceArtifactScope::Global,
+            library_id: Some(lib_a()),
+            media_id: Some(movie_from_str(MOVIE_ARRIVAL)),
+            run_id: None,
+            supersedes_artifact_id: None,
+            title: "Old Arrival summary".to_string(),
+            summary: Some("Old provenance-bearing summary".to_string()),
+            excerpt: None,
+            content: json!({"body": "old"}),
+            metadata: json!({}),
+            source_revision: 7,
+        })
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO intelligence_artifact_sources \
+         (artifact_id, source_ordinal, source_kind, source_revision, source_excerpt) \
+         VALUES ($1, 0, 'manual', 7, 'operator supplied source')",
+    )
+    .bind(old_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let new_id = repo
+        .upsert_artifact(IntelligenceArtifactUpsert {
+            artifact_id: None,
+            kind: IntelligenceArtifactKind::Summary,
+            scope: IntelligenceArtifactScope::Global,
+            library_id: Some(lib_a()),
+            media_id: Some(movie_from_str(MOVIE_ARRIVAL)),
+            run_id: None,
+            supersedes_artifact_id: Some(old_id),
+            title: "New Arrival summary".to_string(),
+            summary: Some("Replacement summary".to_string()),
+            excerpt: None,
+            content: json!({"body": "new"}),
+            metadata: json!({}),
+            source_revision: 8,
+        })
+        .await
+        .unwrap();
+
+    let (status, invalidated, reason): (String, bool, Option<String>) =
+        sqlx::query_as(
+            "SELECT status::text, invalidated_at IS NOT NULL, invalidation_reason \
+             FROM intelligence_artifacts WHERE id = $1",
+        )
+        .bind(old_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "superseded");
+    assert!(invalidated);
+    assert!(
+        reason.unwrap().contains(&new_id.to_string()),
+        "supersede reason should identify replacement artifact"
+    );
+
+    let source_excerpt: String = sqlx::query_scalar(
+        "SELECT source_excerpt FROM intelligence_artifact_sources \
+         WHERE artifact_id = $1 AND source_ordinal = 0",
+    )
+    .bind(old_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(source_excerpt, "operator supplied source");
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(
+        path = "../fixtures",
+        scripts("test_libraries", "intelligence_base")
+    )
+)]
 async fn run_and_tool_call_audit_lifecycle(pool: PgPool) {
     let repo = repo(&pool);
     let alice = Uuid::parse_str(ALICE).unwrap();
@@ -761,6 +941,112 @@ async fn invalidate_media_read_model_marks_rows_invalidated(pool: PgPool) {
         response.candidates.is_empty(),
         "invalidated read models must not appear in search"
     );
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(
+        path = "../fixtures",
+        scripts("test_libraries", "intelligence_base")
+    )
+)]
+async fn catalog_unavailability_invalidates_all_scopes_and_artifacts(
+    pool: PgPool,
+) {
+    let repo = repo(&pool);
+    let alice = Uuid::parse_str(ALICE).unwrap();
+    let arrival = Uuid::parse_str(MOVIE_ARRIVAL).unwrap();
+
+    repo.refresh_library_read_models(lib_a(), None)
+        .await
+        .unwrap();
+    repo.refresh_library_read_models(lib_a(), Some(alice))
+        .await
+        .unwrap();
+
+    let global_id = repo
+        .upsert_artifact(IntelligenceArtifactUpsert {
+            artifact_id: None,
+            kind: IntelligenceArtifactKind::Summary,
+            scope: IntelligenceArtifactScope::Global,
+            library_id: Some(lib_a()),
+            media_id: Some(movie_from_str(MOVIE_ARRIVAL)),
+            run_id: None,
+            supersedes_artifact_id: None,
+            title: "Global Arrival note".to_string(),
+            summary: Some("Global generated note".to_string()),
+            excerpt: None,
+            content: json!({}),
+            metadata: json!({}),
+            source_revision: 1,
+        })
+        .await
+        .unwrap();
+    let user_id = repo
+        .upsert_artifact(IntelligenceArtifactUpsert {
+            artifact_id: None,
+            kind: IntelligenceArtifactKind::UserNote,
+            scope: IntelligenceArtifactScope::User(alice),
+            library_id: Some(lib_a()),
+            media_id: Some(movie_from_str(MOVIE_ARRIVAL)),
+            run_id: None,
+            supersedes_artifact_id: None,
+            title: "Alice Arrival note".to_string(),
+            summary: Some("Private generated note".to_string()),
+            excerpt: None,
+            content: json!({}),
+            metadata: json!({}),
+            source_revision: 1,
+        })
+        .await
+        .unwrap();
+
+    repo.invalidate_media_catalog_change(
+        lib_a(),
+        movie_from_str(MOVIE_ARRIVAL),
+        "file tombstoned",
+    )
+    .await
+    .unwrap();
+
+    let active_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM intelligence_media_context \
+         WHERE media_id = $1 AND status = 'active'",
+    )
+    .bind(arrival)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active_rows, 0);
+
+    let invalidated_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM intelligence_media_context \
+         WHERE media_id = $1 AND status = 'invalidated'",
+    )
+    .bind(arrival)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        invalidated_rows >= 2,
+        "global and user rows should be invalidated"
+    );
+
+    let artifact_states: Vec<(Uuid, String, bool, Option<String>)> =
+        sqlx::query_as(
+            "SELECT id, status::text, invalidated_at IS NOT NULL, invalidation_reason \
+             FROM intelligence_artifacts WHERE id = ANY($1)",
+        )
+        .bind(vec![global_id, user_id])
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(artifact_states.len(), 2);
+    for (_, status, invalidated, reason) in artifact_states {
+        assert_eq!(status, "invalidated");
+        assert!(invalidated);
+        assert_eq!(reason.as_deref(), Some("file tombstoned"));
+    }
 }
 
 #[sqlx::test(

@@ -655,7 +655,7 @@ async fn upsert_context_row(
     excerpt: &str,
     metadata: &Value,
     source_revision: i64,
-) -> Result<()> {
+) -> Result<bool> {
     let media_id = row.media_id.as_uuid();
     let media_type = media_type_str(&row.media_id);
     let title = truncate_chars(&row.title, 512);
@@ -690,10 +690,10 @@ async fn upsert_context_row(
         INSERT INTO intelligence_media_context (
             library_id, user_id, media_id, media_type, context_kind, status,
             title, sort_title, summary, excerpt, release_date, runtime_seconds,
-            source_system, source_revision, content_hash, metadata
+            source_system, source_revision, source_updated_at, content_hash, metadata
         )
         VALUES ($1, $2, $3, $4::media_type, $5, 'active', $6, $7, $8, $9, $10, $11,
-                'ferrex', $12, $13, $14::jsonb)
+                'ferrex', $12, now(), $13, $14::jsonb)
         {conflict_clause}
         DO UPDATE SET
             status = 'active',
@@ -710,9 +710,14 @@ async fn upsert_context_row(
             invalidated_at = NULL,
             invalidation_reason = NULL,
             updated_at = now()
+        WHERE intelligence_media_context.status <> 'active'
+           OR intelligence_media_context.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+           OR intelligence_media_context.invalidated_at IS NOT NULL
+           OR intelligence_media_context.invalidation_reason IS NOT NULL
+        RETURNING id
         "#,
     );
-    sqlx::query(&sql)
+    let changed = sqlx::query(&sql)
         .bind(library_id.0)
         .bind(user_id)
         .bind(media_id)
@@ -727,10 +732,11 @@ async fn upsert_context_row(
         .bind(source_revision)
         .bind(&hash)
         .bind(metadata)
-        .execute(pool)
+        .fetch_optional(pool)
         .await
-        .map_err(|e| internal_err(format!("failed to upsert context: {e}")))?;
-    Ok(())
+        .map_err(|e| internal_err(format!("failed to upsert context: {e}")))?
+        .is_some();
+    Ok(changed)
 }
 
 /// Upsert a global or user-scoped search-document read-model row.
@@ -745,7 +751,7 @@ async fn upsert_search_row(
     search_text: &str,
     metadata: &Value,
     source_revision: i64,
-) -> Result<()> {
+) -> Result<bool> {
     let media_id = row.media_id.as_uuid();
     let media_type = media_type_str(&row.media_id);
     let title = truncate_chars(&row.title, 512);
@@ -777,10 +783,10 @@ async fn upsert_search_row(
         INSERT INTO intelligence_search_documents (
             library_id, user_id, media_id, media_type, document_kind, status,
             title, summary, search_excerpt, search_text, language,
-            source_system, source_revision, content_hash, metadata
+            source_system, source_revision, source_updated_at, content_hash, metadata
         )
         VALUES ($1, $2, $3, $4::media_type, $5, 'active', $6, $7, $8, $9, 'simple',
-                'ferrex', $10, $11, $12::jsonb)
+                'ferrex', $10, now(), $11, $12::jsonb)
         {conflict_clause}
         DO UPDATE SET
             status = 'active',
@@ -795,9 +801,14 @@ async fn upsert_search_row(
             invalidated_at = NULL,
             invalidation_reason = NULL,
             updated_at = now()
+        WHERE intelligence_search_documents.status <> 'active'
+           OR intelligence_search_documents.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+           OR intelligence_search_documents.invalidated_at IS NOT NULL
+           OR intelligence_search_documents.invalidation_reason IS NOT NULL
+        RETURNING id
         "#,
     );
-    sqlx::query(&sql)
+    let changed = sqlx::query(&sql)
         .bind(library_id.0)
         .bind(user_id)
         .bind(media_id)
@@ -810,12 +821,11 @@ async fn upsert_search_row(
         .bind(source_revision)
         .bind(&hash)
         .bind(metadata)
-        .execute(pool)
+        .fetch_optional(pool)
         .await
-        .map_err(|e| {
-            internal_err(format!("failed to upsert search doc: {e}"))
-        })?;
-    Ok(())
+        .map_err(|e| internal_err(format!("failed to upsert search doc: {e}")))?
+        .is_some();
+    Ok(changed)
 }
 
 /// Available-movie rows for global read-model refresh.
@@ -960,7 +970,7 @@ async fn upsert_movie_read_model(
     user_id: Option<Uuid>,
     row: &MovieRefreshRow,
     source_revision: i64,
-) -> Result<()> {
+) -> Result<bool> {
     let media_id = MediaID::Movie(MovieID(row.media_id));
     let genres = fetch_genres(pool, &media_id).await?;
     let people = fetch_people(pool, &media_id).await?;
@@ -994,8 +1004,9 @@ async fn upsert_movie_read_model(
         &people,
     );
 
+    let mut changed = false;
     if user_id.is_none() {
-        upsert_context_row(
+        changed |= upsert_context_row(
             pool,
             library_id,
             None,
@@ -1007,7 +1018,7 @@ async fn upsert_movie_read_model(
             source_revision,
         )
         .await?;
-        upsert_search_row(
+        changed |= upsert_search_row(
             pool,
             library_id,
             None,
@@ -1021,7 +1032,7 @@ async fn upsert_movie_read_model(
         )
         .await?;
     }
-    Ok(())
+    Ok(changed)
 }
 
 fn build_search_text(
@@ -1055,7 +1066,7 @@ async fn upsert_episode_read_model(
     _user_id: Option<Uuid>,
     row: &EpisodeRefreshRow,
     source_revision: i64,
-) -> Result<()> {
+) -> Result<bool> {
     let title = row.title.clone().unwrap_or_else(|| {
         format!("S{:02}E{:02}", row.season_number, row.episode_number)
     });
@@ -1082,7 +1093,7 @@ async fn upsert_episode_read_model(
         build_search_text(&title, row.overview.as_deref(), &[], &people);
 
     // Episodes always contribute a global row (they have a direct media file).
-    upsert_context_row(
+    let mut changed = upsert_context_row(
         pool,
         library_id,
         None,
@@ -1094,7 +1105,7 @@ async fn upsert_episode_read_model(
         source_revision,
     )
     .await?;
-    upsert_search_row(
+    changed |= upsert_search_row(
         pool,
         library_id,
         None,
@@ -1107,7 +1118,7 @@ async fn upsert_episode_read_model(
         source_revision,
     )
     .await?;
-    Ok(())
+    Ok(changed)
 }
 
 async fn upsert_series_read_model(
@@ -1116,9 +1127,9 @@ async fn upsert_series_read_model(
     series_id: Uuid,
     available_episode_ids: &[Uuid],
     source_revision: i64,
-) -> Result<()> {
+) -> Result<bool> {
     if available_episode_ids.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let media_id = MediaID::Series(SeriesID(series_id));
     let genres = fetch_genres(pool, &media_id).await?;
@@ -1137,7 +1148,7 @@ async fn upsert_series_read_model(
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load series: {e}")))?;
-    let Some(row) = row else { return Ok(()) };
+    let Some(row) = row else { return Ok(false) };
     let title: String = row
         .try_get("title")
         .map_err(|e| internal_err(format!("decode series title: {e}")))?;
@@ -1182,7 +1193,7 @@ async fn upsert_series_read_model(
     let search_text =
         build_search_text(&title, overview.as_deref(), &genres, &people);
 
-    upsert_context_row(
+    let mut changed = upsert_context_row(
         pool,
         library_id,
         None,
@@ -1194,7 +1205,7 @@ async fn upsert_series_read_model(
         source_revision,
     )
     .await?;
-    upsert_search_row(
+    changed |= upsert_search_row(
         pool,
         library_id,
         None,
@@ -1207,7 +1218,7 @@ async fn upsert_series_read_model(
         source_revision,
     )
     .await?;
-    Ok(())
+    Ok(changed)
 }
 
 async fn upsert_season_read_model(
@@ -1215,7 +1226,7 @@ async fn upsert_season_read_model(
     library_id: LibraryId,
     season_id: Uuid,
     source_revision: i64,
-) -> Result<()> {
+) -> Result<bool> {
     let row = sqlx::query(
         r#"
         SELECT sr.season_number, sm.name, sm.overview, sm.air_date,
@@ -1229,7 +1240,7 @@ async fn upsert_season_read_model(
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load season: {e}")))?;
-    let Some(row) = row else { return Ok(()) };
+    let Some(row) = row else { return Ok(false) };
     let season_number: i16 = row
         .try_get("season_number")
         .map_err(|e| internal_err(format!("decode season_number: {e}")))?;
@@ -1266,7 +1277,7 @@ async fn upsert_season_read_model(
         .unwrap_or(&title);
     let search_text = build_search_text(&title, overview.as_deref(), &[], &[]);
 
-    upsert_context_row(
+    let mut changed = upsert_context_row(
         pool,
         library_id,
         None,
@@ -1278,7 +1289,7 @@ async fn upsert_season_read_model(
         source_revision,
     )
     .await?;
-    upsert_search_row(
+    changed |= upsert_search_row(
         pool,
         library_id,
         None,
@@ -1291,7 +1302,7 @@ async fn upsert_season_read_model(
         source_revision,
     )
     .await?;
-    Ok(())
+    Ok(changed)
 }
 
 /// User watch-progress row joined to its reference title.
@@ -1478,6 +1489,283 @@ async fn library_name(pool: &PgPool, library_id: LibraryId) -> Result<String> {
     row.ok_or_else(|| MediaError::NotFound("library not found".to_string()))
 }
 
+#[derive(Debug, Clone, Copy)]
+enum InvalidationScope {
+    Global,
+    User(Uuid),
+    All,
+}
+
+impl InvalidationScope {
+    fn bind_values(self) -> (&'static str, Option<Uuid>) {
+        match self {
+            InvalidationScope::Global => ("global", None),
+            InvalidationScope::User(user_id) => ("user", Some(user_id)),
+            InvalidationScope::All => ("all", None),
+        }
+    }
+}
+
+async fn invalidate_read_model_rows_for_media(
+    pool: &PgPool,
+    library_id: LibraryId,
+    media_id: MediaID,
+    scope: InvalidationScope,
+    reason: &str,
+    source_revision: i64,
+) -> Result<()> {
+    let (scope_mode, scope_user_id) = scope.bind_values();
+    let media_type = media_type_str(&media_id);
+    let reason = truncate_chars(reason, 512);
+
+    sqlx::query(
+        r#"
+        UPDATE intelligence_media_context
+        SET status = 'invalidated',
+            source_revision = $7,
+            source_updated_at = now(),
+            invalidated_at = now(),
+            invalidation_reason = $1,
+            updated_at = now()
+        WHERE library_id = $2
+          AND media_id = $3
+          AND media_type = $4::media_type
+          AND (
+              $5::text = 'all'
+              OR ($5::text = 'global' AND user_id IS NULL)
+              OR ($5::text = 'user' AND user_id = $6)
+          )
+        "#,
+    )
+    .bind(&reason)
+    .bind(library_id.0)
+    .bind(media_id.as_uuid())
+    .bind(media_type)
+    .bind(scope_mode)
+    .bind(scope_user_id)
+    .bind(source_revision)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        internal_err(format!("failed to invalidate media context rows: {e}"))
+    })?;
+
+    sqlx::query(
+        r#"
+        UPDATE intelligence_search_documents
+        SET status = 'invalidated',
+            source_revision = $7,
+            source_updated_at = now(),
+            invalidated_at = now(),
+            invalidation_reason = $1,
+            updated_at = now()
+        WHERE library_id = $2
+          AND media_id = $3
+          AND media_type = $4::media_type
+          AND (
+              $5::text = 'all'
+              OR ($5::text = 'global' AND user_id IS NULL)
+              OR ($5::text = 'user' AND user_id = $6)
+          )
+        "#,
+    )
+    .bind(&reason)
+    .bind(library_id.0)
+    .bind(media_id.as_uuid())
+    .bind(media_type)
+    .bind(scope_mode)
+    .bind(scope_user_id)
+    .bind(source_revision)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        internal_err(format!("failed to invalidate search document rows: {e}"))
+    })?;
+
+    Ok(())
+}
+
+async fn dependent_artifact_ids_for_media(
+    pool: &PgPool,
+    library_id: LibraryId,
+    media_id: MediaID,
+    scope: InvalidationScope,
+) -> Result<Vec<Uuid>> {
+    let (scope_mode, scope_user_id) = scope.bind_values();
+    let media_type = media_type_str(&media_id);
+
+    let rows = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        WITH RECURSIVE
+        media_context_rows AS (
+            SELECT id
+            FROM intelligence_media_context
+            WHERE library_id = $1
+              AND media_id = $2
+              AND media_type = $3::media_type
+              AND (
+                  $4::text = 'all'
+                  OR ($4::text = 'global' AND user_id IS NULL)
+                  OR ($4::text = 'user' AND user_id = $5)
+              )
+        ),
+        search_document_rows AS (
+            SELECT id
+            FROM intelligence_search_documents
+            WHERE library_id = $1
+              AND media_id = $2
+              AND media_type = $3::media_type
+              AND (
+                  $4::text = 'all'
+                  OR ($4::text = 'global' AND user_id IS NULL)
+                  OR ($4::text = 'user' AND user_id = $5)
+              )
+        ),
+        dependent_artifacts(artifact_id) AS (
+            SELECT ia.id
+            FROM intelligence_artifacts ia
+            WHERE ia.library_id = $1
+              AND ia.media_id = $2
+              AND ia.media_type = $3::media_type
+              AND ia.status IN ('draft', 'active', 'stale')
+              AND (
+                  $4::text = 'all'
+                  OR ($4::text = 'global' AND ia.user_id IS NULL)
+                  OR ($4::text = 'user' AND ia.user_id = $5)
+              )
+            UNION
+            SELECT src.artifact_id
+            FROM intelligence_artifact_sources src
+            JOIN intelligence_artifacts ia ON ia.id = src.artifact_id
+            WHERE src.status <> 'invalidated'
+              AND ia.status IN ('draft', 'active', 'stale')
+              AND (
+                  $4::text = 'all'
+                  OR ($4::text = 'global' AND ia.user_id IS NULL)
+                  OR ($4::text = 'user' AND ia.user_id = $5)
+              )
+              AND (
+                  (
+                      src.source_kind = 'media'
+                      AND src.source_library_id = $1
+                      AND src.source_media_id = $2
+                      AND src.source_media_type = $3::media_type
+                  )
+                  OR src.source_media_context_id IN (SELECT id FROM media_context_rows)
+                  OR src.source_search_document_id IN (SELECT id FROM search_document_rows)
+              )
+            UNION
+            SELECT src.artifact_id
+            FROM intelligence_artifact_sources src
+            JOIN dependent_artifacts dep ON src.source_artifact_id = dep.artifact_id
+            JOIN intelligence_artifacts ia ON ia.id = src.artifact_id
+            WHERE src.status <> 'invalidated'
+              AND ia.status IN ('draft', 'active', 'stale')
+              AND (
+                  $4::text = 'all'
+                  OR ($4::text = 'global' AND ia.user_id IS NULL)
+                  OR ($4::text = 'user' AND ia.user_id = $5)
+              )
+        )
+        SELECT artifact_id FROM dependent_artifacts
+        "#,
+    )
+    .bind(library_id.0)
+    .bind(media_id.as_uuid())
+    .bind(media_type)
+    .bind(scope_mode)
+    .bind(scope_user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        internal_err(format!("failed to resolve dependent artifacts: {e}"))
+    })?;
+
+    Ok(rows)
+}
+
+async fn invalidate_artifacts_for_media(
+    pool: &PgPool,
+    library_id: LibraryId,
+    media_id: MediaID,
+    scope: InvalidationScope,
+    reason: &str,
+) -> Result<()> {
+    let artifact_ids =
+        dependent_artifact_ids_for_media(pool, library_id, media_id, scope)
+            .await?;
+    if artifact_ids.is_empty() {
+        return Ok(());
+    }
+
+    let reason = truncate_chars(reason, 512);
+    sqlx::query(
+        r#"
+        UPDATE intelligence_artifacts
+        SET status = 'invalidated',
+            invalidated_at = now(),
+            invalidation_reason = $1,
+            updated_at = now()
+        WHERE id = ANY($2)
+          AND status IN ('draft', 'active', 'stale')
+        "#,
+    )
+    .bind(&reason)
+    .bind(&artifact_ids)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        internal_err(format!("failed to invalidate artifacts: {e}"))
+    })?;
+
+    sqlx::query(
+        r#"
+        UPDATE intelligence_artifact_sources
+        SET status = 'invalidated',
+            invalidated_at = now(),
+            invalidation_reason = $1,
+            updated_at = now()
+        WHERE artifact_id = ANY($2)
+          AND status <> 'invalidated'
+        "#,
+    )
+    .bind(&reason)
+    .bind(&artifact_ids)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        internal_err(format!("failed to invalidate artifact sources: {e}"))
+    })?;
+
+    Ok(())
+}
+
+async fn invalidate_catalog_change_for_media(
+    pool: &PgPool,
+    library_id: LibraryId,
+    media_id: MediaID,
+    reason: &str,
+) -> Result<()> {
+    let source_revision = current_source_revision(pool).await?;
+    invalidate_read_model_rows_for_media(
+        pool,
+        library_id,
+        media_id,
+        InvalidationScope::All,
+        reason,
+        source_revision,
+    )
+    .await?;
+    invalidate_artifacts_for_media(
+        pool,
+        library_id,
+        media_id,
+        InvalidationScope::All,
+        reason,
+    )
+    .await
+}
+
 // ---------------------------------------------------------------------------
 // Trait implementation
 // ---------------------------------------------------------------------------
@@ -1531,7 +1819,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     "duration": entry.duration,
                     "last_watched": entry.last_watched,
                 });
-                upsert_context_row(
+                let mut changed = upsert_context_row(
                     pool,
                     entry.library_id,
                     Some(uid),
@@ -1543,7 +1831,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     source_revision,
                 )
                 .await?;
-                upsert_search_row(
+                changed |= upsert_search_row(
                     pool,
                     entry.library_id,
                     Some(uid),
@@ -1556,6 +1844,16 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     source_revision,
                 )
                 .await?;
+                if changed {
+                    invalidate_artifacts_for_media(
+                        pool,
+                        entry.library_id,
+                        media_row.media_id,
+                        InvalidationScope::User(uid),
+                        "watch_state_changed",
+                    )
+                    .await?;
+                }
                 refreshed += 1;
             }
             return Ok(refreshed);
@@ -1564,7 +1862,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         // Global refresh: movies.
         let movies = load_available_movies(pool, library_id).await?;
         for movie in &movies {
-            upsert_movie_read_model(
+            let changed = upsert_movie_read_model(
                 pool,
                 library_id,
                 None,
@@ -1572,6 +1870,16 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 source_revision,
             )
             .await?;
+            if changed {
+                invalidate_artifacts_for_media(
+                    pool,
+                    library_id,
+                    MediaID::Movie(MovieID(movie.media_id)),
+                    InvalidationScope::All,
+                    "media_metadata_changed",
+                )
+                .await?;
+            }
             refreshed += 1;
         }
 
@@ -1582,7 +1890,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         let mut seasons_seen: std::collections::BTreeSet<Uuid> =
             std::collections::BTreeSet::new();
         for ep in &episodes {
-            upsert_episode_read_model(
+            let episode_changed = upsert_episode_read_model(
                 pool,
                 library_id,
                 None,
@@ -1590,24 +1898,44 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 source_revision,
             )
             .await?;
+            if episode_changed {
+                invalidate_artifacts_for_media(
+                    pool,
+                    library_id,
+                    MediaID::Episode(EpisodeID(ep.media_id)),
+                    InvalidationScope::All,
+                    "media_metadata_changed",
+                )
+                .await?;
+            }
             refreshed += 1;
             series_episodes
                 .entry(ep.series_id)
                 .or_default()
                 .push(ep.media_id);
             if seasons_seen.insert(ep.season_id) {
-                upsert_season_read_model(
+                let season_changed = upsert_season_read_model(
                     pool,
                     library_id,
                     ep.season_id,
                     source_revision,
                 )
                 .await?;
+                if season_changed {
+                    invalidate_artifacts_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Season(SeasonID(ep.season_id)),
+                        InvalidationScope::All,
+                        "media_metadata_changed",
+                    )
+                    .await?;
+                }
                 refreshed += 1;
             }
         }
         for (series_id, eps) in &series_episodes {
-            upsert_series_read_model(
+            let series_changed = upsert_series_read_model(
                 pool,
                 library_id,
                 *series_id,
@@ -1615,6 +1943,16 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 source_revision,
             )
             .await?;
+            if series_changed {
+                invalidate_artifacts_for_media(
+                    pool,
+                    library_id,
+                    MediaID::Series(SeriesID(*series_id)),
+                    InvalidationScope::All,
+                    "media_metadata_changed",
+                )
+                .await?;
+            }
             refreshed += 1;
         }
 
@@ -1663,6 +2001,13 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     internal_err(format!("failed to load movie: {e}"))
                 })?;
                 let Some(row) = row else {
+                    invalidate_catalog_change_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Movie(id),
+                        "media_unavailable",
+                    )
+                    .await?;
                     return Ok(());
                 };
                 let movie = MovieRefreshRow {
@@ -1693,7 +2038,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                         .ok()
                         .flatten(),
                 };
-                upsert_movie_read_model(
+                let changed = upsert_movie_read_model(
                     pool,
                     library_id,
                     None,
@@ -1701,6 +2046,16 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     source_revision,
                 )
                 .await?;
+                if changed {
+                    invalidate_artifacts_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Movie(id),
+                        InvalidationScope::All,
+                        "media_metadata_changed",
+                    )
+                    .await?;
+                }
             }
             MediaID::Episode(id) => {
                 let row = sqlx::query(
@@ -1723,6 +2078,13 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 .await
                 .map_err(|e| internal_err(format!("failed to load episode: {e}")))?;
                 let Some(row) = row else {
+                    invalidate_catalog_change_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Episode(id),
+                        "media_unavailable",
+                    )
+                    .await?;
                     return Ok(());
                 };
                 let ep = EpisodeRefreshRow {
@@ -1758,7 +2120,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                         .ok()
                         .flatten(),
                 };
-                upsert_episode_read_model(
+                let episode_changed = upsert_episode_read_model(
                     pool,
                     library_id,
                     None,
@@ -1766,14 +2128,34 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     source_revision,
                 )
                 .await?;
-                upsert_season_read_model(
+                if episode_changed {
+                    invalidate_artifacts_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Episode(EpisodeID(ep.media_id)),
+                        InvalidationScope::All,
+                        "media_metadata_changed",
+                    )
+                    .await?;
+                }
+                let season_changed = upsert_season_read_model(
                     pool,
                     library_id,
                     ep.season_id,
                     source_revision,
                 )
                 .await?;
-                upsert_series_read_model(
+                if season_changed {
+                    invalidate_artifacts_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Season(SeasonID(ep.season_id)),
+                        InvalidationScope::All,
+                        "media_metadata_changed",
+                    )
+                    .await?;
+                }
+                let series_changed = upsert_series_read_model(
                     pool,
                     library_id,
                     ep.series_id,
@@ -1781,6 +2163,16 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     source_revision,
                 )
                 .await?;
+                if series_changed {
+                    invalidate_artifacts_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Series(SeriesID(ep.series_id)),
+                        InvalidationScope::All,
+                        "media_metadata_changed",
+                    )
+                    .await?;
+                }
             }
             MediaID::Season(id) => {
                 let has_available_episode = sqlx::query_scalar::<_, bool>(
@@ -1803,11 +2195,29 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     internal_err(format!("failed to check season availability: {e}"))
                 })?;
                 if has_available_episode {
-                    upsert_season_read_model(
+                    let changed = upsert_season_read_model(
                         pool,
                         library_id,
                         id.0,
                         source_revision,
+                    )
+                    .await?;
+                    if changed {
+                        invalidate_artifacts_for_media(
+                            pool,
+                            library_id,
+                            MediaID::Season(id),
+                            InvalidationScope::All,
+                            "media_metadata_changed",
+                        )
+                        .await?;
+                    }
+                } else {
+                    invalidate_catalog_change_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Season(id),
+                        "media_unavailable",
                     )
                     .await?;
                 }
@@ -1835,14 +2245,34 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                         internal_err(format!("decode episode id: {e}"))
                     })?);
                 }
-                upsert_series_read_model(
-                    pool,
-                    library_id,
-                    id.0,
-                    &ids,
-                    source_revision,
-                )
-                .await?;
+                if ids.is_empty() {
+                    invalidate_catalog_change_for_media(
+                        pool,
+                        library_id,
+                        MediaID::Series(id),
+                        "media_unavailable",
+                    )
+                    .await?;
+                } else {
+                    let changed = upsert_series_read_model(
+                        pool,
+                        library_id,
+                        id.0,
+                        &ids,
+                        source_revision,
+                    )
+                    .await?;
+                    if changed {
+                        invalidate_artifacts_for_media(
+                            pool,
+                            library_id,
+                            MediaID::Series(id),
+                            InvalidationScope::All,
+                            "media_metadata_changed",
+                        )
+                        .await?;
+                    }
+                }
             }
         }
         Ok(())
@@ -1856,58 +2286,38 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         reason: &str,
     ) -> Result<()> {
         let pool = self.pool();
-        let media_type = media_type_str(&media_id);
-        let reason = truncate_chars(reason, 512);
-        let result = sqlx::query(
-            r#"
-            UPDATE intelligence_media_context
-            SET status = 'invalidated',
-                invalidated_at = now(),
-                invalidation_reason = $1,
-                updated_at = now()
-            WHERE library_id = $2
-              AND media_id = $3
-              AND media_type = $4::media_type
-              AND (($5::uuid IS NULL AND user_id IS NULL) OR user_id = $5)
-            "#,
+        let scope = user_id
+            .map(InvalidationScope::User)
+            .unwrap_or(InvalidationScope::Global);
+        let source_revision = current_source_revision(pool).await?;
+        invalidate_read_model_rows_for_media(
+            pool,
+            library_id,
+            media_id,
+            scope,
+            reason,
+            source_revision,
         )
-        .bind(&reason)
-        .bind(library_id.0)
-        .bind(media_id.as_uuid())
-        .bind(media_type)
-        .bind(user_id)
-        .execute(pool)
+        .await?;
+        invalidate_artifacts_for_media(
+            pool, library_id, media_id, scope, reason,
+        )
         .await
-        .map_err(|e| {
-            internal_err(format!("failed to invalidate context: {e}"))
-        })?;
-        let _ = result;
+    }
 
-        let result2 = sqlx::query(
-            r#"
-            UPDATE intelligence_search_documents
-            SET status = 'invalidated',
-                invalidated_at = now(),
-                invalidation_reason = $1,
-                updated_at = now()
-            WHERE library_id = $2
-              AND media_id = $3
-              AND media_type = $4::media_type
-              AND (($5::uuid IS NULL AND user_id IS NULL) OR user_id = $5)
-            "#,
+    async fn invalidate_media_catalog_change(
+        &self,
+        library_id: LibraryId,
+        media_id: MediaID,
+        reason: &str,
+    ) -> Result<()> {
+        invalidate_catalog_change_for_media(
+            self.pool(),
+            library_id,
+            media_id,
+            reason,
         )
-        .bind(&reason)
-        .bind(library_id.0)
-        .bind(media_id.as_uuid())
-        .bind(media_type)
-        .bind(user_id)
-        .execute(pool)
         .await
-        .map_err(|e| {
-            internal_err(format!("failed to invalidate search doc: {e}"))
-        })?;
-        let _ = result2;
-        Ok(())
     }
 
     async fn library_overview(
@@ -2674,11 +3084,11 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                         id, artifact_kind, scope, status, library_id, user_id,
                         media_id, media_type, run_id, supersedes_artifact_id,
                         title, summary, excerpt, content, metadata,
-                        source_system, source_revision, content_hash
+                        source_system, source_revision, source_updated_at, content_hash
                     )
                     VALUES ($1, $2::varchar, $3::varchar, 'active', $4, $5, $6, $7::media_type,
                             $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb,
-                            'ferrex', $15, $16)
+                            'ferrex', $15, now(), $16)
                     "#,
                 )
                 .bind(new_id)
@@ -2701,16 +3111,24 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 .await
                 .map_err(|e| internal_err(format!("insert artifact failed: {e}")))?;
                 if let Some(superseded) = upsert.supersedes_artifact_id {
+                    let superseded_reason = truncate_chars(
+                        &format!("superseded by artifact {new_id}"),
+                        512,
+                    );
                     let result = sqlx::query(
                         r#"
                         UPDATE intelligence_artifacts
-                        SET status = 'superseded', updated_at = now()
+                        SET status = 'superseded',
+                            invalidated_at = COALESCE(invalidated_at, now()),
+                            invalidation_reason = $3,
+                            updated_at = now()
                         WHERE id = $1
                           AND (($2::uuid IS NULL AND user_id IS NULL) OR user_id = $2)
                         "#,
                     )
                     .bind(superseded)
                     .bind(user_id)
+                    .bind(&superseded_reason)
                     .execute(pool)
                     .await
                     .map_err(|e| {
@@ -3361,13 +3779,20 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
 // ---------------------------------------------------------------------------
 
 async fn current_source_revision(pool: &PgPool) -> Result<i64> {
-    let max_ctx: Option<i64> = sqlx::query_scalar::<_, i64>(
-        "SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_media_context",
+    let max_revision: i64 = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT GREATEST(
+            (SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_media_context),
+            (SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_search_documents),
+            (SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_artifacts),
+            (SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_artifact_sources)
+        )
+        "#,
     )
-    .fetch_optional(pool)
+    .fetch_one(pool)
     .await
     .map_err(|e| internal_err(format!("source revision lookup failed: {e}")))?;
-    Ok(max_ctx.unwrap_or(0) + 1)
+    Ok(max_revision + 1)
 }
 
 fn parse_cursor_uuid(cursor: &Option<String>) -> Result<Option<Uuid>> {

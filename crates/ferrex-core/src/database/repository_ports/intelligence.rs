@@ -302,11 +302,23 @@ pub trait IntelligenceRepository: Send + Sync {
     ) -> Result<()>;
 
     /// Invalidate read models for a media item by marking them `invalidated`.
+    ///
+    /// When `user_id` is `None`, only global read-model rows are affected;
+    /// otherwise only the matching user's rows are affected.
     async fn invalidate_media_read_model(
         &self,
         library_id: LibraryId,
         media_id: MediaID,
         user_id: Option<Uuid>,
+        reason: &str,
+    ) -> Result<()>;
+
+    /// Invalidate all global and user-scoped read models and dependent
+    /// artifacts for a catalog-level media change such as a tombstone.
+    async fn invalidate_media_catalog_change(
+        &self,
+        library_id: LibraryId,
+        media_id: MediaID,
         reason: &str,
     ) -> Result<()>;
 
