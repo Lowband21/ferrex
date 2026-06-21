@@ -1,6 +1,4 @@
-use crate::{
-    messages::LibraryMessage, scan_dashboard::ScanDashboardRefreshReason,
-};
+use crate::messages::LibraryMessage;
 use base64::{
     Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
 };
@@ -356,40 +354,39 @@ impl MediaEventState {
                 Some(LibraryMessage::MediaDeleted(id))
             }
 
-            // Global scan media events refresh durable dashboard state. Per-run
-            // scan SSE subscriptions still drive live progress frames.
+            // The media SSE can temporarily carry scan telemetry frames while
+            // the server contract is being split. Per-run scan subscriptions
+            // drive live progress and terminal dashboard refreshes, so the
+            // mixed media stream must not schedule overview HTTP refreshes per
+            // scan frame.
             MediaEvent::ScanStarted { scan_id, .. } => {
                 log::debug!(
-                    "ScanStarted event {} refreshing durable dashboard",
+                    "Ignoring ScanStarted media event {} on media SSE",
                     scan_id
                 );
-                Some(LibraryMessage::RefreshScanDashboard(
-                    ScanDashboardRefreshReason::MediaScanEvent,
-                ))
+                None
             }
             MediaEvent::ScanCompleted { scan_id, .. } => {
                 log::debug!(
-                    "ScanCompleted event {} refreshing durable dashboard",
+                    "Ignoring ScanCompleted media event {} on media SSE",
                     scan_id
                 );
-                Some(LibraryMessage::RefreshScanDashboard(
-                    ScanDashboardRefreshReason::MediaScanEvent,
-                ))
+                None
             }
             MediaEvent::ScanProgress { scan_id, .. } => {
                 log::debug!(
-                    "ScanProgress event {} refreshing durable dashboard metadata",
+                    "Ignoring ScanProgress media event {} on media SSE",
                     scan_id
                 );
-                Some(LibraryMessage::RefreshScanDashboard(
-                    ScanDashboardRefreshReason::MediaScanEvent,
-                ))
+                None
             }
             MediaEvent::ScanFailed { scan_id, error, .. } => {
-                log::error!("Scan {} failed: {}", scan_id, error);
-                Some(LibraryMessage::RefreshScanDashboard(
-                    ScanDashboardRefreshReason::MediaScanEvent,
-                ))
+                log::warn!(
+                    "Ignoring ScanFailed media event {} on media SSE: {}",
+                    scan_id,
+                    error
+                );
+                None
             }
         }
     }
@@ -446,7 +443,8 @@ mod tests {
     use super::*;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use ferrex_core::player_prelude::{
-        LibraryId, MediaID, MovieID, ScanEventMetadata,
+        LibraryId, MediaID, MovieBatchId, MovieID, ScanEventMetadata,
+        ScanProgressEvent, ScanStageLatencySummary, SeriesID,
     };
     use ferrex_player_api::{
         services::api::ApiService, testing::TestApiService,
@@ -470,6 +468,39 @@ mod tests {
         }
     }
 
+    fn sample_scan_progress(
+        scan_id: uuid::Uuid,
+        library_id: LibraryId,
+    ) -> ScanProgressEvent {
+        ScanProgressEvent {
+            version: "1".into(),
+            scan_id,
+            library_id,
+            status: "running".into(),
+            completed_items: 1,
+            total_items: 10,
+            validated_items: 1,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
+            retrying_items: 0,
+            sequence: 1,
+            current_path: Some("/media/movie.mkv".into()),
+            path_key: None,
+            p95_stage_latencies_ms: ScanStageLatencySummary {
+                scan: 1,
+                analyze: 2,
+                index: 3,
+            },
+            correlation_id: scan_id,
+            idempotency_key: "scan-progress".into(),
+            emitted_at: chrono::Utc::now(),
+            terminal_at: None,
+            reason_details: Vec::new(),
+        }
+    }
+
     #[test]
     fn decode_media_event_rkyv_roundtrip() {
         let event = sample_event();
@@ -490,24 +521,77 @@ mod tests {
     }
 
     #[test]
-    fn scan_media_events_request_dashboard_refresh() {
+    fn scan_media_events_are_ignored_on_media_sse() {
         let library_id = LibraryId::new();
         let scan_id = uuid::Uuid::now_v7();
         let api: Arc<dyn ApiService> = Arc::new(TestApiService::default());
         let state = MediaEventState::new("http://localhost".into(), api);
 
-        let message = state
-            .convert_media_event(MediaEvent::ScanCompleted {
+        let scan_events = [
+            MediaEvent::ScanStarted {
                 scan_id,
                 metadata: sample_scan_metadata(library_id),
-            })
-            .expect("scan event maps to dashboard refresh");
+            },
+            MediaEvent::ScanProgress {
+                scan_id,
+                progress: sample_scan_progress(scan_id, library_id),
+            },
+            MediaEvent::ScanCompleted {
+                scan_id,
+                metadata: sample_scan_metadata(library_id),
+            },
+            MediaEvent::ScanFailed {
+                scan_id,
+                error: "scan failed".into(),
+                metadata: sample_scan_metadata(library_id),
+            },
+        ];
+
+        for event in scan_events {
+            assert!(
+                state.convert_media_event(event).is_none(),
+                "scan media SSE events must not request dashboard refreshes"
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_media_events_still_request_targeted_updates() {
+        let library_id = LibraryId::new();
+        let batch_id = MovieBatchId::new(7).expect("valid batch id");
+        let series_id = SeriesID::new();
+        let deleted_id = MediaID::Movie(MovieID::new());
+        let api: Arc<dyn ApiService> = Arc::new(TestApiService::default());
+        let state = MediaEventState::new("http://localhost".into(), api);
 
         assert!(matches!(
-            message,
-            LibraryMessage::RefreshScanDashboard(
-                ScanDashboardRefreshReason::MediaScanEvent
-            )
+            state.convert_media_event(MediaEvent::MovieBatchFinalized {
+                library_id,
+                batch_id,
+            }),
+            Some(LibraryMessage::FetchMovieBatch {
+                library_id: message_library_id,
+                batch_id: message_batch_id,
+            }) if message_library_id == library_id
+                && message_batch_id == batch_id
+        ));
+
+        assert!(matches!(
+            state.convert_media_event(MediaEvent::SeriesBundleFinalized {
+                library_id,
+                series_id,
+            }),
+            Some(LibraryMessage::FetchSeriesBundle {
+                library_id: message_library_id,
+                series_id: message_series_id,
+            }) if message_library_id == library_id
+                && message_series_id == series_id
+        ));
+
+        assert!(matches!(
+            state.convert_media_event(MediaEvent::MediaDeleted { id: deleted_id }),
+            Some(LibraryMessage::MediaDeleted(message_id))
+                if message_id == deleted_id
         ));
     }
 }

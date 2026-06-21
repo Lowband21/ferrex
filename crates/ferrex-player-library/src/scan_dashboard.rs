@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use chrono::{DateTime, Utc};
 use ferrex_core::{
@@ -13,6 +16,12 @@ use ferrex_core::{
 };
 use uuid::Uuid;
 
+/// Minimum interval for refreshes requested from telemetry-style media SSE
+/// scan events. User, command, recovery, and terminal-progress refreshes bypass
+/// this throttle and are only deduped while an overview request is in flight.
+pub const MEDIA_SCAN_EVENT_REFRESH_MIN_INTERVAL: Duration =
+    Duration::from_secs(1);
+
 /// Why the dashboard is being refreshed. This lets app shells debounce or log
 /// refreshes without treating scan progress frames as direct durable state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +32,12 @@ pub enum ScanDashboardRefreshReason {
     TerminalProgress,
     CommandAccepted,
     RecoveryAccepted,
+}
+
+impl ScanDashboardRefreshReason {
+    pub fn is_telemetry_derived(self) -> bool {
+        matches!(self, Self::MediaScanEvent)
+    }
 }
 
 impl Default for ScanDashboardRefreshReason {
@@ -155,6 +170,8 @@ pub struct ScanDashboardState {
     pub selected_failures_page: Option<ScanPageMeta>,
     pub terminal_summaries: HashMap<Uuid, TerminalScanSummary>,
     pub last_refresh_reason: ScanDashboardRefreshReason,
+    pub overview_refresh_in_flight: bool,
+    pub last_media_scan_event_refresh_started_at: Option<Instant>,
 }
 
 impl Default for ScanDashboardState {
@@ -176,20 +193,49 @@ impl Default for ScanDashboardState {
             selected_failures_page: None,
             terminal_summaries: HashMap::new(),
             last_refresh_reason: ScanDashboardRefreshReason::InitialLoad,
+            overview_refresh_in_flight: false,
+            last_media_scan_event_refresh_started_at: None,
         }
     }
 }
 
 impl ScanDashboardState {
+    pub fn try_begin_overview_load(
+        &mut self,
+        reason: ScanDashboardRefreshReason,
+        now: Instant,
+    ) -> bool {
+        if self.overview_refresh_in_flight {
+            if !reason.is_telemetry_derived() {
+                self.last_refresh_reason = reason;
+            }
+            return false;
+        }
+
+        if reason.is_telemetry_derived()
+            && self.media_scan_event_refresh_is_rate_limited(now)
+        {
+            return false;
+        }
+
+        self.begin_overview_load(reason);
+        if reason.is_telemetry_derived() {
+            self.last_media_scan_event_refresh_started_at = Some(now);
+        }
+        true
+    }
+
     pub fn begin_overview_load(&mut self, reason: ScanDashboardRefreshReason) {
         self.overview_state = ScanDashboardLoadState::Loading;
         self.last_refresh_reason = reason;
+        self.overview_refresh_in_flight = true;
     }
 
     pub fn fail_overview_load(&mut self, error: impl Into<String>) {
         self.overview_state = ScanDashboardLoadState::Failed {
             error: error.into(),
         };
+        self.overview_refresh_in_flight = false;
     }
 
     pub fn apply_overview(&mut self, payload: ScanDashboardOverviewPayload) {
@@ -225,6 +271,7 @@ impl ScanDashboardState {
         }
 
         self.overview_state = ScanDashboardLoadState::Loaded;
+        self.overview_refresh_in_flight = false;
     }
 
     pub fn begin_run_load(&mut self, scan_id: Uuid) {
@@ -369,6 +416,19 @@ impl ScanDashboardState {
             TerminalScanSummary::from_run(run, terminal_summary)
         {
             self.terminal_summaries.insert(run.scan_id, summary);
+        }
+    }
+
+    fn media_scan_event_refresh_is_rate_limited(&self, now: Instant) -> bool {
+        let Some(last_started_at) =
+            self.last_media_scan_event_refresh_started_at
+        else {
+            return false;
+        };
+
+        match now.checked_duration_since(last_started_at) {
+            Some(elapsed) => elapsed < MEDIA_SCAN_EVENT_REFRESH_MIN_INTERVAL,
+            None => true,
         }
     }
 }
@@ -768,11 +828,84 @@ mod tests {
         });
 
         assert_eq!(state.overview_state, ScanDashboardLoadState::Loaded);
+        assert!(!state.overview_refresh_in_flight);
         assert_eq!(state.active_runs.len(), 1);
         assert!(state.terminal_summaries.contains_key(&terminal_id));
         assert_eq!(
             state.last_refresh_reason,
             ScanDashboardRefreshReason::UserRequested
         );
+    }
+
+    #[test]
+    fn telemetry_refresh_requests_are_deduped_and_rate_limited() {
+        let mut state = ScanDashboardState::default();
+        let now = Instant::now();
+
+        assert!(state.try_begin_overview_load(
+            ScanDashboardRefreshReason::MediaScanEvent,
+            now
+        ));
+        assert!(state.overview_refresh_in_flight);
+        assert!(!state.try_begin_overview_load(
+            ScanDashboardRefreshReason::MediaScanEvent,
+            now + Duration::from_millis(1)
+        ));
+
+        state.fail_overview_load("network unavailable");
+        assert!(!state.overview_refresh_in_flight);
+
+        let repeated_starts = (0..100)
+            .filter(|offset_ms| {
+                let request_time = now + Duration::from_millis(10 + *offset_ms);
+                let started = state.try_begin_overview_load(
+                    ScanDashboardRefreshReason::MediaScanEvent,
+                    request_time,
+                );
+                if started {
+                    state.fail_overview_load("done");
+                }
+                started
+            })
+            .count();
+        assert_eq!(repeated_starts, 0);
+
+        assert!(state.try_begin_overview_load(
+            ScanDashboardRefreshReason::MediaScanEvent,
+            now + MEDIA_SCAN_EVENT_REFRESH_MIN_INTERVAL
+        ));
+    }
+
+    #[test]
+    fn prompt_refresh_requests_bypass_telemetry_rate_limit() {
+        let mut state = ScanDashboardState::default();
+        let now = Instant::now();
+
+        assert!(state.try_begin_overview_load(
+            ScanDashboardRefreshReason::MediaScanEvent,
+            now
+        ));
+        state.fail_overview_load("network unavailable");
+        assert!(!state.try_begin_overview_load(
+            ScanDashboardRefreshReason::MediaScanEvent,
+            now + Duration::from_millis(100)
+        ));
+
+        for reason in [
+            ScanDashboardRefreshReason::UserRequested,
+            ScanDashboardRefreshReason::CommandAccepted,
+            ScanDashboardRefreshReason::RecoveryAccepted,
+            ScanDashboardRefreshReason::TerminalProgress,
+        ] {
+            assert!(
+                state.try_begin_overview_load(
+                    reason,
+                    now + Duration::from_millis(100)
+                ),
+                "{reason:?} should bypass telemetry rate limiting"
+            );
+            assert_eq!(state.last_refresh_reason, reason);
+            state.fail_overview_load("done");
+        }
     }
 }

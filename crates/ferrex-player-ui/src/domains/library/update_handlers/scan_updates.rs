@@ -8,6 +8,7 @@ use ferrex_core::player_prelude::{
 };
 use ferrex_player_library::scan_dashboard::ScanDashboardRefreshReason;
 use iced::Task;
+use std::time::Instant;
 use uuid::Uuid;
 
 pub fn handle_scan_library(
@@ -171,12 +172,20 @@ pub fn handle_refresh_scan_dashboard(
     state: &mut State,
     reason: ScanDashboardRefreshReason,
 ) -> Task<LibraryMessage> {
-    state
+    if !state
         .domains
         .library
         .state
         .scan_dashboard
-        .begin_overview_load(reason);
+        .try_begin_overview_load(reason, Instant::now())
+    {
+        log::debug!(
+            "Skipping scan dashboard overview refresh for {:?}: request deduped or rate limited",
+            reason
+        );
+        return Task::none();
+    }
+
     let api = state.api_service.clone();
     Task::perform(
         async move {
