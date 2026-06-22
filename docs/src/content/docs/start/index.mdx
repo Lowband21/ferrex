@@ -1,0 +1,46 @@
+---
+title: Documentation map
+description: How Ferrex documentation is organized across operator, developer, reference, and release material.
+sidebar:
+  order: 1
+  label: Map
+---
+
+Ferrex documentation is organized by the job a reader is trying to complete. The first site pass keeps that structure visible even while detailed guides continue to be promoted from the repository's existing markdown notes.
+
+## Reader lanes
+
+### Operators
+
+Operators need safe setup, configuration, security, library management, playback behavior, and recovery guidance. Pages in [Operate Ferrex](/operator/) should answer:
+
+- What do I run?
+- Which environment variables or files matter?
+- What user data is written?
+- How do I retry, reset, or recover without losing more data than necessary?
+
+### Developers
+
+Developers need repository setup, architecture boundaries, validation commands, generated contracts, and client-specific workflow. Pages in [Build and extend](/developer/) should connect decisions to the crates, mobile modules, scripts, and Nix shells that enforce them.
+
+### Reference readers
+
+Reference material is stable, searchable, and specific: contracts, policies, workflows, glossary entries, and inventories. The [Reference](/reference/) section keeps the existing in-repo notes discoverable until they are rewritten as full Starlight pages.
+
+### Release maintainers
+
+Release documentation covers packaging targets, preflight checks, changelog expectations, and promotion from development integration to stable release channels. The [Release](/release/) section defines where that material belongs without adding deployment automation to this scaffold.
+
+## Adding a page
+
+1. Choose the reader lane before choosing a filename.
+2. Add the page under `src/content/docs/<lane>/` with a concise `title`, `description`, and `sidebar.order`.
+3. Link to existing repository files by path when they remain the source of truth.
+4. Include verification commands or recovery steps on pages that change how a user operates Ferrex.
+5. Run the documented local checks from the repository root:
+
+```bash
+pnpm --dir docs install --frozen-lockfile
+pnpm --dir docs run check
+pnpm --dir docs run build
+```

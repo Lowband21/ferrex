@@ -1,0 +1,43 @@
+---
+title: Existing documentation inventory
+description: Inventory of repository markdown notes that remain source material for the Starlight documentation site.
+sidebar:
+  order: 2
+---
+
+Ferrex already has useful markdown notes under `docs/`. This inventory keeps them discoverable while the Starlight site grows around reader-focused sections.
+
+## Operator-facing notes
+
+| File | Use when promoting content |
+| --- | --- |
+| `docs/configuration.md` | Convert into setup and configuration pages with environment-variable context and safe defaults. |
+| `docs/unraid.md` | Promote into an operator deployment guide with storage paths, ownership, and update notes. |
+| `docs/auth-security.md` | Split into operator security guidance and developer authentication invariants. |
+| `docs/demo-mode.md` | Convert into a demo setup and reset guide. |
+| `docs/faq.md` | Use as a source for short troubleshooting entries and landing-page links. |
+
+## Developer and QA notes
+
+| File | Use when promoting content |
+| --- | --- |
+| `docs/architecture.md` | Expand into architecture overview pages that link to owning crates and runtime boundaries. |
+| `docs/player-dependency-boundaries.md` | Keep as the source for desktop player crate-boundary documentation. |
+| `docs/ui-testing-workflow.md` | Promote into visual QA and player UI validation guidance. |
+| `docs/playback-auth-regression-qa.md` | Use for playback/auth regression coverage and evidence expectations. |
+| `docs/mobile-device-auth-flatbuffers.md` | Promote into generated-contract and mobile-auth reference material. |
+
+## SQLx and database workflow notes
+
+| File | Use when promoting content |
+| --- | --- |
+| `docs/sqlx-postgres-workflow.md` | Convert into the developer workflow for preparing and checking SQLx metadata. |
+| `docs/sqlx-dynamic-query-allowlist.md` | Keep as policy reference for reviewed dynamic SQL exceptions. |
+
+## Bench artifacts
+
+`docs/bench_results/` contains benchmark result JSON files. They should remain data artifacts unless a performance reference page needs to summarize a stable benchmark methodology.
+
+## Promotion rule
+
+When a note becomes a full Starlight page, keep the original path referenced until inbound links are updated or a redirect/deployment strategy exists. This avoids breaking existing README and issue links during the docs-site scaffold phase.

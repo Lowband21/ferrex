@@ -1,0 +1,39 @@
+---
+title: Ferrex documentation
+description: Entry point for Ferrex operator, developer, reference, and release documentation.
+template: splash
+hero:
+  title: Ferrex documentation
+  tagline: Native media-server and player docs for operators, client builders, and release maintainers.
+  actions:
+    - text: Start with the docs map
+      link: /start/
+    - text: Review existing notes
+      link: /reference/existing-docs/
+      variant: secondary
+sidebar:
+  hidden: true
+---
+
+Ferrex combines a Rust media server, native desktop playback, Android and Android TV clients, packaging, and generated mobile contracts. This Starlight site gives those areas a single home while preserving the existing technical notes that already live in the repository.
+
+## What belongs here
+
+| Area | Reader goal | Section |
+| --- | --- | --- |
+| Start here | Understand the documentation model before choosing a guide. | [Documentation map](/start/) |
+| Operate Ferrex | Install, configure, secure, and recover a Ferrex deployment. | [Operate Ferrex](/operator/) |
+| Build and extend | Set up the repository, run checks, understand architecture, and change clients or backend code. | [Build and extend](/developer/) |
+| Reference | Find durable specs, current in-repo notes, data contracts, and process references. | [Reference](/reference/) |
+| Release | Follow packaging and release validation once release guides are promoted into the site. | [Release](/release/) |
+
+## Site conventions
+
+- Operator-facing pages explain observable behavior, configuration, recovery paths, and validation commands before implementation details.
+- Developer-facing pages link to the crates, mobile modules, scripts, and existing markdown notes that own the underlying details.
+- Reference pages keep long-lived contracts discoverable without forcing every historical note to move in the first docs-site pass.
+- Search is powered by Starlight's Pagefind integration during static builds, so page titles and descriptions are written to match how readers look for help.
+
+## Canonical URL
+
+The generated site is configured for `https://ferrexmedia.org/` and a root base path. Deployment wiring, DNS, CNAME files, and hosting-provider configuration are intentionally outside this app scaffold.

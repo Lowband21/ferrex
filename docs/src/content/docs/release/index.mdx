@@ -1,0 +1,27 @@
+---
+title: Release and packaging guide
+description: Where Ferrex release, packaging, preflight, and promotion documentation belongs.
+sidebar:
+  order: 1
+  label: Overview
+---
+
+The release section is reserved for the steps that move Ferrex from reviewed development work to packaged artifacts and stable channels. This scaffold defines the documentation home without adding deployment, hosting, or domain-provider automation.
+
+## Release documentation scope
+
+| Topic | What belongs here |
+| --- | --- |
+| Preflight checks | Exact commands maintainers run before a release or packaging cut. |
+| Packaging targets | Docker images, Flatpak bundles, Windows packaging, and related `ferrexctl` workflows. |
+| Changelog and versioning | How release notes are assembled and which branch or tag is considered authoritative. |
+| Promotion policy | The human-reviewed movement from development integration to stable release decisions. |
+| Website publishing | Hosting steps only after a deployment plan is approved; not in this scaffold. |
+
+## Current source material
+
+The repository README already lists several packaging commands, and `packaging.toml`, `dist-workspace.toml`, `flatpak/`, and `docker/` contain target-specific configuration. Future release pages should explain how those files work together instead of duplicating command snippets without context.
+
+## Boundary for this docs app
+
+This Starlight app is configured for the canonical site URL, but it does not include a deployment workflow, CNAME file, GitHub Pages settings, Cloudflare Pages project, DNS record, or secret-dependent configuration. Those decisions stay outside the documentation scaffold until a separate deployment issue approves them.
