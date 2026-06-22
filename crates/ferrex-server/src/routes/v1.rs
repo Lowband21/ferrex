@@ -272,6 +272,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             post(intelligence_handlers::candidate_search_handler),
         )
         .route(
+            v1::intelligence::TIMED_TEXT_SEARCH,
+            post(intelligence_handlers::timed_text_search_handler),
+        )
+        .route(
             v1::intelligence::ARTIFACT_LIST,
             post(intelligence_handlers::artifact_search_handler),
         )

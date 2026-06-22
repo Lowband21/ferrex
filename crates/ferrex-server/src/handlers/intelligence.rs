@@ -342,13 +342,115 @@ pub(crate) async fn candidate_search_handler(
     Extension(user): Extension<User>,
     Json(request): Json<IntelligenceCandidateSearchRequest>,
 ) -> AppResult<Json<ApiResponse<IntelligenceCandidateSearchResponse>>> {
-    let response = state
+    let mut response = state
         .unit_of_work()
         .intelligence
         .candidate_search(&request, Some(user.id))
         .await?;
 
+    if request.include_transcript_grounding {
+        attach_transcript_grounding(&state, user.id, &request, &mut response)
+            .await?;
+    }
+
     Ok(Json(ApiResponse::success(response)))
+}
+
+pub(crate) async fn timed_text_search_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(request): Json<TimedTextSnippetSearchRequest>,
+) -> AppResult<Json<ApiResponse<TimedTextSnippetSearchResponse>>> {
+    let response = state
+        .unit_of_work()
+        .transcripts
+        .search_snippets(&request, Some(user.id))
+        .await?;
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
+async fn attach_transcript_grounding(
+    state: &AppState,
+    user_id: Uuid,
+    request: &IntelligenceCandidateSearchRequest,
+    response: &mut IntelligenceCandidateSearchResponse,
+) -> AppResult<()> {
+    let transcript_limit =
+        clamp_timed_text_snippet_limit(request.caps.timed_text_snippet_limit);
+    let grounding_limit = request.caps.grounding_limit;
+    let snippet_chars = clamp_timed_text_snippet_chars(
+        request.caps.timed_text_snippet_max_chars,
+    )
+    .min(clamp_intelligence_summary_chars(
+        request.caps.summary_max_chars,
+    ));
+
+    for candidate in &mut response.candidates {
+        let remaining_grounding = grounding_limit.saturating_sub(
+            candidate.grounding.len().try_into().unwrap_or(u16::MAX),
+        );
+        if remaining_grounding == 0 {
+            continue;
+        }
+
+        let per_candidate_limit = transcript_limit.min(remaining_grounding);
+        let Some(library_id) = candidate.media.library_id else {
+            continue;
+        };
+
+        let mut caps = request.caps;
+        caps.timed_text_snippet_limit = per_candidate_limit;
+        caps.timed_text_snippet_max_chars = snippet_chars;
+        caps.summary_max_chars = snippet_chars;
+
+        let transcript_request = TimedTextSnippetSearchRequest {
+            query: request.query.clone(),
+            library_ids: vec![library_id],
+            media_ids: vec![candidate.media.media_id],
+            media_kinds: Vec::new(),
+            language_codes: Vec::new(),
+            source_kinds: Vec::new(),
+            pagination: IntelligencePagination::new(None, per_candidate_limit),
+            caps,
+            include_artifacts: request.include_artifacts,
+        };
+
+        let transcript_response = state
+            .unit_of_work()
+            .transcripts
+            .search_snippets(&transcript_request, Some(user_id))
+            .await?;
+
+        for snippet in transcript_response.snippets {
+            if candidate.grounding.len() >= usize::from(grounding_limit) {
+                break;
+            }
+            candidate.grounding.push(transcript_grounding_ref(&snippet));
+            candidate.transcript_grounding.push(snippet);
+        }
+    }
+
+    Ok(())
+}
+
+fn transcript_grounding_ref(
+    snippet: &TimedTextSnippet,
+) -> IntelligenceGroundingRef {
+    IntelligenceGroundingRef {
+        source: IntelligenceGroundingSource::IntelligenceArtifact,
+        media_id: Some(snippet.media.media_id),
+        artifact_id: snippet.artifact_id,
+        field: Some("transcript".to_string()),
+        label: format!(
+            "Transcript {} {:?} at {}-{} ms",
+            snippet.language_code,
+            snippet.source_kind,
+            snippet.start_ms,
+            snippet.end_ms
+        ),
+        evidence: Some(snippet.snippet.clone()),
+    }
 }
 
 pub(crate) async fn artifact_search_handler(

@@ -56,7 +56,8 @@ fn snippet_request(query: &str) -> TimedTextSnippetSearchRequest {
         source_kinds: Vec::new(),
         pagination: IntelligencePagination::new(None, 10),
         caps: IntelligenceCaps {
-            summary_max_chars: 80,
+            summary_max_chars: 160,
+            timed_text_snippet_max_chars: 160,
             ..Default::default()
         },
         include_artifacts: true,
@@ -74,7 +75,7 @@ async fn snippet_search_uses_fixture_rows_and_filters_scope(pool: PgPool) {
     let repo = transcript_repo(&pool);
 
     let response = repo
-        .search_snippets(&snippet_request("alien language"))
+        .search_snippets(&snippet_request("alien language"), None)
         .await
         .unwrap();
     assert!(
@@ -86,8 +87,9 @@ async fn snippet_search_uses_fixture_rows_and_filters_scope(pool: PgPool) {
     assert_eq!(snippet.media.library_id, Some(lib_a()));
     assert_eq!(snippet.source_kind, TimedTextSourceKind::Sidecar);
     assert_eq!(snippet.language_code, "en");
-    assert_eq!(snippet.start_ms, 3500);
-    assert_eq!(snippet.end_ms, 6000);
+    assert_eq!(snippet.start_ms, 1000);
+    assert_eq!(snippet.end_ms, 9000);
+    assert_eq!(snippet.segment_ids.len(), 3);
     let artifact_id = Uuid::parse_str(FIXTURE_ARTIFACT).unwrap();
     assert_eq!(snippet.artifact_id, Some(artifact_id));
     assert!(snippet.snippet.text.contains("alien language"));
@@ -96,7 +98,7 @@ async fn snippet_search_uses_fixture_rows_and_filters_scope(pool: PgPool) {
     let mut wrong_library = snippet_request("alien language");
     wrong_library.library_ids = vec![lib_c()];
     assert!(
-        repo.search_snippets(&wrong_library)
+        repo.search_snippets(&wrong_library, None)
             .await
             .unwrap()
             .snippets
@@ -107,7 +109,7 @@ async fn snippet_search_uses_fixture_rows_and_filters_scope(pool: PgPool) {
     let mut wrong_language = snippet_request("alien language");
     wrong_language.language_codes = vec!["fr".to_string()];
     assert!(
-        repo.search_snippets(&wrong_language)
+        repo.search_snippets(&wrong_language, None)
             .await
             .unwrap()
             .snippets
@@ -357,7 +359,7 @@ async fn invalidation_and_purge_remove_snippets_and_status(pool: PgPool) {
         .unwrap();
     assert_eq!(invalidated, 1);
     assert!(
-        repo.search_snippets(&snippet_request("alien language"))
+        repo.search_snippets(&snippet_request("alien language"), None)
             .await
             .unwrap()
             .snippets

@@ -278,9 +278,11 @@ pub trait TranscriptRepository: Send + Sync {
 
     /// Search active transcript segments and return bounded timestamped
     /// snippets. Results never include local paths, content hashes, or whole
-    /// transcript bodies.
+    /// transcript bodies. `user_id` is used only to suppress user-scoped
+    /// artifact ids that are not visible to the caller.
     async fn search_snippets(
         &self,
         request: &TimedTextSnippetSearchRequest,
+        user_id: Option<Uuid>,
     ) -> Result<TimedTextSnippetSearchResponse>;
 }

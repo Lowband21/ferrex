@@ -4,6 +4,8 @@
 //! without requiring new offline SQLx metadata for every transcript query. The
 //! migration owns the durable constraints and indexes.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use ferrex_model::{
     EpisodeID, LibraryId, MediaID, MovieID, SeasonID, SeriesID,
@@ -15,9 +17,12 @@ use uuid::Uuid;
 
 use crate::{
     api::types::intelligence::{
-        IntelligenceMediaKind, IntelligenceMediaRef, IntelligencePageInfo,
-        IntelligenceSummary, TimedTextSnippet, TimedTextSnippetSearchRequest,
+        IntelligenceCaps, IntelligenceMediaKind, IntelligenceMediaRef,
+        IntelligencePageInfo, IntelligenceSummary, MAX_INTELLIGENCE_PAGE_LIMIT,
+        TimedTextSnippet, TimedTextSnippetSearchRequest,
         TimedTextSnippetSearchResponse, TimedTextSourceKind,
+        clamp_intelligence_summary_chars, clamp_timed_text_segment_limit,
+        clamp_timed_text_snippet_chars, clamp_timed_text_snippet_limit,
     },
     database::repository_ports::transcripts::{
         TranscriptProcessingState, TranscriptProcessingStatusSummary,
@@ -42,6 +47,46 @@ impl PostgresTranscriptRepository {
 
     fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    async fn snippet_context_segments(
+        &self,
+        source_id: Uuid,
+        cue_index: i32,
+        segment_limit: usize,
+    ) -> Result<Vec<SnippetContextSegment>> {
+        let before = i32::try_from(segment_limit.saturating_sub(1) / 2)
+            .unwrap_or_default();
+        let start_cue_index = cue_index.saturating_sub(before).max(0);
+        let rows = sqlx::query(
+            r#"
+            SELECT id AS segment_id, start_ms, end_ms, cue_text
+            FROM transcript_segments
+            WHERE transcript_source_id = $1
+              AND cue_index >= $2
+              AND status = 'active'
+              AND invalidated_at IS NULL
+              AND purged_at IS NULL
+            ORDER BY cue_index ASC
+            LIMIT $3
+            "#,
+        )
+        .bind(source_id)
+        .bind(start_cue_index)
+        .bind(i64::try_from(segment_limit).unwrap_or(i64::MAX))
+        .fetch_all(self.pool())
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(SnippetContextSegment {
+                    segment_id: row.try_get("segment_id")?,
+                    start_ms: row.try_get("start_ms")?,
+                    end_ms: row.try_get("end_ms")?,
+                    cue_text: row.try_get("cue_text")?,
+                })
+            })
+            .collect()
     }
 }
 
@@ -91,6 +136,76 @@ fn clamp_limit(limit: u16, default: u16, max: u16) -> u16 {
     } else {
         limit
     }
+}
+
+fn timed_text_cursor_offset(cursor: Option<&str>) -> Result<i64> {
+    let Some(cursor) = cursor.map(str::trim).filter(|value| !value.is_empty())
+    else {
+        return Ok(0);
+    };
+    let cursor = cursor.strip_prefix("tt:").unwrap_or(cursor);
+    let offset = cursor.parse::<i64>().map_err(|_| {
+        MediaError::InvalidMedia(
+            "timed-text pagination cursor is invalid".to_string(),
+        )
+    })?;
+    if offset < 0 {
+        return Err(MediaError::InvalidMedia(
+            "timed-text pagination cursor must be non-negative".to_string(),
+        ));
+    }
+    Ok(offset)
+}
+
+fn timed_text_cursor(offset: i64) -> String {
+    format!("tt:{offset}")
+}
+
+fn effective_snippet_caps(caps: IntelligenceCaps) -> IntelligenceCaps {
+    let summary_max_chars =
+        clamp_intelligence_summary_chars(caps.summary_max_chars);
+    let timed_text_snippet_max_chars =
+        clamp_timed_text_snippet_chars(caps.timed_text_snippet_max_chars)
+            .min(summary_max_chars);
+
+    IntelligenceCaps {
+        candidate_limit: caps.candidate_limit,
+        artifact_limit: caps.artifact_limit,
+        related_limit: caps.related_limit,
+        facet_limit: caps.facet_limit,
+        grounding_limit: caps.grounding_limit,
+        tool_call_limit: caps.tool_call_limit,
+        summary_max_chars,
+        timed_text_snippet_limit: clamp_timed_text_snippet_limit(
+            caps.timed_text_snippet_limit,
+        ),
+        timed_text_segment_limit: clamp_timed_text_segment_limit(
+            caps.timed_text_segment_limit,
+        ),
+        timed_text_snippet_max_chars,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SnippetMatchRow {
+    segment_id: Uuid,
+    source_id: Uuid,
+    library_id: LibraryId,
+    media_id: MediaID,
+    title: String,
+    artifact_id: Option<Uuid>,
+    source_kind: TimedTextSourceKind,
+    language_code: String,
+    cue_index: i32,
+    score: f32,
+}
+
+#[derive(Debug, Clone)]
+struct SnippetContextSegment {
+    segment_id: Uuid,
+    start_ms: i64,
+    end_ms: i64,
+    cue_text: String,
 }
 
 fn content_hash(parts: &[&str]) -> String {
@@ -1290,10 +1405,19 @@ impl TranscriptRepository for PostgresTranscriptRepository {
     async fn search_snippets(
         &self,
         request: &TimedTextSnippetSearchRequest,
+        user_id: Option<Uuid>,
     ) -> Result<TimedTextSnippetSearchResponse> {
         let query = request.query.trim();
-        let limit = clamp_limit(request.pagination.limit, 20, 50);
-        let caps = request.caps;
+        let caps = effective_snippet_caps(request.caps);
+        let page_limit = clamp_limit(
+            request.pagination.limit,
+            caps.timed_text_snippet_limit,
+            MAX_INTELLIGENCE_PAGE_LIMIT,
+        );
+        let limit = page_limit.min(caps.timed_text_snippet_limit);
+        let segment_limit = usize::from(caps.timed_text_segment_limit);
+        let offset =
+            timed_text_cursor_offset(request.pagination.cursor.as_deref())?;
 
         if query.is_empty() {
             return Ok(TimedTextSnippetSearchResponse {
@@ -1319,7 +1443,7 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let language_codes: Vec<String> = request
             .language_codes
             .iter()
-            .map(|lang| lang.trim().to_string())
+            .map(|lang| lang.trim().to_ascii_lowercase())
             .filter(|lang| !lang.is_empty())
             .collect();
         let source_kinds: Vec<String> = request
@@ -1327,7 +1451,10 @@ impl TranscriptRepository for PostgresTranscriptRepository {
             .iter()
             .map(|kind| kind.as_db_str().to_string())
             .collect();
-        let fetch_limit = i64::from(limit) + 1;
+        let match_window =
+            (i64::from(limit) * i64::from(caps.timed_text_segment_limit) * 4)
+                .max(i64::from(limit));
+        let fetch_limit = match_window.saturating_add(1);
 
         let rows = sqlx::query(
             r#"
@@ -1338,11 +1465,9 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                    seg.library_id,
                    seg.media_id,
                    seg.media_type::text AS media_type,
-                   seg.start_ms,
-                   seg.end_ms,
-                   seg.cue_text,
+                   seg.cue_index,
                    src.id AS source_id,
-                   src.artifact_id,
+                   CASE WHEN $7::bool AND ia.id IS NOT NULL THEN ia.id ELSE NULL END AS artifact_id,
                    src.source_kind::text AS source_kind,
                    src.language_code,
                    COALESCE(
@@ -1358,6 +1483,11 @@ impl TranscriptRepository for PostgresTranscriptRepository {
             FROM transcript_segments seg
             JOIN transcript_sources src ON src.id = seg.transcript_source_id
             CROSS JOIN query
+            LEFT JOIN intelligence_artifacts ia
+              ON ia.id = src.artifact_id
+             AND ia.status = 'active'
+             AND ia.invalidated_at IS NULL
+             AND (ia.user_id IS NULL OR ia.user_id = $8)
             LEFT JOIN movie_references mr
               ON seg.media_type = 'movie'
              AND mr.id = seg.media_id
@@ -1376,7 +1506,7 @@ impl TranscriptRepository for PostgresTranscriptRepository {
               AND (cardinality($2::uuid[]) = 0 OR seg.library_id = ANY($2::uuid[]))
               AND (cardinality($3::uuid[]) = 0 OR seg.media_id = ANY($3::uuid[]))
               AND (cardinality($4::text[]) = 0 OR seg.media_type::text = ANY($4::text[]))
-              AND (cardinality($5::text[]) = 0 OR src.language_code = ANY($5::text[]))
+              AND (cardinality($5::text[]) = 0 OR lower(src.language_code) = ANY($5::text[]))
               AND (cardinality($6::text[]) = 0 OR src.source_kind::text = ANY($6::text[]))
               AND (
                   seg.search_vector @@ query.tsq
@@ -1384,13 +1514,21 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                   OR similarity(seg.cue_text::text, $1) > 0.1
               )
             ORDER BY
-                (ts_rank_cd(seg.search_vector, query.tsq) + similarity(seg.cue_text::text, $1)) DESC,
+                (seg.cue_text ILIKE ('%' || $1 || '%')) DESC,
+                fts_score DESC,
+                CASE
+                    WHEN seg.search_vector @@ query.tsq
+                      OR seg.cue_text ILIKE ('%' || $1 || '%')
+                    THEN seg.start_ms
+                    ELSE NULL
+                END ASC NULLS LAST,
+                trigram_score DESC,
                 seg.library_id,
                 seg.media_type,
                 seg.media_id,
                 seg.start_ms,
                 seg.id
-            LIMIT $7
+            LIMIT $9 OFFSET $10
             "#,
         )
         .bind(query)
@@ -1399,53 +1537,131 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         .bind(&media_kinds)
         .bind(&language_codes)
         .bind(&source_kinds)
+        .bind(request.include_artifacts)
+        .bind(user_id)
         .bind(fetch_limit)
+        .bind(offset)
         .fetch_all(self.pool())
         .await?;
 
-        let has_more = rows.len() > usize::from(limit);
-        let mut snippets =
-            Vec::with_capacity(rows.len().min(usize::from(limit)));
-        for row in rows.into_iter().take(usize::from(limit)) {
+        let fetched_has_extra = rows.len() as i64 > match_window;
+        let mut matches = Vec::with_capacity(
+            rows.len()
+                .min(usize::try_from(match_window).unwrap_or(usize::MAX)),
+        );
+        for row in rows.into_iter().take(match_window as usize) {
             let media_uuid: Uuid = row.try_get("media_id")?;
             let media_type: String = row.try_get("media_type")?;
-            let media_id = media_id_from_parts(&media_type, media_uuid);
-            let mut media = IntelligenceMediaRef::new(
-                media_id,
-                row.try_get::<String, _>("title")?,
-            );
-            media.library_id = Some(LibraryId(row.try_get("library_id")?));
-
+            let source_kind: String = row.try_get("source_kind")?;
             let fts_score: f32 = row.try_get("fts_score")?;
             let trigram_score: f32 = row.try_get("trigram_score")?;
-            let artifact_id = if request.include_artifacts {
-                row.try_get("artifact_id")?
-            } else {
-                None
-            };
-            let source_kind: String = row.try_get("source_kind")?;
+            matches.push(SnippetMatchRow {
+                segment_id: row.try_get("segment_id")?,
+                source_id: row.try_get("source_id")?,
+                library_id: LibraryId(row.try_get("library_id")?),
+                media_id: media_id_from_parts(&media_type, media_uuid),
+                title: row.try_get("title")?,
+                artifact_id: row.try_get("artifact_id")?,
+                source_kind: TimedTextSourceKind::from_db_str(&source_kind),
+                language_code: row.try_get("language_code")?,
+                cue_index: row.try_get("cue_index")?,
+                score: fts_score + trigram_score,
+            });
+        }
+
+        let mut snippets = Vec::with_capacity(usize::from(limit));
+        let mut used_segment_ids = HashSet::new();
+        let mut consumed_matches: i64 = 0;
+        let mut stopped_on_limit = false;
+        for matched in &matches {
+            consumed_matches += 1;
+            if used_segment_ids.contains(&matched.segment_id) {
+                continue;
+            }
+
+            let context = self
+                .snippet_context_segments(
+                    matched.source_id,
+                    matched.cue_index,
+                    segment_limit,
+                )
+                .await?;
+            if context.is_empty()
+                || context.iter().any(|segment| {
+                    used_segment_ids.contains(&segment.segment_id)
+                })
+            {
+                continue;
+            }
+
+            let text = context
+                .iter()
+                .map(|segment| segment.cue_text.trim())
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if text.is_empty() {
+                continue;
+            }
+
+            let mut media = IntelligenceMediaRef::new(
+                matched.media_id,
+                matched.title.clone(),
+            );
+            media.library_id = Some(matched.library_id);
+            let start_ms = context
+                .iter()
+                .map(|segment| segment.start_ms)
+                .min()
+                .unwrap_or_default();
+            let end_ms = context
+                .iter()
+                .map(|segment| segment.end_ms)
+                .max()
+                .unwrap_or_default();
+            let segment_ids = context
+                .iter()
+                .map(|segment| segment.segment_id)
+                .collect::<Vec<_>>();
+            for segment_id in &segment_ids {
+                used_segment_ids.insert(*segment_id);
+            }
 
             snippets.push(TimedTextSnippet {
                 media,
-                source_id: row.try_get("source_id")?,
-                segment_ids: vec![row.try_get("segment_id")?],
-                artifact_id,
-                source_kind: TimedTextSourceKind::from_db_str(&source_kind),
-                language_code: row.try_get("language_code")?,
-                start_ms: row.try_get("start_ms")?,
-                end_ms: row.try_get("end_ms")?,
+                source_id: matched.source_id,
+                segment_ids,
+                artifact_id: matched.artifact_id,
+                source_kind: matched.source_kind,
+                language_code: matched.language_code.clone(),
+                start_ms,
+                end_ms,
                 snippet: IntelligenceSummary::with_max_chars(
-                    row.try_get::<String, _>("cue_text")?,
-                    caps.summary_max_chars,
+                    text,
+                    caps.timed_text_snippet_max_chars,
                 ),
-                score: Some(fts_score + trigram_score),
+                score: Some(matched.score),
             });
+
+            if snippets.len() >= usize::from(limit) {
+                stopped_on_limit = true;
+                break;
+            }
         }
+
+        let has_more = stopped_on_limit
+            && (consumed_matches < matches.len() as i64 || fetched_has_extra)
+            || (!stopped_on_limit && fetched_has_extra);
+        let next_cursor = if has_more {
+            Some(timed_text_cursor(offset.saturating_add(consumed_matches)))
+        } else {
+            None
+        };
 
         Ok(TimedTextSnippetSearchResponse {
             snippets,
             page: IntelligencePageInfo {
-                next_cursor: None,
+                next_cursor,
                 limit,
                 has_more,
             },

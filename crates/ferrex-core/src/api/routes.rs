@@ -81,6 +81,8 @@ pub mod v1 {
         pub const FACETS: &str = v1_path!("/intelligence/facets");
         pub const CANDIDATE_SEARCH: &str =
             v1_path!("/intelligence/candidates:search");
+        pub const TIMED_TEXT_SEARCH: &str =
+            v1_path!("/intelligence/timed-text:search");
         pub const ARTIFACT_LIST: &str = v1_path!("/intelligence/artifacts");
         pub const ARTIFACT_SEARCH: &str =
             v1_path!("/intelligence/artifacts:search");

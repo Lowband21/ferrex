@@ -2552,6 +2552,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 score: rank,
                 artifact_ids: candidate_artifact_ids,
                 grounding,
+                transcript_grounding: Vec::new(),
             });
         }
 
