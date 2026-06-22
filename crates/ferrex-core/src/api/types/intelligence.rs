@@ -49,6 +49,21 @@ pub const DEFAULT_INTELLIGENCE_SUMMARY_CHARS: u16 = 400;
 /// Absolute maximum size for bounded summaries returned by intelligence DTOs.
 pub const MAX_INTELLIGENCE_SUMMARY_CHARS: u16 = 800;
 
+/// Default number of timed-text snippets returned by transcript search.
+pub const DEFAULT_TIMED_TEXT_SNIPPET_LIMIT: u16 = 12;
+/// Maximum number of timed-text snippets returned by one response.
+pub const MAX_TIMED_TEXT_SNIPPET_LIMIT: u16 = 50;
+
+/// Default number of adjacent transcript segments merged into one snippet.
+pub const DEFAULT_TIMED_TEXT_SEGMENT_LIMIT: u16 = 3;
+/// Maximum number of adjacent transcript segments merged into one snippet.
+pub const MAX_TIMED_TEXT_SEGMENT_LIMIT: u16 = 8;
+
+/// Default character budget for transcript snippet text.
+pub const DEFAULT_TIMED_TEXT_SNIPPET_CHARS: u16 = 320;
+/// Maximum character budget for transcript snippet text.
+pub const MAX_TIMED_TEXT_SNIPPET_CHARS: u16 = 800;
+
 /// Clamp a user-provided page limit to the stable intelligence API bounds.
 pub fn clamp_intelligence_page_limit(limit: u16) -> u16 {
     clamp_bounded_limit(
@@ -64,6 +79,33 @@ pub fn clamp_intelligence_summary_chars(max_chars: u16) -> u16 {
         max_chars,
         DEFAULT_INTELLIGENCE_SUMMARY_CHARS,
         MAX_INTELLIGENCE_SUMMARY_CHARS,
+    )
+}
+
+/// Clamp a user-provided transcript snippet limit to stable API bounds.
+pub fn clamp_timed_text_snippet_limit(limit: u16) -> u16 {
+    clamp_bounded_limit(
+        limit,
+        DEFAULT_TIMED_TEXT_SNIPPET_LIMIT,
+        MAX_TIMED_TEXT_SNIPPET_LIMIT,
+    )
+}
+
+/// Clamp a user-provided adjacent transcript segment limit to stable API bounds.
+pub fn clamp_timed_text_segment_limit(limit: u16) -> u16 {
+    clamp_bounded_limit(
+        limit,
+        DEFAULT_TIMED_TEXT_SEGMENT_LIMIT,
+        MAX_TIMED_TEXT_SEGMENT_LIMIT,
+    )
+}
+
+/// Clamp a user-provided transcript snippet character budget to stable bounds.
+pub fn clamp_timed_text_snippet_chars(max_chars: u16) -> u16 {
+    clamp_bounded_limit(
+        max_chars,
+        DEFAULT_TIMED_TEXT_SNIPPET_CHARS,
+        MAX_TIMED_TEXT_SNIPPET_CHARS,
     )
 }
 
@@ -97,6 +139,18 @@ pub const fn default_intelligence_tool_call_limit() -> u16 {
 
 pub const fn default_intelligence_summary_chars() -> u16 {
     DEFAULT_INTELLIGENCE_SUMMARY_CHARS
+}
+
+pub const fn default_timed_text_snippet_limit() -> u16 {
+    DEFAULT_TIMED_TEXT_SNIPPET_LIMIT
+}
+
+pub const fn default_timed_text_segment_limit() -> u16 {
+    DEFAULT_TIMED_TEXT_SEGMENT_LIMIT
+}
+
+pub const fn default_timed_text_snippet_chars() -> u16 {
+    DEFAULT_TIMED_TEXT_SNIPPET_CHARS
 }
 
 const fn clamp_bounded_limit(limit: u16, default: u16, max: u16) -> u16 {
@@ -197,6 +251,36 @@ where
     Ok(clamp_intelligence_summary_chars(value))
 }
 
+fn deserialize_timed_text_snippet_limit<'de, D>(
+    deserializer: D,
+) -> Result<u16, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u16::deserialize(deserializer)?;
+    Ok(clamp_timed_text_snippet_limit(value))
+}
+
+fn deserialize_timed_text_segment_limit<'de, D>(
+    deserializer: D,
+) -> Result<u16, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u16::deserialize(deserializer)?;
+    Ok(clamp_timed_text_segment_limit(value))
+}
+
+fn deserialize_timed_text_snippet_chars<'de, D>(
+    deserializer: D,
+) -> Result<u16, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u16::deserialize(deserializer)?;
+    Ok(clamp_timed_text_snippet_chars(value))
+}
+
 /// Cursor pagination request shared by Phase 1 intelligence endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntelligencePagination {
@@ -291,6 +375,21 @@ pub struct IntelligenceCaps {
         deserialize_with = "deserialize_summary_chars"
     )]
     pub summary_max_chars: u16,
+    #[serde(
+        default = "default_timed_text_snippet_limit",
+        deserialize_with = "deserialize_timed_text_snippet_limit"
+    )]
+    pub timed_text_snippet_limit: u16,
+    #[serde(
+        default = "default_timed_text_segment_limit",
+        deserialize_with = "deserialize_timed_text_segment_limit"
+    )]
+    pub timed_text_segment_limit: u16,
+    #[serde(
+        default = "default_timed_text_snippet_chars",
+        deserialize_with = "deserialize_timed_text_snippet_chars"
+    )]
+    pub timed_text_snippet_max_chars: u16,
 }
 
 impl Default for IntelligenceCaps {
@@ -303,6 +402,9 @@ impl Default for IntelligenceCaps {
             grounding_limit: DEFAULT_INTELLIGENCE_GROUNDING_LIMIT,
             tool_call_limit: DEFAULT_INTELLIGENCE_TOOL_CALL_LIMIT,
             summary_max_chars: DEFAULT_INTELLIGENCE_SUMMARY_CHARS,
+            timed_text_snippet_limit: DEFAULT_TIMED_TEXT_SNIPPET_LIMIT,
+            timed_text_segment_limit: DEFAULT_TIMED_TEXT_SEGMENT_LIMIT,
+            timed_text_snippet_max_chars: DEFAULT_TIMED_TEXT_SNIPPET_CHARS,
         }
     }
 }
@@ -512,6 +614,9 @@ pub struct IntelligenceCandidateSearchRequest {
     pub caps: IntelligenceCaps,
     #[serde(default)]
     pub include_artifacts: bool,
+    /// Opt in to bounded transcript snippets that ground each candidate.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_transcript_grounding: bool,
 }
 
 /// Candidate media item with bounded explanation and artifact links.
@@ -528,6 +633,9 @@ pub struct IntelligenceCandidate {
     pub artifact_ids: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub grounding: Vec<IntelligenceGroundingRef>,
+    /// Timestamped transcript snippets attached only when explicitly requested.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transcript_grounding: Vec<TimedTextSnippet>,
 }
 
 /// Response for candidate media search.
@@ -547,6 +655,7 @@ pub struct IntelligenceCandidateSearchResponse {
 pub enum IntelligenceArtifactKind {
     Summary,
     EmbeddingChunk,
+    TranscriptSource,
     TranscriptSegment,
     UserNote,
     GeneratedAnswer,
@@ -641,6 +750,87 @@ pub struct IntelligenceArtifactSourceEdge {
 
 fn is_zero_i64(value: &i64) -> bool {
     *value == 0
+}
+
+/// Transcript source classes exposed by timed-text repository and search DTOs.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum TimedTextSourceKind {
+    Embedded,
+    Sidecar,
+    Manual,
+    Generated,
+}
+
+impl TimedTextSourceKind {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            TimedTextSourceKind::Embedded => "embedded",
+            TimedTextSourceKind::Sidecar => "sidecar",
+            TimedTextSourceKind::Manual => "manual",
+            TimedTextSourceKind::Generated => "generated",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Self {
+        match value {
+            "sidecar" => TimedTextSourceKind::Sidecar,
+            "manual" => TimedTextSourceKind::Manual,
+            "generated" => TimedTextSourceKind::Generated,
+            _ => TimedTextSourceKind::Embedded,
+        }
+    }
+}
+
+/// Bounded timestamped transcript snippet returned by timed-text search.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimedTextSnippet {
+    pub media: IntelligenceMediaRef,
+    pub source_id: Uuid,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub segment_ids: Vec<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<Uuid>,
+    pub source_kind: TimedTextSourceKind,
+    pub language_code: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub snippet: IntelligenceSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+}
+
+/// Request for bounded timed-text snippet search.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimedTextSnippetSearchRequest {
+    pub query: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub library_ids: Vec<LibraryId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media_ids: Vec<MediaID>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media_kinds: Vec<IntelligenceMediaKind>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub language_codes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_kinds: Vec<TimedTextSourceKind>,
+    #[serde(default)]
+    pub pagination: IntelligencePagination,
+    #[serde(default)]
+    pub caps: IntelligenceCaps,
+    #[serde(default)]
+    pub include_artifacts: bool,
+}
+
+/// Response for bounded timed-text snippet search.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimedTextSnippetSearchResponse {
+    #[serde(default)]
+    pub snippets: Vec<TimedTextSnippet>,
+    #[serde(default)]
+    pub page: IntelligencePageInfo,
+    #[serde(default)]
+    pub caps: IntelligenceCaps,
 }
 
 /// Bounded artifact summary. The raw artifact body remains out-of-band.
@@ -1325,6 +1515,7 @@ mod tests {
                 score: Some(0.92),
                 artifact_ids: vec![Uuid::from_u128(4)],
                 grounding: vec![grounding_ref()],
+                transcript_grounding: Vec::new(),
             }],
             page: IntelligencePageInfo {
                 next_cursor: Some("cursor-2".to_string()),

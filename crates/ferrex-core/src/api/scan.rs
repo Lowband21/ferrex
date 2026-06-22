@@ -1,5 +1,7 @@
-use ferrex_model::scan::scanner::settings;
+use chrono::{DateTime, Utc};
+use ferrex_model::{MediaID, scan::scanner::settings};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Ready-queue depths for scan-related workers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,6 +11,34 @@ pub struct ScanQueueDepths {
     pub metadata: usize,
     pub index: usize,
     pub image_fetch: usize,
+    #[serde(default)]
+    pub transcript_extract: usize,
+}
+
+/// Safe recent transcript extraction failure row for admin surfaces. This view
+/// exposes IDs, bounded error excerpts, and retry timing only; it never includes
+/// transcript text or local filesystem paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptRecentFailureView {
+    pub library_id: ferrex_model::LibraryId,
+    pub media_id: MediaID,
+    pub media_file_id: Uuid,
+    pub status: String,
+    pub source_count: i32,
+    pub segment_count: i32,
+    pub attempt_count: i32,
+    pub last_error_excerpt: Option<String>,
+    pub next_retry_at: Option<DateTime<Utc>>,
+    pub last_run_correlation_id: Option<Uuid>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Bounded transcript extraction status included in scan metrics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TranscriptScanStatusView {
+    pub queue_depth: usize,
+    #[serde(default)]
+    pub recent_failures: Vec<TranscriptRecentFailureView>,
 }
 
 /// Top-level scanner metrics for admin surfaces.
@@ -18,6 +48,8 @@ pub struct ScanMetrics {
     pub active_scans: usize,
     #[serde(default)]
     pub incremental: IncrementalScanStatusView,
+    #[serde(default)]
+    pub transcripts: TranscriptScanStatusView,
 }
 
 /// Minimal, feature-agnostic view of orchestrator configuration for admin surfaces.
@@ -94,6 +126,8 @@ pub struct OrchestratorConfigView {
     pub queue: QueueConfigView,
     pub retry: RetryConfigView,
     pub metadata_limits: MetadataLimitsView,
+    #[serde(default)]
+    pub transcript_indexing: TranscriptIndexingConfigView,
     pub bulk_mode: BulkModeView,
     pub maintenance: MaintenanceConfigView,
     pub lease: LeaseConfigView,
@@ -109,6 +143,8 @@ pub struct QueueConfigView {
     pub max_parallel_metadata: usize,
     pub max_parallel_index: usize,
     pub max_parallel_image_fetch: usize,
+    #[serde(default)]
+    pub max_parallel_transcript_extract: usize,
     pub max_parallel_scans_per_device: usize,
     pub default_library_cap: usize,
 }
@@ -130,6 +166,48 @@ pub struct RetryConfigView {
 pub struct MetadataLimitsView {
     pub max_concurrency: usize,
     pub max_qps: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TranscriptIndexingConfigView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub embedded_enabled: bool,
+    #[serde(default)]
+    pub sidecar_enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_languages: Vec<String>,
+    #[serde(default)]
+    pub max_subtitle_bytes: usize,
+    #[serde(default)]
+    pub max_segments_per_media: usize,
+    #[serde(default)]
+    pub max_chars_per_segment: usize,
+    #[serde(default)]
+    pub max_chars_per_snippet: u16,
+    #[serde(default)]
+    pub extraction_timeout_ms: u64,
+    #[serde(default)]
+    pub concurrency_budget: usize,
+    #[serde(default)]
+    pub redaction: TranscriptRedactionConfigView,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TranscriptRedactionConfigView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub redact_emails: bool,
+    #[serde(default)]
+    pub redact_phone_numbers: bool,
+    #[serde(default)]
+    pub redact_url_secrets: bool,
+    #[serde(default)]
+    pub redact_bearer_tokens: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_regexes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,4 +243,14 @@ pub struct WatchConfigView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BudgetConfigView {
     pub library_scan_limit: usize,
+    #[serde(default)]
+    pub media_analysis_limit: usize,
+    #[serde(default)]
+    pub metadata_limit: usize,
+    #[serde(default)]
+    pub indexing_limit: usize,
+    #[serde(default)]
+    pub image_fetch_limit: usize,
+    #[serde(default)]
+    pub transcript_extraction_limit: usize,
 }

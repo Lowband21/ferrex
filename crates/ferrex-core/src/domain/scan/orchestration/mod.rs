@@ -93,7 +93,8 @@ pub use job::{
     EpisodeMatchJob, FolderScanJob, ImageFetchJob, ImageFetchPriority,
     IndexUpsertJob, JobHandle, JobId, JobKind, JobPayload, JobPriority,
     JobRecord, JobState, MediaAnalyzeJob, MediaCandidate, MediaFingerprint,
-    MetadataEnrichJob, ScanReason, SeriesResolveJob,
+    MetadataEnrichJob, ScanReason, SeriesResolveJob, TranscriptExtractJob,
+    TranscriptExtractTrigger,
 };
 pub use lease::{
     CompletionOutcome, DequeueRequest, JobLease, LeaseId, LeaseRenewal,

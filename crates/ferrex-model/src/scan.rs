@@ -134,6 +134,8 @@ pub mod orchestration {
             pub indexing_limit: usize,
             /// Poster/backdrop workers.
             pub image_fetch_limit: usize,
+            /// Transcript extraction workers.
+            pub transcript_extraction_limit: usize,
         }
 
         impl Default for BudgetConfig {
@@ -146,6 +148,7 @@ pub mod orchestration {
                     metadata_limit: cpu_count * 2,
                     indexing_limit: cpu_count,
                     image_fetch_limit: 4,
+                    transcript_extraction_limit: 1,
                 }
             }
         }
@@ -186,6 +189,91 @@ pub mod orchestration {
             pub budget: super::budget::BudgetConfig,
             /// Filesystem watch debounce and batching configuration.
             pub watch: WatchConfig,
+            /// Optional transcript indexing orchestration.
+            #[cfg_attr(feature = "serde", serde(default))]
+            pub transcript_indexing: TranscriptIndexingConfig,
+        }
+
+        /// Controls whether scan/index flows enqueue transcript extraction jobs
+        /// and how optional timed-text evidence is bounded before persistence.
+        #[derive(Clone, Debug)]
+        #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
+        pub struct TranscriptIndexingConfig {
+            /// Global opt-in for transcript indexing. Defaults to `false` so
+            /// existing installs never persist subtitle text until explicitly
+            /// enabled by an operator.
+            pub enabled: bool,
+            /// Extract text-convertible embedded subtitle streams.
+            pub embedded_enabled: bool,
+            /// Extract sibling `.srt`/`.vtt` sidecar files.
+            pub sidecar_enabled: bool,
+            /// Optional normalized language allow-list. Empty means all
+            /// detected languages are eligible.
+            pub allowed_languages: Vec<String>,
+            /// Maximum bytes read from any sidecar or converted subtitle stream.
+            pub max_subtitle_bytes: usize,
+            /// Maximum stored transcript segments across all sources for one
+            /// media file.
+            pub max_segments_per_media: usize,
+            /// Maximum stored characters per redacted transcript segment.
+            pub max_chars_per_segment: usize,
+            /// Maximum characters returned for one transcript search snippet.
+            pub max_chars_per_snippet: u16,
+            /// Timeout in milliseconds for probing or converting one media file.
+            pub extraction_timeout_ms: u64,
+            /// Desired transcript extraction concurrency budget. Runtime queue
+            /// and workload budgets are raised to at least this value.
+            pub concurrency_budget: usize,
+            /// Redaction policy applied after parser normalization and before
+            /// any transcript segment can be persisted or searched.
+            pub redaction: TranscriptRedactionConfig,
+        }
+
+        impl Default for TranscriptIndexingConfig {
+            fn default() -> Self {
+                Self {
+                    enabled: false,
+                    embedded_enabled: true,
+                    sidecar_enabled: true,
+                    allowed_languages: Vec::new(),
+                    max_subtitle_bytes: 4 * 1024 * 1024,
+                    max_segments_per_media: 20_000,
+                    max_chars_per_segment: 4_000,
+                    max_chars_per_snippet: 320,
+                    extraction_timeout_ms: 15_000,
+                    concurrency_budget: 1,
+                    redaction: TranscriptRedactionConfig::default(),
+                }
+            }
+        }
+
+        /// Configurable transcript redaction switches. Built-in patterns cover
+        /// common personal data and access-token shapes; custom regexes let
+        /// operators add deployment-specific redaction without code changes.
+        #[derive(Clone, Debug)]
+        #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
+        pub struct TranscriptRedactionConfig {
+            pub enabled: bool,
+            pub redact_emails: bool,
+            pub redact_phone_numbers: bool,
+            pub redact_url_secrets: bool,
+            pub redact_bearer_tokens: bool,
+            pub custom_regexes: Vec<String>,
+        }
+
+        impl Default for TranscriptRedactionConfig {
+            fn default() -> Self {
+                Self {
+                    enabled: true,
+                    redact_emails: true,
+                    redact_phone_numbers: true,
+                    redact_url_secrets: true,
+                    redact_bearer_tokens: true,
+                    custom_regexes: Vec::new(),
+                }
+            }
         }
 
         #[derive(Clone, Debug)]
@@ -199,6 +287,7 @@ pub mod orchestration {
             pub max_parallel_metadata: usize,
             pub max_parallel_index: usize,
             pub max_parallel_image_fetch: usize,
+            pub max_parallel_transcript_extract: usize,
             /// Per-device cap for scan workers touching the same mount.
             pub max_parallel_scans_per_device: usize,
             /// High watermark for queued jobs. Beyond this we start coalescing low priority work.
@@ -225,6 +314,7 @@ pub mod orchestration {
                     max_parallel_metadata: 4,
                     max_parallel_index: 1,
                     max_parallel_image_fetch: 4,
+                    max_parallel_transcript_extract: 1,
                     max_parallel_scans_per_device: 16,
                     high_watermark: 10_000,
                     critical_watermark: 20_000,

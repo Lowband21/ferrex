@@ -1,0 +1,111 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id,\n                   library_id,\n                   media_id,\n                   media_type::text AS \"media_type!\",\n                   media_file_id,\n                   source_kind::text AS \"source_kind!\",\n                   status::text AS \"status!\",\n                   language_code,\n                   source_name,\n                   artifact_id,\n                   segment_count,\n                   duration_ms,\n                   invalidated_at,\n                   purged_at,\n                   updated_at\n            FROM transcript_sources\n            WHERE ($1::uuid IS NULL OR library_id = $1)\n              AND ($2::uuid IS NULL OR media_file_id = $2)\n              AND ($3::uuid IS NULL OR media_id = $3)\n              AND ($4::text IS NULL OR media_type::text = $4)\n              AND ($5::text IS NULL OR status::text = $5)\n            ORDER BY updated_at DESC, id\n            LIMIT $6\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "media_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "media_file_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "language_code",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "segment_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "duration_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "invalidated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "purged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      null,
+      null,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "9dfd7b61048c5ea818ca472f16b0428b89be4158e93e76caf631780f46fa828e"
+}

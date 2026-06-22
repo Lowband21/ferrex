@@ -352,6 +352,7 @@ async fn candidate_search_is_bounded_and_ordered(pool: PgPool) {
             ..Default::default()
         },
         include_artifacts: false,
+        include_transcript_grounding: false,
     };
     let response = repo.candidate_search(&request, None).await.unwrap();
     assert!(!response.candidates.is_empty(), "arrival should match");
@@ -1217,6 +1218,7 @@ async fn invalidate_media_read_model_marks_rows_invalidated(pool: PgPool) {
                 pagination: IntelligencePagination::default(),
                 caps: IntelligenceCaps::default(),
                 include_artifacts: false,
+                include_transcript_grounding: false,
             },
             None,
         )
@@ -1403,6 +1405,7 @@ async fn user_refresh_upserts_watch_state_rows(pool: PgPool) {
         pagination: IntelligencePagination::default(),
         caps: IntelligenceCaps::default(),
         include_artifacts: false,
+        include_transcript_grounding: false,
     };
     let alice_results = repo
         .candidate_search(&watch_search, Some(alice))

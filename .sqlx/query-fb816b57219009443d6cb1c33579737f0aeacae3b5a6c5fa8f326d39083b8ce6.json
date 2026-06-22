@@ -1,0 +1,111 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id,\n                   library_id,\n                   media_id,\n                   media_type::text AS \"media_type!\",\n                   media_file_id,\n                   status::text AS \"status!\",\n                   source_count,\n                   segment_count,\n                   attempt_count,\n                   last_error_excerpt,\n                   next_retry_at,\n                   last_run_correlation_id,\n                   invalidated_at,\n                   purged_at,\n                   updated_at\n            FROM transcript_processing_status\n            WHERE ($1::uuid IS NULL OR library_id = $1)\n              AND ($2::uuid IS NULL OR media_file_id = $2)\n              AND ($3::uuid IS NULL OR media_id = $3)\n              AND ($4::text IS NULL OR media_type::text = $4)\n              AND ($5::text IS NULL OR status::text = $5)\n            ORDER BY updated_at DESC, id\n            LIMIT $6\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "media_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "media_file_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "segment_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "attempt_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_error_excerpt",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "next_retry_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_run_correlation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "invalidated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "purged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      null,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "fb816b57219009443d6cb1c33579737f0aeacae3b5a6c5fa8f326d39083b8ce6"
+}

@@ -13,5 +13,6 @@ pub use routes::v1;
 pub use scan::{
     IncrementalScanPolicyView, IncrementalScanStatusView,
     OrchestratorConfigView, ScanConfig, ScanMetrics, ScanQueueDepths,
+    TranscriptRecentFailureView, TranscriptScanStatusView,
 };
 pub use types::*;

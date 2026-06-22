@@ -11,4 +11,7 @@ pub mod indices;
 
 pub mod metadata;
 
+#[cfg(feature = "database")]
+pub mod timed_text;
+
 pub mod providers;

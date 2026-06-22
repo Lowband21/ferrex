@@ -17,6 +17,7 @@ use crate::database::{
         security_settings::PostgresSecuritySettingsRepository,
         setup_claims::PostgresSetupClaimsRepository,
         sync_sessions::PostgresSyncSessionsRepository,
+        transcripts::PostgresTranscriptRepository,
         users::PostgresUsersRepository,
         watch_metrics::PostgresWatchMetricsRepository,
     },
@@ -30,7 +31,8 @@ use crate::database::{
         query::QueryRepository, rbac::RbacRepository,
         security_settings::SecuritySettingsRepository,
         setup_claims::SetupClaimsRepository,
-        sync_sessions::SyncSessionsRepository, users::UsersRepository,
+        sync_sessions::SyncSessionsRepository,
+        transcripts::TranscriptRepository, users::UsersRepository,
         watch_metrics::WatchMetricsReadPort,
         watch_status::WatchStatusRepository,
     },
@@ -67,6 +69,7 @@ pub struct AppUnitOfWork {
     pub indices: Arc<dyn IndicesRepository>,
     pub scan_runs: Arc<dyn ScanRunRepository>,
     pub intelligence: Arc<dyn IntelligenceRepository>,
+    pub transcripts: Arc<dyn TranscriptRepository>,
 }
 
 impl fmt::Debug for AppUnitOfWork {
@@ -120,6 +123,7 @@ impl fmt::Debug for AppUnitOfWork {
                 "intelligence",
                 &type_name_of_val(self.intelligence.as_ref()),
             )
+            .field("transcripts", &type_name_of_val(self.transcripts.as_ref()))
             .finish()
     }
 }
@@ -148,6 +152,7 @@ pub struct AppUnitOfWorkBuilder {
     indices: Option<Arc<dyn IndicesRepository>>,
     scan_runs: Option<Arc<dyn ScanRunRepository>>,
     intelligence: Option<Arc<dyn IntelligenceRepository>>,
+    transcripts: Option<Arc<dyn TranscriptRepository>>,
 }
 
 impl fmt::Debug for AppUnitOfWorkBuilder {
@@ -171,6 +176,7 @@ impl fmt::Debug for AppUnitOfWorkBuilder {
             .field("indices", &self.indices.is_some())
             .field("scan_runs", &self.scan_runs.is_some())
             .field("intelligence", &self.intelligence.is_some())
+            .field("transcripts", &self.transcripts.is_some())
             .finish()
     }
 }
@@ -280,6 +286,14 @@ impl AppUnitOfWorkBuilder {
         self
     }
 
+    pub fn with_transcripts(
+        mut self,
+        repo: Arc<dyn TranscriptRepository>,
+    ) -> Self {
+        self.transcripts = Some(repo);
+        self
+    }
+
     /// Build a validated AppUnitOfWork. Returns a string error if any required
     /// repository is missing. Keep errors simple for ease of use at call sites.
     pub fn build(self) -> Result<AppUnitOfWork, String> {
@@ -338,6 +352,9 @@ impl AppUnitOfWorkBuilder {
             intelligence: self
                 .intelligence
                 .ok_or_else(|| "missing IntelligenceRepository".to_string())?,
+            transcripts: self
+                .transcripts
+                .ok_or_else(|| "missing TranscriptRepository".to_string())?,
         })
     }
 }
@@ -421,8 +438,12 @@ impl AppUnitOfWorkBuilder {
         self.scan_runs = Some(scan_runs);
 
         let intelligence: Arc<dyn IntelligenceRepository> =
-            Arc::new(PostgresIntelligenceRepository::new(pool));
+            Arc::new(PostgresIntelligenceRepository::new(pool.clone()));
         self.intelligence = Some(intelligence);
+
+        let transcripts: Arc<dyn TranscriptRepository> =
+            Arc::new(PostgresTranscriptRepository::new(pool));
+        self.transcripts = Some(transcripts);
 
         self
     }

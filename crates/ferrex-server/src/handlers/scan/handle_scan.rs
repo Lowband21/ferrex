@@ -14,7 +14,10 @@ use ferrex_core::api::types::{
     ScanStartDisposition, StartScanRequest,
 };
 use ferrex_core::error::MediaError;
-use ferrex_core::types::{LibraryId, MediaEvent, ScanProgressEvent};
+use ferrex_core::types::{
+    EpisodeID, LibraryId, MediaEvent, MediaID, MovieID, ScanProgressEvent,
+    VideoMediaType,
+};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
@@ -32,7 +35,8 @@ use ferrex_core::api::scan::{
     BudgetConfigView, BulkModeView, IncrementalScanPolicyView,
     IncrementalScanStatusView, LeaseConfigView, MaintenanceConfigView,
     MetadataLimitsView, OrchestratorConfigView, QueueConfigView,
-    RetryConfigView, ScanConfig, ScanMetrics, WatchConfigView,
+    RetryConfigView, ScanConfig, ScanMetrics, TranscriptIndexingConfigView,
+    TranscriptRedactionConfigView, WatchConfigView,
 };
 
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
@@ -84,6 +88,38 @@ pub struct ScanHistoryResponse {
 pub struct ScanEventsResponse {
     pub scan_id: Uuid,
     pub events: Vec<ScanBroadcastFrame>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TranscriptRefreshResponse {
+    pub media_id: Uuid,
+    pub media_type: String,
+    pub media_file_id: Option<Uuid>,
+    pub queued: bool,
+    pub accepted: bool,
+    pub job_id: Option<Uuid>,
+    pub merged_into: Option<Uuid>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TranscriptPurgeRequest {
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TranscriptPurgeResponse {
+    pub library_id: Uuid,
+    pub media_id: Uuid,
+    pub media_type: String,
+    pub purged_sources: u64,
+    pub media_file_id: Option<Uuid>,
+    pub rebuild_queued: bool,
+    pub accepted: bool,
+    pub job_id: Option<Uuid>,
+    pub merged_into: Option<Uuid>,
+    pub reason: Option<String>,
 }
 
 pub async fn start_scan_handler(
@@ -200,6 +236,24 @@ mod tests {
             StatusCode::OK
         );
     }
+
+    #[test]
+    fn transcript_refresh_media_id_accepts_playable_media_only() {
+        let id = Uuid::from_u128(42);
+
+        assert_eq!(
+            parse_transcript_refresh_media_id("movies", id)
+                .expect("movie refresh target"),
+            (MediaID::Movie(MovieID(id)), VideoMediaType::Movie)
+        );
+        assert_eq!(
+            parse_transcript_refresh_media_id("Episode", id)
+                .expect("episode refresh target"),
+            (MediaID::Episode(EpisodeID(id)), VideoMediaType::Episode)
+        );
+        assert!(parse_transcript_refresh_media_id("series", id).is_err());
+        assert!(parse_transcript_refresh_media_id("season", id).is_err());
+    }
 }
 
 pub async fn active_scans_handler(
@@ -277,6 +331,208 @@ pub async fn scan_progress_sse_handler(
     Ok(Sse::new(stream).keep_alive(default_keep_alive()))
 }
 
+pub async fn refresh_transcript_handler(
+    State(state): State<AppState>,
+    Path((media_type, media_id)): Path<(String, Uuid)>,
+) -> Result<impl IntoResponse, ScanHttpError> {
+    let (typed_media_id, variant) =
+        parse_transcript_refresh_media_id(&media_type, media_id)?;
+    let normalized_media_type = transcript_media_type_label(variant);
+    let orchestrator = state.scan_control().orchestrator();
+
+    if !orchestrator.config().transcript_indexing.enabled {
+        return Ok((
+            StatusCode::OK,
+            Json(ApiResponse::success(TranscriptRefreshResponse {
+                media_id,
+                media_type: normalized_media_type.to_string(),
+                media_file_id: None,
+                queued: false,
+                accepted: false,
+                job_id: None,
+                merged_into: None,
+                reason: Some("transcript_indexing_disabled".to_string()),
+            })),
+        ));
+    }
+
+    let media_file = state
+        .unit_of_work()
+        .media_files_read
+        .get_by_media_id(&typed_media_id)
+        .await
+        .map_err(internal_scan_error)?
+        .ok_or_else(|| ScanHttpError {
+            status: StatusCode::NOT_FOUND,
+            message: "Playable media file not found for transcript refresh"
+                .to_string(),
+        })?;
+
+    let handle = orchestrator
+        .enqueue_transcript_refresh(
+            media_file.library_id,
+            typed_media_id,
+            variant,
+            media_file.id,
+            media_file.path.to_string_lossy().to_string(),
+            None,
+        )
+        .await
+        .map_err(internal_scan_error)?;
+
+    let status = if handle.is_some() {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::OK
+    };
+    let response = match handle {
+        Some(handle) => TranscriptRefreshResponse {
+            media_id,
+            media_type: normalized_media_type.to_string(),
+            media_file_id: Some(media_file.id),
+            queued: true,
+            accepted: handle.accepted,
+            job_id: Some(handle.job_id.0),
+            merged_into: handle.merged_into.map(|id| id.0),
+            reason: None,
+        },
+        None => TranscriptRefreshResponse {
+            media_id,
+            media_type: normalized_media_type.to_string(),
+            media_file_id: Some(media_file.id),
+            queued: false,
+            accepted: false,
+            job_id: None,
+            merged_into: None,
+            reason: Some("media_file_unavailable".to_string()),
+        },
+    };
+
+    Ok((status, Json(ApiResponse::success(response))))
+}
+
+pub async fn purge_transcript_handler(
+    State(state): State<AppState>,
+    Path((library_id, media_type, media_id)): Path<(Uuid, String, Uuid)>,
+    Json(request): Json<TranscriptPurgeRequest>,
+) -> Result<impl IntoResponse, ScanHttpError> {
+    let (typed_media_id, variant) =
+        parse_transcript_refresh_media_id(&media_type, media_id)?;
+    let normalized_media_type = transcript_media_type_label(variant);
+    let reason = transcript_purge_reason(
+        request.reason,
+        "operator requested transcript purge",
+    );
+    let purged_sources = state
+        .unit_of_work()
+        .transcripts
+        .purge_media(LibraryId(library_id), typed_media_id, &reason)
+        .await
+        .map_err(transcript_repo_error)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse::success(TranscriptPurgeResponse {
+            library_id,
+            media_id,
+            media_type: normalized_media_type.to_string(),
+            purged_sources,
+            media_file_id: None,
+            rebuild_queued: false,
+            accepted: false,
+            job_id: None,
+            merged_into: None,
+            reason: Some(reason),
+        })),
+    ))
+}
+
+pub async fn rebuild_transcript_handler(
+    State(state): State<AppState>,
+    Path((library_id, media_type, media_id)): Path<(Uuid, String, Uuid)>,
+    Json(request): Json<TranscriptPurgeRequest>,
+) -> Result<impl IntoResponse, ScanHttpError> {
+    let (typed_media_id, variant) =
+        parse_transcript_refresh_media_id(&media_type, media_id)?;
+    let normalized_media_type = transcript_media_type_label(variant);
+    let reason = transcript_purge_reason(
+        request.reason,
+        "operator requested transcript rebuild",
+    );
+    let library = LibraryId(library_id);
+    let purged_sources = state
+        .unit_of_work()
+        .transcripts
+        .purge_media(library, typed_media_id, &reason)
+        .await
+        .map_err(transcript_repo_error)?;
+
+    let orchestrator = state.scan_control().orchestrator();
+    let media_file = state
+        .unit_of_work()
+        .media_files_read
+        .get_by_media_id(&typed_media_id)
+        .await
+        .map_err(internal_scan_error)?
+        .filter(|file| file.library_id == library);
+
+    let handle = if let Some(media_file) = &media_file {
+        orchestrator
+            .enqueue_transcript_refresh(
+                media_file.library_id,
+                typed_media_id,
+                variant,
+                media_file.id,
+                media_file.path.to_string_lossy().to_string(),
+                None,
+            )
+            .await
+            .map_err(internal_scan_error)?
+    } else {
+        None
+    };
+
+    let status = if handle.is_some() {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::OK
+    };
+    let disabled = !orchestrator.config().transcript_indexing.enabled;
+    let media_file_id = media_file.as_ref().map(|file| file.id);
+    let response = match handle {
+        Some(handle) => TranscriptPurgeResponse {
+            library_id,
+            media_id,
+            media_type: normalized_media_type.to_string(),
+            purged_sources,
+            media_file_id,
+            rebuild_queued: true,
+            accepted: handle.accepted,
+            job_id: Some(handle.job_id.0),
+            merged_into: handle.merged_into.map(|id| id.0),
+            reason: None,
+        },
+        None => TranscriptPurgeResponse {
+            library_id,
+            media_id,
+            media_type: normalized_media_type.to_string(),
+            purged_sources,
+            media_file_id,
+            rebuild_queued: false,
+            accepted: false,
+            job_id: None,
+            merged_into: None,
+            reason: Some(if disabled {
+                "transcript_indexing_disabled".to_string()
+            } else {
+                "media_file_unavailable".to_string()
+            }),
+        },
+    };
+
+    Ok((status, Json(ApiResponse::success(response))))
+}
+
 pub async fn scan_metrics_handler(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<ScanMetrics>>, ScanHttpError> {
@@ -291,10 +547,20 @@ pub async fn scan_metrics_handler(
         })?;
     let active = state.scan_control().active_scans().await.len();
     let incremental = incremental_status(&state).await?;
+    let transcripts = state
+        .scan_control()
+        .orchestrator()
+        .transcript_scan_status()
+        .await
+        .map_err(|e: MediaError| ScanHttpError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: e.to_string(),
+        })?;
     Ok(Json(ApiResponse::success(ScanMetrics {
         queue_depths: depths,
         active_scans: active,
         incremental,
+        transcripts,
     })))
 }
 
@@ -312,6 +578,9 @@ pub async fn scan_config_handler(
             max_parallel_metadata: cfg.queue.max_parallel_metadata,
             max_parallel_index: cfg.queue.max_parallel_index,
             max_parallel_image_fetch: cfg.queue.max_parallel_image_fetch,
+            max_parallel_transcript_extract: cfg
+                .queue
+                .max_parallel_transcript_extract,
             max_parallel_scans_per_device: cfg
                 .queue
                 .max_parallel_scans_per_device,
@@ -335,6 +604,50 @@ pub async fn scan_config_handler(
         metadata_limits: MetadataLimitsView {
             max_concurrency: cfg.metadata_limits.max_concurrency,
             max_qps: cfg.metadata_limits.max_qps,
+        },
+        transcript_indexing: TranscriptIndexingConfigView {
+            enabled: cfg.transcript_indexing.enabled,
+            embedded_enabled: cfg.transcript_indexing.embedded_enabled,
+            sidecar_enabled: cfg.transcript_indexing.sidecar_enabled,
+            allowed_languages: cfg
+                .transcript_indexing
+                .allowed_languages
+                .clone(),
+            max_subtitle_bytes: cfg.transcript_indexing.max_subtitle_bytes,
+            max_segments_per_media: cfg
+                .transcript_indexing
+                .max_segments_per_media,
+            max_chars_per_segment: cfg
+                .transcript_indexing
+                .max_chars_per_segment,
+            max_chars_per_snippet: cfg
+                .transcript_indexing
+                .max_chars_per_snippet,
+            extraction_timeout_ms: cfg
+                .transcript_indexing
+                .extraction_timeout_ms,
+            concurrency_budget: cfg.transcript_indexing.concurrency_budget,
+            redaction: TranscriptRedactionConfigView {
+                enabled: cfg.transcript_indexing.redaction.enabled,
+                redact_emails: cfg.transcript_indexing.redaction.redact_emails,
+                redact_phone_numbers: cfg
+                    .transcript_indexing
+                    .redaction
+                    .redact_phone_numbers,
+                redact_url_secrets: cfg
+                    .transcript_indexing
+                    .redaction
+                    .redact_url_secrets,
+                redact_bearer_tokens: cfg
+                    .transcript_indexing
+                    .redaction
+                    .redact_bearer_tokens,
+                custom_regexes: cfg
+                    .transcript_indexing
+                    .redaction
+                    .custom_regexes
+                    .clone(),
+            },
         },
         bulk_mode: BulkModeView {
             speedup_factor: cfg.bulk_mode.speedup_factor,
@@ -364,6 +677,11 @@ pub async fn scan_config_handler(
         },
         budget: BudgetConfigView {
             library_scan_limit: cfg.budget.library_scan_limit,
+            media_analysis_limit: cfg.budget.media_analysis_limit,
+            metadata_limit: cfg.budget.metadata_limit,
+            indexing_limit: cfg.budget.indexing_limit,
+            image_fetch_limit: cfg.budget.image_fetch_limit,
+            transcript_extraction_limit: cfg.budget.transcript_extraction_limit,
         },
     };
     let incremental_policy = IncrementalScanPolicyView {
@@ -409,6 +727,63 @@ fn watch_strategy_label(
     strategy: ferrex_core::domain::scan::orchestration::config::WatchStrategy,
 ) -> String {
     format!("{strategy:?}").to_ascii_lowercase()
+}
+
+fn parse_transcript_refresh_media_id(
+    media_type: &str,
+    media_id: Uuid,
+) -> Result<(MediaID, VideoMediaType), ScanHttpError> {
+    match media_type.trim().to_ascii_lowercase().as_str() {
+        "movie" | "movies" => Ok((
+            MediaID::Movie(MovieID(media_id)),
+            VideoMediaType::Movie,
+        )),
+        "episode" | "episodes" => Ok((
+            MediaID::Episode(EpisodeID(media_id)),
+            VideoMediaType::Episode,
+        )),
+        _ => Err(ScanHttpError {
+            status: StatusCode::BAD_REQUEST,
+            message: "Transcript refresh is supported only for movie or episode media"
+                .to_string(),
+        }),
+    }
+}
+
+fn transcript_media_type_label(media_type: VideoMediaType) -> &'static str {
+    match media_type {
+        VideoMediaType::Movie => "movie",
+        VideoMediaType::Episode => "episode",
+        VideoMediaType::Series => "series",
+        VideoMediaType::Season => "season",
+    }
+}
+
+fn transcript_purge_reason(
+    reason: Option<String>,
+    fallback: &'static str,
+) -> String {
+    reason
+        .map(|value| value.trim().chars().take(512).collect::<String>())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn transcript_repo_error(error: MediaError) -> ScanHttpError {
+    match error {
+        MediaError::InvalidMedia(message) => ScanHttpError {
+            status: StatusCode::BAD_REQUEST,
+            message,
+        },
+        other => internal_scan_error(other),
+    }
+}
+
+fn internal_scan_error(error: MediaError) -> ScanHttpError {
+    ScanHttpError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: error.to_string(),
+    }
 }
 
 pub async fn build_scan_progress_stream(

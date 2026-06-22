@@ -27,9 +27,11 @@ use crate::{
         DEFAULT_INTELLIGENCE_CANDIDATE_LIMIT, DEFAULT_INTELLIGENCE_FACET_LIMIT,
         DEFAULT_INTELLIGENCE_GROUNDING_LIMIT, DEFAULT_INTELLIGENCE_PAGE_LIMIT,
         DEFAULT_INTELLIGENCE_RELATED_LIMIT, DEFAULT_INTELLIGENCE_SUMMARY_CHARS,
-        DEFAULT_INTELLIGENCE_TOOL_CALL_LIMIT, IntelligenceArtifactKind,
-        IntelligenceArtifactSearchRequest, IntelligenceArtifactSearchResponse,
-        IntelligenceArtifactSourceEdge, IntelligenceCandidateSearchRequest,
+        DEFAULT_INTELLIGENCE_TOOL_CALL_LIMIT, DEFAULT_TIMED_TEXT_SEGMENT_LIMIT,
+        DEFAULT_TIMED_TEXT_SNIPPET_CHARS, DEFAULT_TIMED_TEXT_SNIPPET_LIMIT,
+        IntelligenceArtifactKind, IntelligenceArtifactSearchRequest,
+        IntelligenceArtifactSearchResponse, IntelligenceArtifactSourceEdge,
+        IntelligenceCandidateSearchRequest,
         IntelligenceCandidateSearchResponse, IntelligenceCaps,
         IntelligenceDraftArtifactPayload, IntelligenceFacetGroup,
         IntelligenceGroundingRef, IntelligenceGroundingSource,
@@ -42,7 +44,8 @@ use crate::{
         MAX_INTELLIGENCE_CANDIDATE_LIMIT, MAX_INTELLIGENCE_FACET_LIMIT,
         MAX_INTELLIGENCE_GROUNDING_LIMIT, MAX_INTELLIGENCE_PAGE_LIMIT,
         MAX_INTELLIGENCE_RELATED_LIMIT, MAX_INTELLIGENCE_SUMMARY_CHARS,
-        MAX_INTELLIGENCE_TOOL_CALL_LIMIT,
+        MAX_INTELLIGENCE_TOOL_CALL_LIMIT, MAX_TIMED_TEXT_SEGMENT_LIMIT,
+        MAX_TIMED_TEXT_SNIPPET_CHARS, MAX_TIMED_TEXT_SNIPPET_LIMIT,
     },
     database::repository_ports::{
         intelligence::{
@@ -1705,6 +1708,21 @@ fn clamp_caps_for_tool(
             DEFAULT_INTELLIGENCE_SUMMARY_CHARS,
             MAX_INTELLIGENCE_SUMMARY_CHARS,
         ),
+        timed_text_snippet_limit: clamp_limit(
+            caps.timed_text_snippet_limit,
+            DEFAULT_TIMED_TEXT_SNIPPET_LIMIT,
+            MAX_TIMED_TEXT_SNIPPET_LIMIT.min(budget.max_rows),
+        ),
+        timed_text_segment_limit: clamp_limit(
+            caps.timed_text_segment_limit,
+            DEFAULT_TIMED_TEXT_SEGMENT_LIMIT,
+            MAX_TIMED_TEXT_SEGMENT_LIMIT,
+        ),
+        timed_text_snippet_max_chars: clamp_limit(
+            caps.timed_text_snippet_max_chars,
+            DEFAULT_TIMED_TEXT_SNIPPET_CHARS,
+            MAX_TIMED_TEXT_SNIPPET_CHARS,
+        ),
     }
 }
 
@@ -3066,6 +3084,7 @@ mod tests {
             score: Some(0.9),
             artifact_ids: Vec::new(),
             grounding: Vec::new(),
+            transcript_grounding: Vec::new(),
         }
     }
 
@@ -3132,8 +3151,12 @@ mod tests {
                     grounding_limit: 500,
                     tool_call_limit: 500,
                     summary_max_chars: 5_000,
+                    timed_text_snippet_limit: 500,
+                    timed_text_segment_limit: 500,
+                    timed_text_snippet_max_chars: 5_000,
                 },
                 include_artifacts: true,
+                include_transcript_grounding: false,
             })
             .unwrap();
         args["pagination"]["limit"] = json!(500);

@@ -2493,6 +2493,7 @@ mod tests {
                     evidence: Some(IntelligenceSummary::new("candidate")),
                 },
             ],
+            transcript_grounding: Vec::new(),
         }
     }
 

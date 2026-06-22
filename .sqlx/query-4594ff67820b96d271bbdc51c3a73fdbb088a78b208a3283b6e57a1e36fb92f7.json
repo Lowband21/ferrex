@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                                    SELECT id, state, attempts, correlation_id\n                                    FROM orchestrator_jobs\n                                    WHERE dedupe_key = $1\n                                      AND state IN ('ready','deferred','leased')\n                                    ORDER BY created_at ASC\n                                    LIMIT 1\n                                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "state",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "correlation_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "4594ff67820b96d271bbdc51c3a73fdbb088a78b208a3283b6e57a1e36fb92f7"
+}

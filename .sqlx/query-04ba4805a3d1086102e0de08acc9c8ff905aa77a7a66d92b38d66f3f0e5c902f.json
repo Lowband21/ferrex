@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT media_file_id AS \"media_file_id!\"\n            FROM transcript_sources\n            WHERE library_id = $1\n              AND media_id = $2\n              AND media_type = ($3::text)::media_type\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_file_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "04ba4805a3d1086102e0de08acc9c8ff905aa77a7a66d92b38d66f3f0e5c902f"
+}

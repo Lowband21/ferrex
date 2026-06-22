@@ -377,6 +377,114 @@ async fn seed_artifact(
     .expect("insert artifact source");
 }
 
+async fn seed_transcript_source(
+    pool: &PgPool,
+    library_id: Uuid,
+    movie_id: Uuid,
+    file_id: Uuid,
+    source_id: Uuid,
+    artifact_id: Uuid,
+    owner_id: Uuid,
+) {
+    sqlx::query(
+        r#"
+        INSERT INTO intelligence_artifacts (
+            id, artifact_kind, scope, status, library_id, user_id, media_id,
+            media_type, title, summary, content_hash, content, metadata,
+            source_revision
+        ) VALUES (
+            $1, 'transcript_source', 'user', 'active', $2, $3, $4,
+            'movie', 'Cosmic Arrival transcript',
+            'Owner-scoped transcript source summary.', $5,
+            jsonb_build_object('raw_body', 'this full body must stay hidden'),
+            '{}'::jsonb, 1
+        )
+        "#,
+    )
+    .bind(artifact_id)
+    .bind(library_id)
+    .bind(owner_id)
+    .bind(movie_id)
+    .bind(hex_hash(40))
+    .execute(pool)
+    .await
+    .expect("insert transcript artifact");
+
+    sqlx::query(
+        r#"
+        INSERT INTO transcript_sources (
+            id, library_id, media_id, media_type, media_file_id,
+            source_kind, status, language_code, source_key, source_name,
+            source_path_hash, source_content_hash, normalized_content_hash,
+            artifact_id, duration_ms, segment_count, extracted_at,
+            source_locator, metadata
+        ) VALUES (
+            $1, $2, $3, 'movie', $4,
+            'sidecar', 'active', 'en', $5, 'English sidecar',
+            $6, $7, $8,
+            $9, 120000, 4, now(),
+            jsonb_build_object('private_locator', '/tmp/cosmic-arrival.srt'),
+            '{}'::jsonb
+        )
+        "#,
+    )
+    .bind(source_id)
+    .bind(library_id)
+    .bind(movie_id)
+    .bind(file_id)
+    .bind(format!("sidecar:{}", hex_hash(41)))
+    .bind(hex_hash(41))
+    .bind(hex_hash(42))
+    .bind(hex_hash(43))
+    .bind(artifact_id)
+    .execute(pool)
+    .await
+    .expect("insert transcript source");
+
+    let segments = [
+        (
+            0_i32,
+            1000_i64,
+            2000_i64,
+            "The crew listens in silence.",
+            50_u64,
+        ),
+        (
+            1,
+            2000,
+            3500,
+            "A cosmic signal arrives with a bounded clue.",
+            51,
+        ),
+        (2, 3500, 5000, "Grounded transcript evidence follows.", 52),
+        (3, 9000, 11000, "Another cosmic signal appears later.", 53),
+    ];
+
+    for (cue_index, start_ms, end_ms, text, hash_seed) in segments {
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_segments (
+                transcript_source_id, library_id, media_id, media_type,
+                media_file_id, language_code, cue_index, start_ms, end_ms,
+                cue_text, segment_hash, metadata
+            ) VALUES ($1, $2, $3, 'movie', $4, 'en', $5, $6, $7, $8, $9, '{}'::jsonb)
+            "#,
+        )
+        .bind(source_id)
+        .bind(library_id)
+        .bind(movie_id)
+        .bind(file_id)
+        .bind(cue_index)
+        .bind(start_ms)
+        .bind(end_ms)
+        .bind(text)
+        .bind(hex_hash(hash_seed))
+        .execute(pool)
+        .await
+        .expect("insert transcript segment");
+    }
+}
+
 fn hex_hash(seed: u64) -> String {
     format!("{seed:064x}")
 }
@@ -453,15 +561,18 @@ async fn intelligence_routes_are_authenticated_bounded_and_scoped(
     let library_id = Uuid::from_u128(0x100);
     let movie_id = Uuid::from_u128(0x200);
     let related_movie_id = Uuid::from_u128(0x201);
+    let movie_file_id = Uuid::from_u128(0x210);
     let global_artifact_id = Uuid::from_u128(0x300);
     let user_artifact_id = Uuid::from_u128(0x301);
+    let transcript_artifact_id = Uuid::from_u128(0x302);
+    let transcript_source_id = Uuid::from_u128(0x400);
 
     seed_library(&pool, library_id).await;
     seed_movie(
         &pool,
         library_id,
         movie_id,
-        Uuid::from_u128(0x210),
+        movie_file_id,
         1,
         "Cosmic Arrival",
         878,
@@ -514,12 +625,28 @@ async fn intelligence_routes_are_authenticated_bounded_and_scoped(
         3,
     )
     .await;
+    seed_transcript_source(
+        &pool,
+        library_id,
+        movie_id,
+        movie_file_id,
+        transcript_source_id,
+        transcript_artifact_id,
+        user_id,
+    )
+    .await;
 
     let unauthenticated = server
         .post(routes::v1::intelligence::LIBRARY_OVERVIEW)
         .json(&json!({ "library_ids": [library_id] }))
         .await;
     unauthenticated.assert_status(StatusCode::UNAUTHORIZED);
+
+    let unauthenticated_transcripts = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .json(&json!({ "query": "cosmic", "library_ids": [library_id] }))
+        .await;
+    unauthenticated_transcripts.assert_status(StatusCode::UNAUTHORIZED);
 
     let overview = server
         .post(routes::v1::intelligence::LIBRARY_OVERVIEW)
@@ -540,12 +667,12 @@ async fn intelligence_routes_are_authenticated_bounded_and_scoped(
     assert_eq!(overview_body["data"]["caps"]["artifact_limit"], 24);
     assert_eq!(overview_body["data"]["caps"]["facet_limit"], 32);
     assert_eq!(overview_body["data"]["libraries"][0]["counts"]["movies"], 2);
-    assert_eq!(
+    assert!(
         overview_body["data"]["libraries"][0]["artifact_ids"]
             .as_array()
             .expect("artifact ids array")
-            .len(),
-        2
+            .len()
+            >= 2
     );
 
     let facets = server
@@ -588,6 +715,150 @@ async fn intelligence_routes_are_authenticated_bounded_and_scoped(
             .expect("candidate artifact ids")
             .len()
             >= 2
+    );
+    assert!(
+        candidates_body["data"]["candidates"][0]
+            .get("transcript_grounding")
+            .is_none(),
+        "candidate search must not include transcript snippets by default"
+    );
+
+    let grounded_candidates = server
+        .post(routes::v1::intelligence::CANDIDATE_SEARCH)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({
+            "query": "cosmic signal",
+            "library_ids": [library_id],
+            "include_artifacts": true,
+            "include_transcript_grounding": true,
+            "caps": {
+                "grounding_limit": 4,
+                "timed_text_snippet_limit": 1,
+                "timed_text_segment_limit": 2,
+                "timed_text_snippet_max_chars": 30
+            }
+        }))
+        .await;
+    grounded_candidates.assert_status_ok();
+    let grounded_candidates_body: Value = grounded_candidates.json();
+    let transcript_grounding = grounded_candidates_body["data"]["candidates"]
+        [0]["transcript_grounding"]
+        .as_array()
+        .expect("candidate transcript grounding");
+    assert_eq!(transcript_grounding.len(), 1);
+    assert_eq!(transcript_grounding[0]["start_ms"], 2000);
+    assert_eq!(transcript_grounding[0]["end_ms"], 5000);
+    assert_eq!(
+        transcript_grounding[0]["artifact_id"],
+        transcript_artifact_id.to_string()
+    );
+
+    let timed_text = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({
+            "query": "cosmic signal",
+            "library_ids": [library_id],
+            "media_kinds": ["movie"],
+            "language_codes": ["EN"],
+            "source_kinds": ["sidecar"],
+            "include_artifacts": true,
+            "pagination": { "limit": 999 },
+            "caps": {
+                "timed_text_snippet_limit": 1,
+                "timed_text_segment_limit": 2,
+                "timed_text_snippet_max_chars": 30,
+                "summary_max_chars": 30
+            }
+        }))
+        .await;
+    timed_text.assert_status_ok();
+    let timed_text_body: Value = timed_text.json();
+    assert_eq!(timed_text_body["data"]["page"]["limit"], 1);
+    assert_eq!(timed_text_body["data"]["page"]["has_more"], true);
+    assert!(timed_text_body["data"]["page"]["next_cursor"].is_string());
+    assert_eq!(
+        timed_text_body["data"]["caps"]["timed_text_segment_limit"],
+        2
+    );
+    let snippets = timed_text_body["data"]["snippets"]
+        .as_array()
+        .expect("timed-text snippets");
+    assert_eq!(snippets.len(), 1);
+    assert_eq!(snippets[0]["media"]["title"], "Cosmic Arrival");
+    assert_eq!(snippets[0]["source_id"], transcript_source_id.to_string());
+    assert_eq!(
+        snippets[0]["artifact_id"],
+        transcript_artifact_id.to_string()
+    );
+    assert_eq!(snippets[0]["source_kind"], "sidecar");
+    assert_eq!(snippets[0]["language_code"], "en");
+    assert_eq!(snippets[0]["start_ms"], 2000);
+    assert_eq!(snippets[0]["end_ms"], 5000);
+    assert_eq!(
+        snippets[0]["segment_ids"]
+            .as_array()
+            .expect("snippet segment ids")
+            .len(),
+        2
+    );
+    assert_eq!(snippets[0]["snippet"]["max_chars"], 30);
+    assert_eq!(snippets[0]["snippet"]["truncated"], true);
+
+    let next_cursor = timed_text_body["data"]["page"]["next_cursor"]
+        .as_str()
+        .expect("next cursor")
+        .to_string();
+    let second_page = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({
+            "query": "cosmic signal",
+            "library_ids": [library_id],
+            "pagination": { "limit": 1, "cursor": next_cursor },
+            "caps": {
+                "timed_text_snippet_limit": 1,
+                "timed_text_segment_limit": 2,
+                "timed_text_snippet_max_chars": 80
+            }
+        }))
+        .await;
+    second_page.assert_status_ok();
+    let second_page_body: Value = second_page.json();
+    assert_eq!(second_page_body["data"]["page"]["has_more"], false);
+    assert_eq!(second_page_body["data"]["snippets"][0]["start_ms"], 9000);
+
+    let other_user_transcripts = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .add_header("Authorization", bearer(&other_access_token))
+        .json(&json!({
+            "query": "cosmic signal",
+            "library_ids": [library_id],
+            "include_artifacts": true,
+            "caps": { "timed_text_snippet_limit": 1 }
+        }))
+        .await;
+    other_user_transcripts.assert_status_ok();
+    let other_user_transcripts_body: Value = other_user_transcripts.json();
+    assert!(
+        other_user_transcripts_body["data"]["snippets"][0]
+            .get("artifact_id")
+            .is_none(),
+        "user-scoped transcript artifact ids must not leak to another user"
+    );
+
+    let transcript_miss = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({ "query": "zzzznomatch", "library_ids": [library_id] }))
+        .await;
+    transcript_miss.assert_status_ok();
+    let transcript_miss_body: Value = transcript_miss.json();
+    assert!(
+        transcript_miss_body["data"]["snippets"]
+            .as_array()
+            .expect("miss snippets")
+            .is_empty()
     );
 
     let artifact_search = server
@@ -700,6 +971,8 @@ async fn intelligence_routes_are_authenticated_bounded_and_scoped(
     let response_shape = serde_json::to_string(&json!({
         "overview": overview_body["data"],
         "candidate": candidates_body["data"],
+        "grounded_candidate": grounded_candidates_body["data"],
+        "timed_text": timed_text_body["data"],
         "artifact": artifact_body["data"],
         "item": item_body["data"],
         "related": related_body["data"],
@@ -708,6 +981,8 @@ async fn intelligence_routes_are_authenticated_bounded_and_scoped(
     assert!(response_shape.contains("provenance"));
     assert!(!response_shape.contains("/tmp/raw-path"));
     assert!(!response_shape.contains("file_path"));
+    assert!(!response_shape.contains("private_locator"));
+    assert!(!response_shape.contains("raw_body"));
     assert!(!response_shape.contains("content_hash"));
     assert!(!response_shape.contains("technical_metadata"));
 
@@ -1057,6 +1332,120 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
             .as_array()
             .map(|drafts| drafts.is_empty())
             .unwrap_or(true)
+    );
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn transcript_purge_and_rebuild_routes_remove_searchable_segments(
+    pool: PgPool,
+) -> Result<()> {
+    let library_id = Uuid::from_u128(0x1700);
+    let movie_id = Uuid::from_u128(0x2700);
+    let movie_file_id = Uuid::from_u128(0x2710);
+    let transcript_artifact_id = Uuid::from_u128(0x3700);
+    let transcript_source_id = Uuid::from_u128(0x4700);
+
+    seed_library(&pool, library_id).await;
+    seed_movie(
+        &pool,
+        library_id,
+        movie_id,
+        movie_file_id,
+        77,
+        "Purgeable Arrival",
+        878,
+        "Science Fiction",
+    )
+    .await;
+    let (server, _state, _tempdir) = build_server(pool.clone()).await?;
+    let (user_id, access_token) = register_user(&server, "purge_owner").await?;
+    seed_transcript_source(
+        &pool,
+        library_id,
+        movie_id,
+        movie_file_id,
+        transcript_source_id,
+        transcript_artifact_id,
+        user_id,
+    )
+    .await;
+
+    let found = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({
+            "query": "cosmic signal",
+            "library_ids": [library_id],
+            "caps": { "timed_text_snippet_limit": 1 }
+        }))
+        .await;
+    found.assert_status_ok();
+    let found_body: Value = found.json();
+    assert_eq!(
+        found_body["data"]["snippets"]
+            .as_array()
+            .expect("snippets before purge")
+            .len(),
+        1
+    );
+
+    let purge_path = route_utils::replace_params(
+        routes::v1::transcripts::PURGE,
+        &[
+            ("{library_id}", library_id.to_string()),
+            ("{type}", "movie".to_string()),
+            ("{id}", movie_id.to_string()),
+        ],
+    );
+    let purge = server
+        .post(&purge_path)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({"reason": "test purge"}))
+        .await;
+    purge.assert_status_ok();
+    let purge_body: Value = purge.json();
+    assert_eq!(purge_body["data"]["purged_sources"], 1);
+    assert_eq!(purge_body["data"]["rebuild_queued"], false);
+
+    let after_purge = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({
+            "query": "cosmic signal",
+            "library_ids": [library_id]
+        }))
+        .await;
+    after_purge.assert_status_ok();
+    let after_purge_body: Value = after_purge.json();
+    assert!(
+        after_purge_body["data"]["snippets"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "purged transcripts must not remain searchable"
+    );
+
+    let rebuild_path = route_utils::replace_params(
+        routes::v1::transcripts::REBUILD,
+        &[
+            ("{library_id}", library_id.to_string()),
+            ("{type}", "movie".to_string()),
+            ("{id}", movie_id.to_string()),
+        ],
+    );
+    let rebuild = server
+        .post(&rebuild_path)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({"reason": "test rebuild"}))
+        .await;
+    rebuild.assert_status_ok();
+    let rebuild_body: Value = rebuild.json();
+    assert_eq!(rebuild_body["data"]["purged_sources"], 0);
+    assert_eq!(rebuild_body["data"]["rebuild_queued"], false);
+    assert_eq!(
+        rebuild_body["data"]["reason"],
+        "transcript_indexing_disabled"
     );
 
     Ok(())

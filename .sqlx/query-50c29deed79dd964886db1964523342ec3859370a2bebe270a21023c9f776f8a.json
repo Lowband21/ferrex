@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE transcript_sources\n            SET status = 'invalidated',\n                invalidated_at = now(),\n                invalidation_reason = $4,\n                updated_at = now()\n            WHERE library_id = $1\n              AND media_id = $2\n              AND media_type = ($3::text)::media_type\n              AND status <> 'purged'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "50c29deed79dd964886db1964523342ec3859370a2bebe270a21023c9f776f8a"
+}

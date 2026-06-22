@@ -20,6 +20,7 @@ pub mod sync_sessions;
 pub mod tmdb_metadata;
 pub mod tmdb_metadata_batch_bulk;
 pub mod tmdb_metadata_bulk;
+pub mod transcripts;
 pub mod users;
 pub mod watch_metrics;
 pub mod watch_status;

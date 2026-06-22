@@ -143,9 +143,8 @@ fn year_from_date(date: Option<NaiveDate>) -> Option<u16> {
 
 /// Map a DTO artifact kind to the database `artifact_kind` enum value.
 ///
-/// `EmbeddingChunk` and `TranscriptSegment` are explicitly deferred by the
-/// foundation schema (vector and transcript segment storage land in later
-/// phases) and are rejected with a validation error rather than stored.
+/// Embedding vectors remain deferred, while transcript source/segment artifact
+/// rows are supported as bounded summaries with raw text kept out of DTOs.
 fn artifact_kind_to_db(kind: IntelligenceArtifactKind) -> Result<&'static str> {
     Ok(match kind {
         IntelligenceArtifactKind::Summary => "summary",
@@ -153,15 +152,11 @@ fn artifact_kind_to_db(kind: IntelligenceArtifactKind) -> Result<&'static str> {
         IntelligenceArtifactKind::GeneratedAnswer => "search_answer",
         IntelligenceArtifactKind::UserNote => "note",
         IntelligenceArtifactKind::AuditRecord => "analysis",
+        IntelligenceArtifactKind::TranscriptSource => "transcript_source",
+        IntelligenceArtifactKind::TranscriptSegment => "transcript_segment",
         IntelligenceArtifactKind::EmbeddingChunk => {
             return Err(MediaError::InvalidMedia(
                 "embedding chunk artifacts are deferred to a later phase"
-                    .to_string(),
-            ));
-        }
-        IntelligenceArtifactKind::TranscriptSegment => {
-            return Err(MediaError::InvalidMedia(
-                "transcript segment artifacts are deferred to a later phase"
                     .to_string(),
             ));
         }
@@ -176,6 +171,8 @@ fn artifact_kind_from_db(value: &str) -> IntelligenceArtifactKind {
         "analysis" | "index_manifest" => IntelligenceArtifactKind::AuditRecord,
         "watch_plan" => IntelligenceArtifactKind::GeneratedAnswer,
         "collection" => IntelligenceArtifactKind::Recommendation,
+        "transcript_source" => IntelligenceArtifactKind::TranscriptSource,
+        "transcript_segment" => IntelligenceArtifactKind::TranscriptSegment,
         _ => IntelligenceArtifactKind::Summary,
     }
 }
@@ -2555,6 +2552,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 score: rank,
                 artifact_ids: candidate_artifact_ids,
                 grounding,
+                transcript_grounding: Vec::new(),
             });
         }
 
@@ -4899,7 +4897,7 @@ async fn artifact_summary_from_row(
         let source_tool_call_id = s.source_tool_call_id;
         let source = match source_kind.as_str() {
             "tool_call" => IntelligenceGroundingSource::ToolCall,
-            "artifact" | "manual" => {
+            "artifact" | "manual" | "transcript_source" => {
                 IntelligenceGroundingSource::IntelligenceArtifact
             }
             "search_document" => IntelligenceGroundingSource::SearchIndex,

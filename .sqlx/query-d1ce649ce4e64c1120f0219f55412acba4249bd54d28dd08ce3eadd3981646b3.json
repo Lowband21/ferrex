@@ -1,0 +1,97 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH query AS (\n                SELECT websearch_to_tsquery('simple'::regconfig, $1) AS tsq\n            )\n            SELECT seg.id AS \"segment_id!\",\n                   seg.library_id,\n                   seg.media_id,\n                   seg.media_type::text AS \"media_type!\",\n                   seg.cue_index,\n                   src.id AS \"source_id!\",\n                   CASE WHEN $7::bool AND ia.id IS NOT NULL THEN ia.id ELSE NULL END AS artifact_id,\n                   src.source_kind::text AS \"source_kind!\",\n                   src.language_code,\n                   COALESCE(\n                       mr.title,\n                       em.name,\n                       CASE\n                           WHEN er.id IS NOT NULL THEN format('S%s E%s', er.season_number, er.episode_number)\n                           ELSE 'Untitled media'\n                       END\n                   ) AS \"title!\",\n                   ts_rank_cd(seg.search_vector, query.tsq) AS \"fts_score!\",\n                   similarity(seg.cue_text::text, $1) AS \"trigram_score!\"\n            FROM transcript_segments seg\n            JOIN transcript_sources src ON src.id = seg.transcript_source_id\n            CROSS JOIN query\n            LEFT JOIN intelligence_artifacts ia\n              ON ia.id = src.artifact_id\n             AND ia.status = 'active'\n             AND ia.invalidated_at IS NULL\n             AND (ia.user_id IS NULL OR ia.user_id = $8)\n            LEFT JOIN movie_references mr\n              ON seg.media_type = 'movie'\n             AND mr.id = seg.media_id\n             AND mr.library_id = seg.library_id\n            LEFT JOIN episode_references er\n              ON seg.media_type = 'episode'\n             AND er.id = seg.media_id\n            LEFT JOIN episode_metadata em\n              ON em.episode_id = er.id\n            WHERE seg.status = 'active'\n              AND seg.invalidated_at IS NULL\n              AND seg.purged_at IS NULL\n              AND src.status = 'active'\n              AND src.invalidated_at IS NULL\n              AND src.purged_at IS NULL\n              AND (cardinality($2::uuid[]) = 0 OR seg.library_id = ANY($2::uuid[]))\n              AND (cardinality($3::uuid[]) = 0 OR seg.media_id = ANY($3::uuid[]))\n              AND (cardinality($4::text[]) = 0 OR seg.media_type::text = ANY($4::text[]))\n              AND (cardinality($5::text[]) = 0 OR lower(src.language_code) = ANY($5::text[]))\n              AND (cardinality($6::text[]) = 0 OR src.source_kind::text = ANY($6::text[]))\n              AND (\n                  seg.search_vector @@ query.tsq\n                  OR seg.cue_text ILIKE ('%' || $1 || '%')\n                  OR similarity(seg.cue_text::text, $1) > 0.1\n              )\n            ORDER BY\n                (seg.cue_text ILIKE ('%' || $1 || '%')) DESC,\n                ts_rank_cd(seg.search_vector, query.tsq) DESC,\n                CASE\n                    WHEN seg.search_vector @@ query.tsq\n                      OR seg.cue_text ILIKE ('%' || $1 || '%')\n                    THEN seg.start_ms\n                    ELSE NULL\n                END ASC NULLS LAST,\n                similarity(seg.cue_text::text, $1) DESC,\n                seg.library_id,\n                seg.media_type,\n                seg.media_id,\n                seg.start_ms,\n                seg.id\n            LIMIT $9 OFFSET $10\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "segment_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "media_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "cue_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "source_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "language_code",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "title!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "fts_score!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 11,
+        "name": "trigram_score!",
+        "type_info": "Float4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "UuidArray",
+        "UuidArray",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Bool",
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      null,
+      null,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "d1ce649ce4e64c1120f0219f55412acba4249bd54d28dd08ce3eadd3981646b3"
+}

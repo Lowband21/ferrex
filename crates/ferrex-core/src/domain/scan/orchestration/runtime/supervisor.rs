@@ -254,6 +254,11 @@ where
             self.config.queue.max_parallel_image_fetch,
         )
         .await;
+        self.spawn_worker_pool(
+            JobKind::TranscriptExtract,
+            self.config.queue.max_parallel_transcript_extract,
+        )
+        .await;
 
         self.task_graph
             .spawn_housekeeper(
@@ -920,6 +925,7 @@ mod tests {
         config.queue.max_parallel_metadata = 0;
         config.queue.max_parallel_index = 0;
         config.queue.max_parallel_image_fetch = 0;
+        config.queue.max_parallel_transcript_extract = 0;
 
         let queue = Arc::new(RecordingQueue::default());
         let events = Arc::new(InProcJobEventBus::new(32));
@@ -962,6 +968,7 @@ mod tests {
         config.queue.max_parallel_metadata = 0;
         config.queue.max_parallel_index = 0;
         config.queue.max_parallel_image_fetch = 0;
+        config.queue.max_parallel_transcript_extract = 0;
         config.queue.default_library_cap = 1;
         config.budget.library_scan_limit = 2;
         config.lease.lease_ttl_secs = 1;
@@ -1144,6 +1151,7 @@ mod tests {
         config.queue.max_parallel_analyses = 0;
         config.queue.max_parallel_metadata = 0;
         config.queue.max_parallel_index = 0;
+        config.queue.max_parallel_transcript_extract = 0;
         config.budget.library_scan_limit = 1;
 
         let queue = Arc::new(

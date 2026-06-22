@@ -81,6 +81,8 @@ pub mod v1 {
         pub const FACETS: &str = v1_path!("/intelligence/facets");
         pub const CANDIDATE_SEARCH: &str =
             v1_path!("/intelligence/candidates:search");
+        pub const TIMED_TEXT_SEARCH: &str =
+            v1_path!("/intelligence/timed-text:search");
         pub const ARTIFACT_LIST: &str = v1_path!("/intelligence/artifacts");
         pub const ARTIFACT_SEARCH: &str =
             v1_path!("/intelligence/artifacts:search");
@@ -192,6 +194,20 @@ pub mod v1 {
 
     pub mod events {
         pub const MEDIA: &str = v1_path!("/events/media");
+    }
+
+    pub mod transcripts {
+        /// Enqueue transcript extraction refresh for a playable media item.
+        pub const REFRESH: &str =
+            v1_path!("/media/{type}/{id}/refresh-transcripts");
+        /// Purge transcript sources and segment text for one library media item.
+        pub const PURGE: &str = v1_path!(
+            "/libraries/{library_id}/media/{type}/{id}/transcripts:purge"
+        );
+        /// Purge transcript text and enqueue extraction rebuild when possible.
+        pub const REBUILD: &str = v1_path!(
+            "/libraries/{library_id}/media/{type}/{id}/transcripts:rebuild"
+        );
     }
 
     pub mod images {

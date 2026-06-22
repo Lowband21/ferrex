@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT artifact_id AS \"artifact_id!\"\n            FROM transcript_sources\n            WHERE library_id = $1\n              AND media_id = $2\n              AND media_type = ($3::text)::media_type\n              AND artifact_id IS NOT NULL\n              AND status <> 'purged'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "73f87d2133bc792cf5cd2d11c520a239b47d9868623303d312dd36bc8a50ed7c"
+}
