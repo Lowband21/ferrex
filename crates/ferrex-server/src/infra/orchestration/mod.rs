@@ -56,6 +56,7 @@ use ferrex_core::domain::scan::{
 use ferrex_core::error::{MediaError, Result};
 use ferrex_core::infra::media::{
     image_service::ImageService, providers::TmdbApiProvider,
+    timed_text::TimedTextExtractionConfig,
 };
 use ferrex_core::types::LibraryId;
 use tokio::sync::Mutex;
@@ -180,7 +181,12 @@ impl ScanOrchestrator {
                 correlations.clone(),
             )
             .with_delta_repository(delta_repo)
-            .with_intelligence_repository(unit_of_work.intelligence.clone()),
+            .with_intelligence_repository(unit_of_work.intelligence.clone())
+            .with_timed_text_extraction(
+                unit_of_work.libraries.clone(),
+                unit_of_work.transcripts.clone(),
+                TimedTextExtractionConfig::default(),
+            ),
         );
 
         let watch_cfg = config.watch.clone();

@@ -1,8 +1,13 @@
 use std::{any::type_name, fmt, path::PathBuf, sync::Arc};
 
-use crate::database::repository_ports::intelligence::IntelligenceRepository;
+use crate::database::repository_ports::{
+    intelligence::IntelligenceRepository, library::LibraryRepository,
+    transcripts::TranscriptRepository,
+};
 use crate::domain::scan::actors::image_fetch::ImageFetchActor;
-use crate::domain::scan::actors::index::{IndexCommand, IndexerActor};
+use crate::domain::scan::actors::index::{
+    IndexCommand, IndexerActor, IndexingOutcome,
+};
 use crate::domain::scan::actors::metadata::{
     MediaReadyForIndex, MetadataActor, MetadataCommand,
 };
@@ -37,9 +42,13 @@ use crate::domain::scan::orchestration::{
     series_state::SeriesScanStateRepository,
 };
 use crate::error::{MediaError, Result};
+use crate::infra::media::timed_text::{
+    TimedTextExtractionConfig, TimedTextExtractionOutcome,
+    TimedTextExtractionRequest, TimedTextExtractor,
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use ferrex_model::{MediaID, VideoMediaType};
+use ferrex_model::{Media, MediaFile, MediaID, VideoMediaType};
 use tracing::{Instrument, debug, debug_span, warn};
 
 async fn path_exists(path: &str) -> bool {
@@ -197,6 +206,18 @@ where
         self.media_pipeline_flow = self
             .media_pipeline_flow
             .with_intelligence_repository(intelligence);
+        self
+    }
+
+    pub fn with_timed_text_extraction(
+        mut self,
+        libraries: Arc<dyn LibraryRepository>,
+        transcripts: Arc<dyn TranscriptRepository>,
+        config: TimedTextExtractionConfig,
+    ) -> Self {
+        self.media_pipeline_flow = self
+            .media_pipeline_flow
+            .with_timed_text_extraction(libraries, transcripts, config);
         self
     }
 }
@@ -1156,6 +1177,31 @@ where
     }
 }
 
+#[derive(Clone)]
+struct TimedTextRuntime {
+    extractor: TimedTextExtractor,
+    libraries: Arc<dyn LibraryRepository>,
+    transcripts: Arc<dyn TranscriptRepository>,
+}
+
+impl fmt::Debug for TimedTextRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TimedTextRuntime")
+            .field("extractor", &self.extractor)
+            .field("libraries", &"LibraryRepository")
+            .field("transcripts", &"TranscriptRepository")
+            .finish()
+    }
+}
+
+fn transcript_media_file(media: &Media) -> Option<&MediaFile> {
+    match media {
+        Media::Movie(movie) => Some(&movie.file),
+        Media::Episode(episode) => Some(&episode.file),
+        Media::Series(_) | Media::Season(_) => None,
+    }
+}
+
 struct MediaPipelineFlow<Q, E>
 where
     Q: QueueService + Send + Sync + 'static,
@@ -1165,6 +1211,7 @@ where
     actors: DispatcherActors,
     series_coordinator: Arc<SeriesCoordinator>,
     intelligence: Option<Arc<dyn IntelligenceRepository>>,
+    timed_text: Option<TimedTextRuntime>,
     planner: FollowUpPlanner,
     follow_ups: FollowUpEnqueuer<Q, E>,
 }
@@ -1180,6 +1227,7 @@ where
             .field("actors", &self.actors)
             .field("series_coordinator", &self.series_coordinator)
             .field("intelligence", &self.intelligence.is_some())
+            .field("timed_text", &self.timed_text.is_some())
             .field("planner", &self.planner)
             .field("follow_ups", &self.follow_ups)
             .finish()
@@ -1203,6 +1251,7 @@ where
             actors,
             series_coordinator,
             intelligence: None,
+            timed_text: None,
             planner,
             follow_ups,
         }
@@ -1213,6 +1262,20 @@ where
         intelligence: Arc<dyn IntelligenceRepository>,
     ) -> Self {
         self.intelligence = Some(intelligence);
+        self
+    }
+
+    fn with_timed_text_extraction(
+        mut self,
+        libraries: Arc<dyn LibraryRepository>,
+        transcripts: Arc<dyn TranscriptRepository>,
+        config: TimedTextExtractionConfig,
+    ) -> Self {
+        self.timed_text = Some(TimedTextRuntime {
+            extractor: TimedTextExtractor::new(config),
+            libraries,
+            transcripts,
+        });
         self
     }
 
@@ -1490,6 +1553,12 @@ where
             Err(err) => return classify_media_error(err),
         };
 
+        if let Err(err) =
+            self.extract_and_upsert_timed_text(job, &outcome).await
+        {
+            return classify_media_error(err);
+        }
+
         if let Err(err) = self
             .refresh_intelligence_read_model(job.library_id, job.media_id)
             .await
@@ -1506,6 +1575,85 @@ where
         }
 
         DispatchStatus::Success
+    }
+
+    async fn extract_and_upsert_timed_text(
+        &self,
+        job: &IndexUpsertJob,
+        outcome: &IndexingOutcome,
+    ) -> Result<()> {
+        let Some(runtime) = &self.timed_text else {
+            return Ok(());
+        };
+        if !matches!(job.media_id, MediaID::Movie(_) | MediaID::Episode(_)) {
+            return Ok(());
+        }
+
+        let Some(media_file) =
+            outcome.media.as_ref().and_then(transcript_media_file)
+        else {
+            debug!(
+                target: "scan::timed_text",
+                media_id = %job.media_id,
+                "indexed media has no playable media file; skipping timed-text extraction"
+            );
+            return Ok(());
+        };
+
+        let Some(library) =
+            runtime.libraries.get_library(job.library_id).await?
+        else {
+            warn!(
+                target: "scan::timed_text",
+                library_id = %job.library_id,
+                media_id = %job.media_id,
+                "library roots unavailable; skipping timed-text extraction"
+            );
+            return Ok(());
+        };
+        if library.paths.is_empty() {
+            warn!(
+                target: "scan::timed_text",
+                library_id = %job.library_id,
+                media_id = %job.media_id,
+                "library has no configured roots; skipping timed-text extraction"
+            );
+            return Ok(());
+        }
+
+        let extraction: TimedTextExtractionOutcome = runtime
+            .extractor
+            .extract(TimedTextExtractionRequest {
+                library_id: job.library_id,
+                media_id: job.media_id,
+                media_file_id: media_file.id,
+                media_path: media_file.path.clone(),
+                library_roots: library.paths,
+            })
+            .await?;
+        let source_count = extraction.sources.len();
+        let segment_count = extraction.segment_count();
+        let skipped_count = extraction.skipped.len();
+        let failure_count = extraction.failures.len();
+
+        for batch in extraction.sources {
+            runtime
+                .transcripts
+                .upsert_source_with_segments(batch.source, batch.segments)
+                .await?;
+        }
+
+        debug!(
+            target: "scan::timed_text",
+            media_id = %job.media_id,
+            source_count,
+            segment_count,
+            skipped_count,
+            failure_count,
+            "timed-text extraction completed for indexed media"
+        );
+
+        Ok(())
     }
 
     async fn handle_image_fetch(&self, job: &ImageFetchJob) -> DispatchStatus {
@@ -1553,6 +1701,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::repository_ports::transcripts::{
+        TranscriptProcessingStatusSummary, TranscriptSegmentUpsert,
+        TranscriptSourceStatusFilter, TranscriptSourceStatusSummary,
+        TranscriptSourceUpsert, TranscriptSourceUpsertResult,
+        TranscriptStatusFilter,
+    };
     use crate::domain::scan::actors::folder::FolderListingPlan;
     use crate::domain::scan::actors::index::{IndexingChange, IndexingOutcome};
     use crate::domain::scan::actors::messages::{
@@ -1583,9 +1737,16 @@ mod tests {
         lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
     };
     use crate::error::Result;
-    use crate::types::ids::{LibraryId, SeriesID};
+    use crate::types::ids::{LibraryId, MovieID, SeriesID};
     use crate::types::library::LibraryType;
-    use ferrex_model::{MediaID, VideoMediaType};
+    use ferrex_model::details::ExternalIds;
+    use ferrex_model::image::MediaImages;
+    use ferrex_model::titles::MovieTitle;
+    use ferrex_model::urls::{MovieURL, UrlLike};
+    use ferrex_model::{
+        EnhancedMovieDetails, Library, Media, MediaFile, MediaID,
+        MovieReference, MovieReferenceBatchSize, VideoMediaType,
+    };
     use sqlx::PgPool;
     use std::collections::HashMap;
     use tokio::sync::Mutex;
@@ -1854,12 +2015,175 @@ mod tests {
         }
     }
 
+    struct MediaIndexActor {
+        media: Media,
+    }
+
+    #[async_trait]
+    impl IndexerActor for MediaIndexActor {
+        async fn index(
+            &self,
+            command: IndexCommand,
+        ) -> Result<IndexingOutcome> {
+            Ok(IndexingOutcome {
+                library_id: command.job.library_id,
+                path_norm: command.job.path_norm,
+                media_id: command.ready.media_id,
+                hierarchy: command.job.hierarchy,
+                indexed_at: Utc::now(),
+                upserted: true,
+                media: Some(self.media.clone()),
+                change: IndexingChange::Created,
+            })
+        }
+    }
+
     struct StubImageActor;
 
     #[async_trait]
     impl ImageFetchActor for StubImageActor {
         async fn fetch(&self, _job: &ImageFetchJob) -> Result<()> {
             Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct StaticLibraryRepository {
+        library: Library,
+    }
+
+    #[async_trait]
+    impl LibraryRepository for StaticLibraryRepository {
+        async fn create_library(&self, library: Library) -> Result<LibraryId> {
+            Ok(library.id)
+        }
+
+        async fn get_library(&self, id: LibraryId) -> Result<Option<Library>> {
+            Ok((self.library.id == id).then(|| self.library.clone()))
+        }
+
+        async fn list_libraries(&self) -> Result<Vec<Library>> {
+            Ok(vec![self.library.clone()])
+        }
+
+        async fn update_library(
+            &self,
+            _id: LibraryId,
+            _library: Library,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn delete_library(&self, _id: LibraryId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn update_library_last_scan(&self, _id: LibraryId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn list_library_references(
+            &self,
+        ) -> Result<Vec<crate::types::details::LibraryReference>> {
+            unimplemented!("not needed by dispatcher timed-text tests")
+        }
+
+        async fn get_library_reference(
+            &self,
+            _id: Uuid,
+        ) -> Result<crate::types::details::LibraryReference> {
+            unimplemented!("not needed by dispatcher timed-text tests")
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingTranscriptRepository {
+        upserts:
+            Mutex<Vec<(TranscriptSourceUpsert, Vec<TranscriptSegmentUpsert>)>>,
+    }
+
+    impl RecordingTranscriptRepository {
+        async fn recorded(
+            &self,
+        ) -> Vec<(TranscriptSourceUpsert, Vec<TranscriptSegmentUpsert>)>
+        {
+            self.upserts.lock().await.clone()
+        }
+    }
+
+    #[async_trait]
+    impl TranscriptRepository for RecordingTranscriptRepository {
+        async fn upsert_source_with_segments(
+            &self,
+            source: TranscriptSourceUpsert,
+            segments: Vec<TranscriptSegmentUpsert>,
+        ) -> Result<TranscriptSourceUpsertResult> {
+            self.upserts
+                .lock()
+                .await
+                .push((source.clone(), segments.clone()));
+            Ok(TranscriptSourceUpsertResult {
+                source_id: source.source_id.unwrap_or_else(Uuid::now_v7),
+                segment_count: segments.len() as u64,
+                source_content_hash: source.source_content_hash,
+            })
+        }
+
+        async fn list_source_status(
+            &self,
+            _filter: TranscriptSourceStatusFilter,
+        ) -> Result<Vec<TranscriptSourceStatusSummary>> {
+            Ok(Vec::new())
+        }
+
+        async fn list_processing_status(
+            &self,
+            _filter: TranscriptStatusFilter,
+        ) -> Result<Vec<TranscriptProcessingStatusSummary>> {
+            Ok(Vec::new())
+        }
+
+        async fn invalidate_media(
+            &self,
+            _library_id: LibraryId,
+            _media_id: MediaID,
+            _reason: &str,
+        ) -> Result<u64> {
+            Ok(0)
+        }
+
+        async fn purge_media(
+            &self,
+            _library_id: LibraryId,
+            _media_id: MediaID,
+            _reason: &str,
+        ) -> Result<u64> {
+            Ok(0)
+        }
+
+        async fn invalidate_source(
+            &self,
+            _source_id: Uuid,
+            _reason: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn purge_source(
+            &self,
+            _source_id: Uuid,
+            _reason: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn search_snippets(
+            &self,
+            _request: &crate::api::types::intelligence::TimedTextSnippetSearchRequest,
+        ) -> Result<
+            crate::api::types::intelligence::TimedTextSnippetSearchResponse,
+        > {
+            unimplemented!("not needed by dispatcher timed-text tests")
         }
     }
 
@@ -2045,6 +2369,88 @@ mod tests {
                 .cloned()
                 .collect())
         }
+    }
+
+    fn minimal_movie_details(title: &str) -> EnhancedMovieDetails {
+        EnhancedMovieDetails {
+            id: 1,
+            title: title.to_string(),
+            original_title: None,
+            overview: None,
+            release_date: None,
+            runtime: None,
+            vote_average: None,
+            vote_count: None,
+            popularity: None,
+            content_rating: None,
+            content_ratings: Vec::new(),
+            release_dates: Vec::new(),
+            genres: Vec::new(),
+            spoken_languages: Vec::new(),
+            production_companies: Vec::new(),
+            production_countries: Vec::new(),
+            homepage: None,
+            status: None,
+            tagline: None,
+            budget: None,
+            revenue: None,
+            poster_path: None,
+            backdrop_path: None,
+            logo_path: None,
+            primary_poster_iid: None,
+            primary_backdrop_iid: None,
+            images: MediaImages::default(),
+            cast: Vec::new(),
+            crew: Vec::new(),
+            videos: Vec::new(),
+            keywords: Vec::new(),
+            external_ids: ExternalIds::default(),
+            alternative_titles: Vec::new(),
+            translations: Vec::new(),
+            collection: None,
+            recommendations: Vec::new(),
+            similar: Vec::new(),
+        }
+    }
+
+    fn movie_library(library_id: LibraryId, paths: Vec<PathBuf>) -> Library {
+        Library {
+            id: library_id,
+            name: "Timed Text Library".to_string(),
+            library_type: LibraryType::Movies,
+            paths,
+            scan_interval_minutes: 60,
+            last_scan: None,
+            enabled: true,
+            auto_scan: true,
+            watch_for_changes: true,
+            analyze_on_scan: true,
+            max_retry_attempts: 3,
+            movie_ref_batch_size: MovieReferenceBatchSize::default(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            media: None,
+        }
+    }
+
+    fn movie_media(
+        library_id: LibraryId,
+        movie_id: MovieID,
+        media_path: PathBuf,
+    ) -> Media {
+        let media_id = MediaID::Movie(movie_id);
+        let file = MediaFile::new(media_id, media_path, library_id).unwrap();
+        Media::Movie(Box::new(MovieReference {
+            id: movie_id,
+            library_id,
+            batch_id: None,
+            tmdb_id: 1,
+            title: MovieTitle::new("Timed Text Movie".to_string()).unwrap(),
+            details: minimal_movie_details("Timed Text Movie"),
+            endpoint: MovieURL::from_string(format!("/stream/{}", file.id)),
+            file,
+            theme_color: None,
+        }))
     }
 
     async fn dispatcher_fixture(
@@ -2412,6 +2818,115 @@ mod tests {
                 completed_at: Utc::now(),
             },
         }) as Arc<dyn FolderScanActor>
+    }
+
+    #[tokio::test]
+    async fn index_upsert_persists_timed_text_sidecar_upserts() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let library_root = temp.path().join("library");
+        let movie_root = library_root.join("Arrival");
+        std::fs::create_dir_all(&movie_root).unwrap();
+        let media_path = movie_root.join("Arrival.mkv");
+        std::fs::write(&media_path, b"movie bytes").unwrap();
+        std::fs::write(
+            movie_root.join("Arrival.en.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\nRuntime transcript\n",
+        )
+        .unwrap();
+
+        let library_id =
+            LibraryId(Uuid::from_u128(0x62900000000000000000000000000001));
+        let movie_id =
+            MovieID(Uuid::from_u128(0x62900000000000000000000000000002));
+        let media_id = MediaID::Movie(movie_id);
+        let media = movie_media(library_id, movie_id, media_path.clone());
+        let media_file_id = match &media {
+            Media::Movie(movie) => movie.file.id,
+            _ => unreachable!("movie_media returns movie media"),
+        };
+
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(16));
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let series_resolver: Arc<dyn SeriesResolverPort> =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&series_states)));
+        let actors = DispatcherActors::new(
+            noop_folder_actor(library_id),
+            Arc::new(StubAnalyzeActor),
+            Arc::new(StubMetadataActor),
+            Arc::new(MediaIndexActor { media }),
+            Arc::new(StubImageActor),
+        );
+        let transcripts = Arc::new(RecordingTranscriptRepository::default());
+        let transcript_repo: Arc<dyn TranscriptRepository> =
+            transcripts.clone();
+        let library_repo: Arc<dyn LibraryRepository> =
+            Arc::new(StaticLibraryRepository {
+                library: movie_library(library_id, vec![library_root.clone()]),
+            });
+        let mut timed_text_config = TimedTextExtractionConfig::default();
+        timed_text_config.ffprobe_path = library_root.join("missing-ffprobe");
+        timed_text_config.ffmpeg_path = library_root.join("missing-ffmpeg");
+
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            cursors,
+            series_states,
+            series_resolver,
+            actors,
+            CorrelationCache::default(),
+        )
+        .with_timed_text_extraction(
+            library_repo,
+            transcript_repo,
+            timed_text_config,
+        );
+        let movie_root_str = movie_root.to_string_lossy().to_string();
+        let library_root_str = library_root.to_string_lossy().to_string();
+        let job = IndexUpsertJob {
+            library_id,
+            media_id,
+            variant: VideoMediaType::Movie,
+            hierarchy: AnalyzeScanHierarchy::Movie(MovieScanHierarchy {
+                movie_root_path: MovieRootPath::try_new_under_library_root(
+                    &library_root_str,
+                    movie_root_str,
+                )
+                .unwrap(),
+                movie_id: Some(movie_id),
+                extra_tag: None,
+            }),
+            node: ScanNodeKind::MovieFolder,
+            path_norm: media_path.to_string_lossy().to_string(),
+            idempotency_key: "timed-text-runtime-test".to_string(),
+        };
+        let lease = JobLease::new(
+            JobRecord::new(JobPayload::IndexUpsert(job), JobPriority::P1),
+            "timed-text-test".to_string(),
+            chrono::Duration::seconds(30),
+        );
+
+        let status = dispatcher.dispatch(&lease).await;
+
+        assert_eq!(status, DispatchStatus::Success);
+        let upserts = transcripts.recorded().await;
+        assert_eq!(upserts.len(), 1);
+        let (source, segments) = &upserts[0];
+        assert_eq!(source.library_id, library_id);
+        assert_eq!(source.media_id, media_id);
+        assert_eq!(source.media_file_id, media_file_id);
+        assert_eq!(
+            source.source_kind,
+            crate::api::types::intelligence::TimedTextSourceKind::Sidecar
+        );
+        assert!(source.source_key.starts_with("sidecar:"));
+        assert_eq!(source.language_code, "en");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "Runtime transcript");
+        assert!(!source.source_locator.to_string().contains("Arrival"));
     }
 
     #[tokio::test]
