@@ -18,6 +18,7 @@ use crate::domain::scan::orchestration::{
     lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
     queue::{
         LeaseExpiryScanner, QueueInstrumentation, QueueService, QueueSnapshot,
+        ReadyQueueCount,
     },
     scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
 };
@@ -38,15 +39,6 @@ impl fmt::Debug for PostgresQueueService {
             .field("retry_config", &self.retry_config)
             .finish()
     }
-}
-
-/// Aggregated ready-state counts grouped by queue dimensions.
-#[derive(Clone, Debug)]
-pub struct ReadyQueueCount {
-    pub kind: JobKind,
-    pub library_id: LibraryId,
-    pub priority: JobPriority,
-    pub ready: usize,
 }
 
 impl PostgresQueueService {
@@ -433,6 +425,10 @@ impl QueueInstrumentation for PostgresQueueService {
 
 #[async_trait]
 impl QueueService for PostgresQueueService {
+    async fn ready_counts_grouped(&self) -> Result<Vec<ReadyQueueCount>> {
+        Self::ready_counts_grouped(self).await
+    }
+
     async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
         request.validate()?;
         let job_id = crate::domain::scan::orchestration::job::JobId::new();

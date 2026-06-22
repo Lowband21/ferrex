@@ -6,26 +6,20 @@ use std::{
 };
 
 use tokio::sync::{Mutex, RwLock, oneshot};
-use tokio_util::sync::CancellationToken;
 
-use crate::domain::scan::actors::LibraryActor;
-use crate::domain::scan::actors::{LibraryActorCommand, StartMode};
+use super::task_graph::{
+    LibraryActorHandle, OrchestratorCommand, RuntimeTaskGraph,
+};
+use crate::domain::scan::actors::LibraryActorCommand;
 use crate::domain::scan::orchestration::runtime::JobEventStream;
 use crate::domain::scan::orchestration::{
-    budget::{WorkloadBudget, WorkloadType},
+    budget::WorkloadBudget,
     config::OrchestratorConfig,
     correlation::CorrelationCache,
-    dispatcher::{DispatchStatus, JobDispatcher},
+    dispatcher::JobDispatcher,
     enqueuer::PipelineEnqueuer,
-    events::{
-        JobEvent, JobEventPayload, ScanEvent, ScanEventBus, ScanSeedMode,
-        ScanSeedSummary, stable_path_key,
-    },
-    job::{
-        DedupeKey, EnqueueRequest, FolderScanJob, JobKind, JobPayload,
-        JobPriority, ScanReason,
-    },
-    lease::{DequeueRequest, LeaseRenewal, QueueSelector},
+    events::ScanEventBus,
+    job::JobKind,
     queue::{LeaseExpiryScanner, QueueService},
     scheduler::WeightedFairScheduler,
 };
@@ -33,8 +27,6 @@ use crate::{
     error::{MediaError, Result},
     types::ids::LibraryId,
 };
-
-pub type LibraryActorHandle = Arc<Mutex<Box<dyn LibraryActor>>>;
 
 /// Orchestrator-owned command executor used by producers that should share the
 /// normal library actor mailbox and enqueue/event publication path.
@@ -69,9 +61,7 @@ where
     library_actors: Arc<RwLock<HashMap<LibraryId, LibraryActorHandle>>>,
     mailbox_tx:
         Arc<Mutex<Option<tokio::sync::mpsc::Sender<OrchestratorCommand>>>>,
-    // Runtime supervision
-    shutdown_token: CancellationToken,
-    worker_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    task_graph: RuntimeTaskGraph,
 }
 
 impl<Q, E, B> fmt::Debug for OrchestratorRuntime<Q, E, B>
@@ -94,11 +84,7 @@ where
             .try_read()
             .map(|guard| guard.len())
             .unwrap_or_default();
-        let worker_handle_count = self
-            .worker_handles
-            .try_lock()
-            .map(|handles| handles.len())
-            .unwrap_or_default();
+        let runtime_task_count = self.task_graph.try_task_count();
         let mailbox_ready = self
             .mailbox_tx
             .try_lock()
@@ -113,9 +99,12 @@ where
             .field("dispatcher_type", &dispatcher_type)
             .field("scheduler", &self.scheduler)
             .field("library_actor_count", &library_actor_count)
-            .field("worker_handle_count", &worker_handle_count)
+            .field("runtime_task_count", &runtime_task_count)
             .field("mailbox_ready", &mailbox_ready)
-            .field("shutdown_cancelled", &self.shutdown_token.is_cancelled())
+            .field(
+                "shutdown_cancelled",
+                &self.task_graph.is_shutdown_requested(),
+            )
             .finish()
     }
 }
@@ -150,8 +139,7 @@ where
             scheduler,
             library_actors: Arc::new(RwLock::new(HashMap::new())),
             mailbox_tx: Arc::new(Mutex::new(None)),
-            shutdown_token: CancellationToken::new(),
-            worker_handles: Mutex::new(Vec::new()),
+            task_graph: RuntimeTaskGraph::new(),
         }
     }
 
@@ -215,12 +203,22 @@ where
     }
 
     pub async fn start(&self) -> Result<()> {
-        self.spawn_scheduler_observer();
+        self.task_graph
+            .prime_scheduler_from_persistence(self.queue(), self.scheduler())
+            .await?;
 
-        // Route domain events -> orchestrator actions (e.g., enqueue folder scans)
-        self.spawn_domain_event_router();
+        self.task_graph
+            .spawn_scheduler_observer(
+                self.events(),
+                self.scheduler(),
+                self.correlations.clone(),
+            )
+            .await;
 
-        // Spawn worker pools for each queue kind according to config limits
+        self.task_graph
+            .spawn_domain_event_router(self.events(), self.enqueuer())
+            .await;
+
         self.spawn_worker_pool(
             JobKind::FolderScan,
             self.config.queue.max_parallel_scans,
@@ -257,23 +255,19 @@ where
         )
         .await;
 
-        // Spawn housekeeping loop for lease expiry scanning (no-op for in-memory queue)
-        self.spawn_housekeeper();
+        self.task_graph
+            .spawn_housekeeper(
+                self.queue(),
+                std::time::Duration::from_millis(
+                    self.config.lease.housekeeper_interval_ms,
+                ),
+            )
+            .await;
 
-        // Start mailbox runner for one-shot library actor commands
         self.start_mailbox_runner().await?;
 
         Ok(())
     }
-}
-
-#[derive(Debug)]
-pub enum OrchestratorCommand {
-    Library {
-        library_id: LibraryId,
-        command: LibraryActorCommand,
-        completion: Option<oneshot::Sender<Result<()>>>,
-    },
 }
 
 impl<Q, E, B> OrchestratorRuntime<Q, E, B>
@@ -285,769 +279,46 @@ where
         + 'static,
     B: WorkloadBudget + 'static,
 {
-    fn spawn_domain_event_router(&self) {
-        let mut domain_rx = self.events().subscribe_scan();
-        let enqueuer = self.enqueuer();
-        let shutdown = self.shutdown_token.clone();
-
-        // Helper mirrors dispatcher priority mapping
-        fn priority_for_reason(reason: &ScanReason) -> JobPriority {
-            match reason {
-                ScanReason::HotChange | ScanReason::WatcherOverflow => {
-                    JobPriority::P0
-                }
-                ScanReason::UserRequested | ScanReason::BulkSeed => {
-                    JobPriority::P1
-                }
-                ScanReason::MaintenanceSweep => JobPriority::P2,
-            }
-        }
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = shutdown.cancelled() => {
-                        tracing::info!("Domain event router shutting down");
-                        break;
-                    }
-                    evt = domain_rx.recv() => match evt {
-                        Ok(ScanEvent::FolderDiscovered { context, reason }) => {
-                            // Build FolderScan job from event and enqueue
-                            let job = FolderScanJob {
-                                context: *context.clone(),
-                                scan_reason: reason,
-                                enqueue_time: chrono::Utc::now(),
-                                device_id: None,
-                            };
-                            let payload = JobPayload::FolderScan(job);
-                            let priority = priority_for_reason(&reason);
-                            let request = EnqueueRequest::new(priority, payload);
-
-                            if let Err(err) = enqueuer.enqueue(request).await {
-                                tracing::warn!(target: "scan::router", error = %err, folder = %context.folder_path_norm(), "failed to enqueue FolderScan from FolderDiscovered");
-                            }
-                        }
-                        Ok(_) => { /* ignore other domain events */ }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            tracing::warn!("domain event router lagged, skipped {skipped} events");
-                        }
-                    }
-                }
-            }
-        });
-    }
-    pub async fn start_mailbox_runner(&self) -> Result<()> {
-        let (tx, mut rx) =
-            tokio::sync::mpsc::channel::<OrchestratorCommand>(1024);
-        {
-            let mut guard = self.mailbox_tx.lock().await;
-            if guard.is_some() {
-                return Ok(());
-            }
-            *guard = Some(tx);
-        }
-
-        let enqueuer = self.enqueuer();
-        let e = self.events();
-
-        let handle = OrchestratorRuntimeHandle {
-            library_actors: Arc::clone(&self.library_actors),
-        };
-        tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
-                match msg {
-                    OrchestratorCommand::Library {
-                        library_id,
-                        command,
-                        completion,
-                    } => {
-                        let result: Result<()> = async {
-                            let actor_handle = {
-                                let guard = handle.library_actors.read().await;
-                                guard.get(&library_id).cloned()
-                            }
-                            .ok_or_else(|| {
-                                MediaError::Internal(format!(
-                                    "library actor not registered for {library_id}"
-                                ))
-                            })?;
-
-                            let mut actor = actor_handle.lock().await;
-                            let events = actor
-                                .handle_command(command.clone())
-                                .await
-                                .map_err(|err| {
-                                    tracing::warn!(
-                                        "library actor command failed: {err}"
-                                    );
-                                    err
-                                })?;
-                            drop(actor);
-
-                            // Process actor-emitted events (e.g., enqueue requests)
-                            // Batch enqueue requests for transactional queue implementations.
-                            let mut batch: Vec<EnqueueRequest> = Vec::new();
-                            for evt in events {
-                                match evt {
-                                    crate::domain::scan::actors::LibraryActorEvent::EnqueueFolderScan { request } => {
-                                        batch.push(*request);
-                                    }
-                                    crate::domain::scan::actors::LibraryActorEvent::EnqueueMetadataEnrich { job, priority, correlation_id } => {
-                                        let payload = JobPayload::MetadataEnrich(*job);
-                                        let mut request = EnqueueRequest::new(priority, payload);
-                                        request.correlation_id = correlation_id;
-                                        batch.push(request);
-                                    }
-                                    _ => {}
-                                }
-                            }
-
-                            let queued_folders = batch
-                                .iter()
-                                .filter(|request| {
-                                    matches!(request.payload, JobPayload::FolderScan(_))
-                                })
-                                .count();
-
-                            if !batch.is_empty() {
-                                enqueuer.enqueue_many(batch).await.map_err(
-                                    |err| {
-                                        tracing::warn!(target: "scan::mailbox", error = %err, "failed to enqueue scan batch from actor request");
-                                        err
-                                    },
-                                )?;
-                            }
-
-                            if let LibraryActorCommand::Start {
-                                mode,
-                                correlation_id,
-                            } = &command
-                            {
-                                let mode = match mode {
-                                    StartMode::Bulk => ScanSeedMode::Bulk,
-                                    StartMode::Maintenance => {
-                                        ScanSeedMode::Maintenance
-                                    }
-                                    StartMode::Resume => ScanSeedMode::Resume,
-                                };
-                                let summary = ScanSeedSummary {
-                                    library_id,
-                                    correlation_id: *correlation_id,
-                                    mode,
-                                    queued_folders,
-                                    completed_at: chrono::Utc::now(),
-                                };
-                                if let Err(err) = e
-                                    .publish_scan_event(ScanEvent::SeedCompleted(
-                                        summary,
-                                    ))
-                                    .await
-                                {
-                                    tracing::warn!(target: "scan::mailbox", error = %err, "failed to publish scan seed completion");
-                                }
-                            }
-
-                            Ok(())
-                        }
-                        .await;
-
-                        if let Err(err) = &result {
-                            tracing::warn!(target: "scan::mailbox", error = %err, "library actor command did not complete");
-                        }
-
-                        if let Some(completion) = completion {
-                            let _ = completion.send(result);
-                        }
-                    }
-                }
-            }
-        });
-        Ok(())
-    }
-
-    fn spawn_scheduler_observer(&self) {
-        let mut job_rx = self.events().subscribe_jobs();
-        let scheduler = self.scheduler.clone();
-        let correlations = self.correlations.clone();
-        let shutdown = self.shutdown_token.clone();
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = shutdown.cancelled() => {
-                        tracing::info!("Scheduler observer shutting down");
-                        break;
-                    }
-                    event = job_rx.recv() => match event {
-                        Ok(event) => {
-                            match event.payload {
-                                JobEventPayload::Enqueued { job_id, priority, .. } => {
-                                    correlations.remember(job_id, event.meta.correlation_id).await;
-                                    scheduler
-                                        .record_enqueued(event.meta.library_id, priority)
-                                        .await;
-                                }
-                                JobEventPayload::Merged {
-                                    existing_job_id,
-                                    merged_job_id,
-                                    ..
-                                } => {
-                                    correlations
-                                        .remember_if_absent(existing_job_id, event.meta.correlation_id)
-                                        .await;
-                                    if merged_job_id != existing_job_id {
-                                        correlations
-                                            .remember_if_absent(
-                                                merged_job_id,
-                                                event.meta.correlation_id,
-                                            )
-                                            .await;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            tracing::warn!(
-                                "scheduler observer lagged, skipped {skipped} events"
-                            );
-                        }
-                    }
-                }
-            }
-        });
-    }
-
     async fn spawn_worker_pool(&self, kind: JobKind, parallelism: usize) {
-        let worker_group = format!("{}-{}", kind, std::process::id());
-        let lease_cfg = self.config.lease;
-        let queue = self.queue();
-        let events = self.events();
-        let budget = self.budget();
-        let dispatcher = self.dispatcher();
-        let mailbox = Arc::clone(&self.mailbox_tx);
-        let correlations = self.correlations.clone();
-        let scheduler = self.scheduler.clone();
-
-        for i in 0..parallelism {
-            let worker_id = format!("{}-w{}", worker_group, i);
-            let q = Arc::clone(&queue);
-            let e = Arc::clone(&events);
-            let b = Arc::clone(&budget);
-            let d = Arc::clone(&dispatcher);
-            let mailbox_tx = Arc::clone(&mailbox);
-            let correlation_cache = correlations.clone();
-            let shutdown = self.shutdown_token.clone();
-            let scheduler = scheduler.clone();
-            let worker_kind = kind;
-
-            let handle = tokio::spawn(async move {
-                loop {
-                    // Check for shutdown signal
-                    if shutdown.is_cancelled() {
-                        tracing::info!("Worker {} shutting down", worker_id);
-                        break;
-                    }
-
-                    // Preflight global budget: avoid growing inflight leases when at cap
-                    if let Ok(false) =
-                        b.has_budget(workload_for(worker_kind)).await
-                    {
-                        tokio::time::sleep(std::time::Duration::from_millis(
-                            50,
-                        ))
-                        .await;
-                        continue;
-                    }
-
-                    let reservation = match scheduler.reserve().await {
-                        Some(reservation) => reservation,
-                        None => {
-                            tokio::time::sleep(
-                                std::time::Duration::from_millis(50),
-                            )
-                            .await;
-                            continue;
-                        }
-                    };
-
-                    tracing::trace!(
-                        worker = %worker_id,
-                        kind = ?worker_kind,
-                        library = %reservation.library_id,
-                        priority = ?reservation.priority,
-                        reservation = %reservation.id,
-                        "scheduler reservation granted"
-                    );
-
-                    let dequeue = DequeueRequest {
-                        kind: worker_kind,
-                        worker_id: worker_id.clone(),
-                        lease_ttl: chrono::Duration::seconds(
-                            lease_cfg.lease_ttl_secs,
-                        ),
-                        selector: Some(QueueSelector {
-                            library_id: reservation.library_id,
-                            priority: reservation.priority,
-                        }),
-                    };
-
-                    match q.dequeue(dequeue).await {
-                        Ok(Some(lease)) => {
-                            let _ = scheduler.confirm(reservation.id).await;
-
-                            tracing::trace!(
-                                worker = %worker_id,
-                                kind = ?worker_kind,
-                                library = %reservation.library_id,
-                                priority = ?reservation.priority,
-                                reservation = %reservation.id,
-                                job = %lease.job.id.0,
-                                "scheduler reservation confirmed"
-                            );
-
-                            // Capture static info we need after renew loop
-                            let job_id = lease.job.id;
-                            let job_kind = lease.job.payload.kind();
-                            let job_priority = lease.job.priority;
-                            let lease_id = lease.lease_id;
-                            let library_id = lease.job.payload.library_id();
-                            let current_expires_at = lease.expires_at;
-
-                            let correlation_id = correlation_cache
-                                .fetch_persisted_or_generate(
-                                    job_id,
-                                    lease.job.correlation_id,
-                                )
-                                .await;
-
-                            // Publish dequeue event
-                            let dequeue_event = JobEvent::from_job(
-                                Some(correlation_id),
-                                library_id,
-                                lease.job.dedupe_key.clone(),
-                                stable_path_key(&lease.job.payload),
-                                JobEventPayload::Dequeued {
-                                    job_id,
-                                    kind: job_kind,
-                                    priority: job_priority,
-                                    lease_id,
-                                },
-                            );
-                            let _ = e.publish(dequeue_event).await;
-
-                            // Acquire budget token for the specific library & workload
-                            let token = match b
-                                .acquire(workload_for(worker_kind), library_id)
-                                .await
-                            {
-                                Ok(t) => t,
-                                Err(err) => {
-                                    tracing::error!(
-                                        "budget acquire error: {err}"
-                                    );
-                                    // Return lease as retryable failure to avoid starvation
-                                    let _ = q
-                                        .fail(
-                                            lease_id,
-                                            true,
-                                            Some(
-                                                "budget acquire failed".into(),
-                                            ),
-                                        )
-                                        .await;
-                                    scheduler.release(library_id).await;
-                                    scheduler
-                                        .record_enqueued(
-                                            library_id,
-                                            job_priority,
-                                        )
-                                        .await;
-                                    continue;
-                                }
-                            };
-
-                            // Start renewal loop
-                            let renewer_q = Arc::clone(&q);
-                            let renewer_e = Arc::clone(&e);
-                            let worker_id_clone = worker_id.clone();
-                            let ttl = chrono::Duration::seconds(
-                                lease_cfg.lease_ttl_secs,
-                            );
-                            let renew_margin = std::time::Duration::from_millis(
-                                lease_cfg.renew_min_margin_ms,
-                            );
-                            let renew_fraction = lease_cfg.renew_at_fraction;
-
-                            let (cancel_tx, mut cancel_rx) =
-                                tokio::sync::mpsc::channel::<()>(1);
-
-                            let mut local_expires_at = current_expires_at;
-                            let renew_correlations = correlation_cache.clone();
-                            let renew_handle = tokio::spawn(async move {
-                                loop {
-                                    // Compute next sleep based on current expiry (best-effort using local expiry)
-                                    let now = chrono::Utc::now();
-                                    let mut sleep_dur =
-                                        std::time::Duration::from_millis(500);
-                                    if local_expires_at > now {
-                                        let ttl_total = ttl.to_std().unwrap_or(
-                                            std::time::Duration::from_secs(30),
-                                        );
-                                        let target = ttl_total
-                                            .mul_f32(1.0 - renew_fraction);
-                                        let remaining = (local_expires_at - now)
-                                            .to_std()
-                                            .unwrap_or(std::time::Duration::from_millis(0));
-                                        sleep_dur = if remaining > target {
-                                            remaining - target
-                                        } else if remaining > renew_margin {
-                                            remaining - renew_margin
-                                        } else {
-                                            std::time::Duration::from_millis(0)
-                                        };
-                                    }
-
-                                    tokio::select! {
-                                        _ = tokio::time::sleep(sleep_dur) => {},
-                                        _ = cancel_rx.recv() => { break; }
-                                    }
-
-                                    // Attempt renew
-                                    match renewer_q
-                                        .renew(LeaseRenewal {
-                                            lease_id,
-                                            worker_id: worker_id_clone.clone(),
-                                            extend_by: ttl,
-                                        })
-                                        .await
-                                    {
-                                        Ok(updated) => {
-                                            local_expires_at =
-                                                updated.expires_at;
-                                            let correlation_id =
-                                                renew_correlations
-                                                    .fetch_persisted_or_generate(
-                                                        updated.job.id,
-                                                        updated.job.correlation_id,
-                                                    )
-                                                    .await;
-                                            let renew_event = JobEvent::from_job(
-                                                Some(correlation_id),
-                                                updated.job.payload.library_id(),
-                                                updated.job.dedupe_key.clone(),
-                                                stable_path_key(&updated.job.payload),
-                                                JobEventPayload::LeaseRenewed {
-                                                    job_id: updated.job.id,
-                                                    lease_id,
-                                                    renewals: updated.renewals,
-                                                },
-                                            );
-                                            let _ = renewer_e
-                                                .publish(renew_event)
-                                                .await;
-                                        }
-                                        Err(MediaError::NotFound(_)) => {
-                                            tracing::trace!(
-                                                lease = ?lease_id,
-                                                "lease renew skipped (completed or released)"
-                                            );
-                                            break;
-                                        }
-                                        Err(err) => {
-                                            tracing::warn!(
-                                                "lease renew failed: {err}"
-                                            );
-                                            // Continue; housekeeping may reclaim
-                                        }
-                                    }
-                                }
-                            });
-
-                            let dispatch_status = d.dispatch(&lease).await;
-
-                            // Stop renewer
-                            let _ = cancel_tx.try_send(());
-                            let _ = renew_handle.await;
-
-                            let dedupe_key: DedupeKey =
-                                lease.job.payload.dedupe_key();
-                            let library_id = lease.job.payload.library_id();
-                            let notify_command = match dispatch_status {
-                                DispatchStatus::Success => {
-                                    if let Err(err) = q.complete(lease_id).await
-                                    {
-                                        tracing::error!(
-                                            "queue complete error: {err}"
-                                        );
-                                    }
-                                    let correlation_id = correlation_cache
-                                        .take_persisted_or_generate(
-                                            job_id,
-                                            lease.job.correlation_id,
-                                        )
-                                        .await;
-                                    let event = JobEvent::from_job(
-                                        Some(correlation_id),
-                                        library_id,
-                                        lease.job.dedupe_key.clone(),
-                                        stable_path_key(&lease.job.payload),
-                                        JobEventPayload::Completed {
-                                            job_id,
-                                            kind: job_kind,
-                                            priority: job_priority,
-                                        },
-                                    );
-                                    if let Err(err) = e.publish(event).await {
-                                        tracing::error!(
-                                            "publish complete event failed: {err}"
-                                        );
-                                    }
-                                    scheduler
-                                        .record_completed(library_id)
-                                        .await;
-                                    Some(LibraryActorCommand::JobCompleted {
-                                        job_id,
-                                        dedupe_key: dedupe_key.clone(),
-                                    })
-                                }
-                                DispatchStatus::Retry { error } => {
-                                    if let Err(err) = q
-                                        .fail(
-                                            lease_id,
-                                            true,
-                                            Some(error.clone()),
-                                        )
-                                        .await
-                                    {
-                                        tracing::error!(
-                                            "queue fail error: {err}"
-                                        );
-                                    }
-                                    let correlation_id = correlation_cache
-                                        .fetch_persisted_or_generate(
-                                            job_id,
-                                            lease.job.correlation_id,
-                                        )
-                                        .await;
-                                    let event = JobEvent::from_job(
-                                        Some(correlation_id),
-                                        library_id,
-                                        lease.job.dedupe_key.clone(),
-                                        stable_path_key(&lease.job.payload),
-                                        JobEventPayload::Failed {
-                                            job_id,
-                                            kind: job_kind,
-                                            priority: job_priority,
-                                            retryable: true,
-                                        },
-                                    );
-                                    if let Err(err) = e.publish(event).await {
-                                        tracing::error!(
-                                            "publish retry event failed: {err}"
-                                        );
-                                    }
-                                    scheduler.release(library_id).await;
-                                    scheduler
-                                        .record_enqueued(
-                                            library_id,
-                                            job_priority,
-                                        )
-                                        .await;
-                                    Some(LibraryActorCommand::JobFailed {
-                                        job_id,
-                                        dedupe_key: dedupe_key.clone(),
-                                        retryable: true,
-                                        error: Some(error),
-                                    })
-                                }
-                                DispatchStatus::DeadLetter { error } => {
-                                    if let Err(err) = q
-                                        .dead_letter(
-                                            lease_id,
-                                            Some(error.clone()),
-                                        )
-                                        .await
-                                    {
-                                        tracing::error!(
-                                            "queue dead-letter error: {err}"
-                                        );
-                                    }
-                                    let correlation_id = correlation_cache
-                                        .take_persisted_or_generate(
-                                            job_id,
-                                            lease.job.correlation_id,
-                                        )
-                                        .await;
-                                    let event = JobEvent::from_job(
-                                        Some(correlation_id),
-                                        library_id,
-                                        lease.job.dedupe_key.clone(),
-                                        stable_path_key(&lease.job.payload),
-                                        JobEventPayload::DeadLettered {
-                                            job_id,
-                                            kind: job_kind,
-                                            priority: job_priority,
-                                        },
-                                    );
-                                    if let Err(err) = e.publish(event).await {
-                                        tracing::error!(
-                                            "publish dead-letter event failed: {err}"
-                                        );
-                                    }
-                                    scheduler
-                                        .record_completed(library_id)
-                                        .await;
-                                    Some(LibraryActorCommand::JobFailed {
-                                        job_id,
-                                        dedupe_key: dedupe_key.clone(),
-                                        retryable: false,
-                                        error: Some(error),
-                                    })
-                                }
-                            };
-
-                            if let Some(command) = notify_command {
-                                let sender_opt = {
-                                    let guard = mailbox_tx.lock().await;
-                                    guard.clone()
-                                };
-                                if let Some(sender) = sender_opt
-                                    && let Err(err) = sender
-                                        .send(OrchestratorCommand::Library {
-                                            library_id,
-                                            command,
-                                            completion: None,
-                                        })
-                                        .await
-                                {
-                                    tracing::warn!(
-                                        "failed to send library actor notification: {err}"
-                                    );
-                                }
-                            }
-
-                            // Release budget
-                            let _ = b.release(token).await;
-                        }
-                        Ok(None) => {
-                            scheduler.cancel(reservation.id).await;
-                            tracing::trace!(
-                                worker = %worker_id,
-                                kind = ?worker_kind,
-                                library = %reservation.library_id,
-                                priority = ?reservation.priority,
-                                reservation = %reservation.id,
-                                "scheduler reservation cancelled (no job ready)"
-                            );
-                            tokio::time::sleep(
-                                std::time::Duration::from_millis(100),
-                            )
-                            .await;
-                            continue;
-                        }
-                        Err(err) => {
-                            scheduler.cancel(reservation.id).await;
-                            tracing::trace!(
-                                worker = %worker_id,
-                                kind = ?worker_kind,
-                                library = %reservation.library_id,
-                                priority = ?reservation.priority,
-                                reservation = %reservation.id,
-                                error = %err,
-                                "scheduler reservation cancelled (dequeue error)"
-                            );
-                            tracing::error!("dequeue error: {err}");
-                            tokio::time::sleep(
-                                std::time::Duration::from_millis(250),
-                            )
-                            .await;
-                            continue;
-                        }
-                    }
-                }
-            });
-
-            let mut handles = self.worker_handles.lock().await;
-            handles.push(handle);
-        }
+        self.task_graph
+            .spawn_worker_pool(
+                kind,
+                parallelism,
+                self.config.lease,
+                self.queue(),
+                self.events(),
+                self.budget(),
+                self.dispatcher(),
+                Arc::clone(&self.mailbox_tx),
+                self.correlations.clone(),
+                self.scheduler(),
+            )
+            .await;
     }
 
-    fn spawn_housekeeper(&self) {
-        let q = self.queue();
-        let interval = std::time::Duration::from_millis(
-            self.config.lease.housekeeper_interval_ms,
-        );
-        let shutdown = self.shutdown_token.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = shutdown.cancelled() => {
-                        tracing::info!("Housekeeper shutting down");
-                        break;
-                    }
-                    _ = tokio::time::sleep(interval) => {
-                        if let Err(err) = q.scan_expired_leases().await {
-                            tracing::warn!("housekeeper scan_expired_leases error: {err}");
-                        }
-                    }
-                }
-            }
-        });
-
-        // Note: We can't store the handle here without cloning self
-        // For now, the housekeeper will just run until cancellation token fires
+    pub async fn start_mailbox_runner(&self) -> Result<()> {
+        self.task_graph
+            .start_mailbox_runner(
+                Arc::clone(&self.mailbox_tx),
+                Arc::clone(&self.library_actors),
+                self.enqueuer(),
+                self.events(),
+            )
+            .await
     }
 
     pub async fn shutdown(&self) -> Result<()> {
-        tracing::info!("Initiating graceful shutdown of orchestrator runtime");
-
-        // Signal all workers to stop
-        self.shutdown_token.cancel();
-
-        // Close mailbox channel
-        {
-            let mut guard = self.mailbox_tx.lock().await;
-            *guard = None;
-        }
-
-        // Wait for all worker tasks to complete
-        let handles = {
-            let mut guard = self.worker_handles.lock().await;
-            std::mem::take(&mut *guard)
-        };
-
-        for handle in handles {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                handle,
+        self.task_graph
+            .shutdown(
+                Arc::clone(&self.mailbox_tx),
+                Arc::clone(&self.library_actors),
             )
             .await
-            {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => tracing::warn!("Worker task failed: {:?}", e),
-                Err(_) => {
-                    tracing::warn!("Worker task timed out during shutdown")
-                }
-            }
-        }
+    }
 
-        // Shutdown library actors
-        let actors = self.library_ids().await;
-
-        for library_id in actors {
-            if let Some(actor) = self.library_actor(library_id).await {
-                let mut actor_guard = actor.lock().await;
-                let _ = actor_guard
-                    .handle_command(LibraryActorCommand::Shutdown)
-                    .await;
-            }
-        }
-
-        tracing::info!("Orchestrator runtime shutdown complete");
-        Ok(())
+    #[cfg(test)]
+    async fn runtime_task_count(&self) -> usize {
+        self.task_graph.task_count().await
     }
 }
 
@@ -1125,25 +396,6 @@ where
     ) -> Result<()> {
         self.submit_library_command_and_wait(library_id, command)
             .await
-    }
-}
-
-/// Lightweight handle for mailbox runner internals.
-pub struct OrchestratorRuntimeHandle {
-    library_actors: Arc<RwLock<HashMap<LibraryId, LibraryActorHandle>>>,
-}
-
-impl fmt::Debug for OrchestratorRuntimeHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let library_actor_count = self
-            .library_actors
-            .try_read()
-            .map(|guard| guard.len())
-            .unwrap_or_default();
-
-        f.debug_struct("OrchestratorRuntimeHandle")
-            .field("library_actor_count", &library_actor_count)
-            .finish()
     }
 }
 
@@ -1271,34 +523,33 @@ where
     }
 }
 
-fn workload_for(kind: JobKind) -> WorkloadType {
-    match kind {
-        JobKind::FolderScan => WorkloadType::LibraryScan,
-        JobKind::SeriesResolve => WorkloadType::MetadataEnrichment,
-        JobKind::MediaAnalyze => WorkloadType::MediaAnalysis,
-        JobKind::MetadataEnrich => WorkloadType::MetadataEnrichment,
-        JobKind::EpisodeMatch => WorkloadType::MetadataEnrichment,
-        JobKind::IndexUpsert => WorkloadType::Indexing,
-        JobKind::ImageFetch => WorkloadType::ImageFetch,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::scan::orchestration::budget::InMemoryBudget;
+    use crate::domain::scan::orchestration::budget::{
+        InMemoryBudget, WorkloadType,
+    };
+    use crate::domain::scan::orchestration::context::{
+        FolderScanContext, MovieFolderScanContext, MovieRootPath,
+    };
     use crate::domain::scan::orchestration::dispatcher::DispatchStatus;
     use crate::domain::scan::orchestration::events::{
         EventMeta, JobEvent, JobEventPayload, JobEventPublisher,
     };
-    use crate::domain::scan::orchestration::job::{JobId, JobPriority};
-    use crate::domain::scan::orchestration::lease::JobLease;
+    use crate::domain::scan::orchestration::job::{
+        EnqueueRequest, FolderScanJob, JobHandle, JobId, JobPayload,
+        JobPriority, JobRecord, JobState, ScanReason,
+    };
+    use crate::domain::scan::orchestration::lease::{
+        DequeueRequest, JobLease, LeaseId, LeaseRenewal, QueueSelector,
+    };
     use crate::domain::scan::orchestration::persistence::PostgresQueueService;
+    use crate::domain::scan::orchestration::queue::ReadyQueueCount;
     use crate::domain::scan::orchestration::runtime::InProcJobEventBus;
     use crate::types::ids::LibraryId;
     use async_trait::async_trait;
     use sqlx::PgPool;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
     use std::fmt;
     use std::sync::Arc;
     use std::time::Duration;
@@ -1340,36 +591,524 @@ mod tests {
     #[async_trait]
     impl JobDispatcher for TestDispatcher {
         async fn dispatch(&self, lease: &JobLease) -> DispatchStatus {
-            let library_id = lease.job.payload.library_id();
-            let priority = lease.job.priority;
-
-            {
-                let mut state = self.state.lock().await;
-                let current = {
-                    let counter = state.active.entry(library_id).or_insert(0);
-                    *counter += 1;
-                    *counter
-                };
-
-                let max_entry =
-                    state.max_seen.entry(library_id).or_insert(current);
-                if current > *max_entry {
-                    *max_entry = current;
-                }
-            }
-
+            record_dispatch_start(&self.state, lease).await;
             time::sleep(self.delay).await;
-
-            {
-                let mut state = self.state.lock().await;
-                if let Some(counter) = state.active.get_mut(&library_id) {
-                    *counter = counter.saturating_sub(1);
-                }
-                state.completions.push((library_id, priority));
-            }
+            record_dispatch_finish(&self.state, lease).await;
 
             DispatchStatus::Success
         }
+    }
+
+    struct ScriptedDispatcher {
+        delay: Duration,
+        statuses: TokioMutex<VecDeque<DispatchStatus>>,
+        state: TokioMutex<DispatcherState>,
+    }
+
+    impl ScriptedDispatcher {
+        fn new(delay: Duration, statuses: Vec<DispatchStatus>) -> Self {
+            Self {
+                delay,
+                statuses: TokioMutex::new(VecDeque::from(statuses)),
+                state: TokioMutex::new(DispatcherState::default()),
+            }
+        }
+
+        async fn max_seen(&self, library_id: LibraryId) -> usize {
+            self.state
+                .lock()
+                .await
+                .max_seen
+                .get(&library_id)
+                .copied()
+                .unwrap_or_default()
+        }
+    }
+
+    #[async_trait]
+    impl JobDispatcher for ScriptedDispatcher {
+        async fn dispatch(&self, lease: &JobLease) -> DispatchStatus {
+            record_dispatch_start(&self.state, lease).await;
+            time::sleep(self.delay).await;
+            record_dispatch_finish(&self.state, lease).await;
+
+            self.statuses
+                .lock()
+                .await
+                .pop_front()
+                .unwrap_or(DispatchStatus::Success)
+        }
+    }
+
+    async fn record_dispatch_start(
+        state: &TokioMutex<DispatcherState>,
+        lease: &JobLease,
+    ) {
+        let library_id = lease.job.payload.library_id();
+        let mut state = state.lock().await;
+        let current = {
+            let counter = state.active.entry(library_id).or_insert(0);
+            *counter += 1;
+            *counter
+        };
+
+        let max_entry = state.max_seen.entry(library_id).or_insert(current);
+        if current > *max_entry {
+            *max_entry = current;
+        }
+    }
+
+    async fn record_dispatch_finish(
+        state: &TokioMutex<DispatcherState>,
+        lease: &JobLease,
+    ) {
+        let library_id = lease.job.payload.library_id();
+        let priority = lease.job.priority;
+        let mut state = state.lock().await;
+        if let Some(counter) = state.active.get_mut(&library_id) {
+            *counter = counter.saturating_sub(1);
+        }
+        state.completions.push((library_id, priority));
+    }
+
+    #[derive(Default)]
+    struct RecordingQueue {
+        state: TokioMutex<RecordingQueueState>,
+    }
+
+    #[derive(Default)]
+    struct RecordingQueueState {
+        ready: VecDeque<JobRecord>,
+        leased: HashMap<LeaseId, JobLease>,
+        selectors: Vec<QueueSelector>,
+        completed: usize,
+        failures: usize,
+        dead_letters: usize,
+        renewals: usize,
+        expired_scans: usize,
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct RecordingQueueStats {
+        completed: usize,
+        failures: usize,
+        dead_letters: usize,
+        renewals: usize,
+    }
+
+    impl RecordingQueue {
+        fn with_ready(jobs: Vec<JobRecord>) -> Self {
+            Self {
+                state: TokioMutex::new(RecordingQueueState {
+                    ready: VecDeque::from(jobs),
+                    ..RecordingQueueState::default()
+                }),
+            }
+        }
+
+        async fn selectors(&self) -> Vec<QueueSelector> {
+            self.state.lock().await.selectors.clone()
+        }
+
+        async fn stats(&self) -> RecordingQueueStats {
+            let state = self.state.lock().await;
+            RecordingQueueStats {
+                completed: state.completed,
+                failures: state.failures,
+                dead_letters: state.dead_letters,
+                renewals: state.renewals,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl QueueService for RecordingQueue {
+        async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
+            let job = JobRecord::new(request.payload.clone(), request.priority);
+            let handle =
+                JobHandle::accepted(job.id, &job.payload, job.priority);
+            self.state.lock().await.ready.push_back(job);
+            Ok(handle)
+        }
+
+        async fn dequeue(
+            &self,
+            request: DequeueRequest,
+        ) -> Result<Option<JobLease>> {
+            let mut state = self.state.lock().await;
+            if let Some(selector) = request.selector {
+                state.selectors.push(selector);
+            }
+
+            let position = state.ready.iter().position(|job| {
+                if job.payload.kind() != request.kind {
+                    return false;
+                }
+                match request.selector {
+                    Some(selector) => {
+                        job.payload.library_id() == selector.library_id
+                            && job.priority == selector.priority
+                    }
+                    None => true,
+                }
+            });
+
+            let Some(position) = position else {
+                return Ok(None);
+            };
+
+            let mut job = state
+                .ready
+                .remove(position)
+                .expect("position came from ready queue");
+            job.state = JobState::Leased;
+            job.lease_owner = Some(request.worker_id.clone());
+            let lease =
+                JobLease::new(job, request.worker_id, request.lease_ttl);
+            state.leased.insert(lease.lease_id, lease.clone());
+            Ok(Some(lease))
+        }
+
+        async fn renew(&self, renewal: LeaseRenewal) -> Result<JobLease> {
+            let mut state = self.state.lock().await;
+            let lease = {
+                let lease = state
+                    .leased
+                    .get_mut(&renewal.lease_id)
+                    .ok_or_else(|| {
+                        MediaError::NotFound(format!(
+                            "lease {} not found",
+                            renewal.lease_id.0
+                        ))
+                    })?;
+                lease.renewals += 1;
+                lease.expires_at = chrono::Utc::now() + renewal.extend_by;
+                lease.clone()
+            };
+            state.renewals += 1;
+            Ok(lease)
+        }
+
+        async fn complete(&self, lease_id: LeaseId) -> Result<()> {
+            let mut state = self.state.lock().await;
+            state.leased.remove(&lease_id).ok_or_else(|| {
+                MediaError::NotFound(format!("lease {} not found", lease_id.0))
+            })?;
+            state.completed += 1;
+            Ok(())
+        }
+
+        async fn fail(
+            &self,
+            lease_id: LeaseId,
+            retryable: bool,
+            _error: Option<String>,
+        ) -> Result<()> {
+            let mut state = self.state.lock().await;
+            let mut lease =
+                state.leased.remove(&lease_id).ok_or_else(|| {
+                    MediaError::NotFound(format!(
+                        "lease {} not found",
+                        lease_id.0
+                    ))
+                })?;
+            state.failures += 1;
+            if retryable {
+                lease.job.state = JobState::Ready;
+                lease.job.lease_owner = None;
+                lease.job.lease_expires_at = None;
+                state.ready.push_back(lease.job);
+            }
+            Ok(())
+        }
+
+        async fn dead_letter(
+            &self,
+            lease_id: LeaseId,
+            _error: Option<String>,
+        ) -> Result<()> {
+            let mut state = self.state.lock().await;
+            state.leased.remove(&lease_id).ok_or_else(|| {
+                MediaError::NotFound(format!("lease {} not found", lease_id.0))
+            })?;
+            state.dead_letters += 1;
+            Ok(())
+        }
+
+        async fn cancel_job(&self, _job_id: JobId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn queue_depth(&self, kind: JobKind) -> Result<usize> {
+            Ok(self
+                .state
+                .lock()
+                .await
+                .ready
+                .iter()
+                .filter(|job| job.payload.kind() == kind)
+                .count())
+        }
+
+        async fn release_dependency(
+            &self,
+            _library_id: LibraryId,
+            _dependency_key: &crate::domain::scan::orchestration::job::DependencyKey,
+        ) -> Result<u64> {
+            Ok(0)
+        }
+
+        async fn ready_counts_grouped(&self) -> Result<Vec<ReadyQueueCount>> {
+            let state = self.state.lock().await;
+            let mut grouped: HashMap<(JobKind, LibraryId, JobPriority), usize> =
+                HashMap::new();
+            for job in &state.ready {
+                *grouped
+                    .entry((
+                        job.payload.kind(),
+                        job.payload.library_id(),
+                        job.priority,
+                    ))
+                    .or_default() += 1;
+            }
+
+            Ok(grouped
+                .into_iter()
+                .map(|((kind, library_id, priority), ready)| ReadyQueueCount {
+                    kind,
+                    library_id,
+                    priority,
+                    ready,
+                })
+                .collect())
+        }
+    }
+
+    #[async_trait]
+    impl LeaseExpiryScanner for RecordingQueue {
+        async fn scan_expired_leases(&self) -> Result<u64> {
+            self.state.lock().await.expired_scans += 1;
+            Ok(0)
+        }
+    }
+
+    fn folder_scan_record(
+        library_id: LibraryId,
+        path: &str,
+        priority: JobPriority,
+    ) -> JobRecord {
+        let context = FolderScanContext::Movie(MovieFolderScanContext {
+            library_id,
+            movie_root_path: MovieRootPath::try_new(path)
+                .expect("valid test movie root"),
+        });
+        let payload = JobPayload::FolderScan(FolderScanJob {
+            context,
+            scan_reason: ScanReason::BulkSeed,
+            enqueue_time: chrono::Utc::now(),
+            device_id: None,
+        });
+        JobRecord::new(payload, priority)
+    }
+
+    #[tokio::test]
+    async fn task_graph_tracks_startup_tasks_and_shutdown_drains_them() {
+        let mut config = OrchestratorConfig::default();
+        config.queue.max_parallel_scans = 0;
+        config.queue.max_parallel_series_resolve = 0;
+        config.queue.max_parallel_analyses = 0;
+        config.queue.max_parallel_metadata = 0;
+        config.queue.max_parallel_index = 0;
+        config.queue.max_parallel_image_fetch = 0;
+
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(32));
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher =
+            Arc::new(TestDispatcher::new(Duration::from_millis(0)));
+
+        let runtime = OrchestratorRuntimeBuilder::new(config)
+            .with_queue(queue)
+            .with_events(events)
+            .with_budget(budget)
+            .with_dispatcher(dispatcher)
+            .build()
+            .expect("runtime build");
+
+        runtime.start().await.expect("runtime start");
+
+        assert_eq!(
+            runtime.runtime_task_count().await,
+            4,
+            "scheduler observer, domain router, housekeeper, and mailbox runner are tracked"
+        );
+
+        runtime.shutdown().await.expect("runtime shutdown succeeds");
+        assert_eq!(
+            runtime.runtime_task_count().await,
+            0,
+            "shutdown drains all tracked runtime tasks"
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_pool_uses_scheduler_selectors_and_balances_lifecycle_accounting()
+     {
+        let library_id = LibraryId::new();
+        let mut config = OrchestratorConfig::default();
+        config.queue.max_parallel_scans = 2;
+        config.queue.max_parallel_series_resolve = 0;
+        config.queue.max_parallel_analyses = 0;
+        config.queue.max_parallel_metadata = 0;
+        config.queue.max_parallel_index = 0;
+        config.queue.max_parallel_image_fetch = 0;
+        config.queue.default_library_cap = 1;
+        config.budget.library_scan_limit = 2;
+        config.lease.lease_ttl_secs = 1;
+        config.lease.renew_at_fraction = 0.0;
+        config.lease.renew_min_margin_ms = 950;
+        config.lease.housekeeper_interval_ms = 10_000;
+
+        let queue = Arc::new(RecordingQueue::with_ready(vec![
+            folder_scan_record(library_id, "/library/movie-a", JobPriority::P1),
+            folder_scan_record(library_id, "/library/movie-b", JobPriority::P1),
+        ]));
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let mut job_events = events.subscribe();
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher = Arc::new(ScriptedDispatcher::new(
+            Duration::from_millis(120),
+            vec![
+                DispatchStatus::Retry {
+                    error: "transient".into(),
+                },
+                DispatchStatus::DeadLetter {
+                    error: "terminal".into(),
+                },
+                DispatchStatus::Success,
+            ],
+        ));
+
+        let runtime = OrchestratorRuntimeBuilder::new(config)
+            .with_queue(queue.clone())
+            .with_events(events)
+            .with_budget(budget.clone())
+            .with_dispatcher(dispatcher.clone())
+            .build()
+            .expect("runtime build");
+
+        runtime.start().await.expect("runtime start");
+
+        time::timeout(Duration::from_secs(5), async {
+            loop {
+                let stats = queue.stats().await;
+                if stats.completed == 1
+                    && stats.failures == 1
+                    && stats.dead_letters == 1
+                {
+                    break;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("worker lifecycle reached terminal outcomes");
+
+        let selectors = queue.selectors().await;
+        assert!(
+            selectors.len() >= 3,
+            "retry causes the requeued job to be selected again"
+        );
+        assert!(
+            selectors
+                .iter()
+                .all(|selector| selector.library_id == library_id
+                    && selector.priority == JobPriority::P1),
+            "workers pass scheduler reservations through as queue selectors"
+        );
+
+        assert_eq!(
+            dispatcher.max_seen(library_id).await,
+            1,
+            "per-library scheduler cap prevents concurrent dispatches"
+        );
+
+        let stats = queue.stats().await;
+        assert!(
+            stats.renewals > 0,
+            "lease renewal task renews active dispatches"
+        );
+
+        let mut payloads = Vec::new();
+        while let Ok(event) = job_events.try_recv() {
+            payloads.push(event.payload);
+        }
+
+        assert_eq!(
+            payloads
+                .iter()
+                .filter(|payload| matches!(
+                    payload,
+                    JobEventPayload::Dequeued { .. }
+                ))
+                .count(),
+            3
+        );
+        assert!(payloads.iter().any(|payload| matches!(
+            payload,
+            JobEventPayload::LeaseRenewed { .. }
+        )));
+        assert_eq!(
+            payloads
+                .iter()
+                .filter(|payload| matches!(
+                    payload,
+                    JobEventPayload::Failed {
+                        retryable: true,
+                        ..
+                    }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            payloads
+                .iter()
+                .filter(|payload| matches!(
+                    payload,
+                    JobEventPayload::DeadLettered { .. }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            payloads
+                .iter()
+                .filter(|payload| matches!(
+                    payload,
+                    JobEventPayload::Completed { .. }
+                ))
+                .count(),
+            1
+        );
+
+        let (in_use, _) = budget
+            .utilization(WorkloadType::LibraryScan)
+            .await
+            .expect("budget utilization");
+        assert_eq!(in_use, 0, "worker releases budget after dispatch");
+
+        let scheduler_snapshot = runtime.scheduler().snapshot().await;
+        assert_eq!(
+            scheduler_snapshot
+                .get(&library_id)
+                .copied()
+                .unwrap_or_default(),
+            (0, 0),
+            "scheduler inflight and ready accounting returns to zero"
+        );
+
+        runtime.shutdown().await.expect("runtime shutdown succeeds");
     }
 
     #[tokio::test]

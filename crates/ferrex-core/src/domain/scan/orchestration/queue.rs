@@ -7,9 +7,19 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 use super::{
-    job::{EnqueueRequest, JobHandle, JobKind},
+    job::{EnqueueRequest, JobHandle, JobKind, JobPriority},
     lease::{DequeueRequest, JobLease, LeaseRenewal},
 };
+use crate::types::ids::LibraryId;
+
+/// Aggregated ready-state counts grouped by queue dimensions.
+#[derive(Clone, Debug)]
+pub struct ReadyQueueCount {
+    pub kind: JobKind,
+    pub library_id: LibraryId,
+    pub priority: JobPriority,
+    pub ready: usize,
+}
 
 /// Abstracts the queue backend (persistence + scheduling) consumed by the orchestrator service.
 #[async_trait]
@@ -47,6 +57,14 @@ pub trait QueueService: Send + Sync {
         library_id: crate::types::LibraryId,
         dependency_key: &super::job::DependencyKey,
     ) -> Result<u64>;
+
+    /// Fetch grouped ready counts for runtime scheduler priming.
+    ///
+    /// Queue implementations without durable startup state can keep the default
+    /// empty snapshot.
+    async fn ready_counts_grouped(&self) -> Result<Vec<ReadyQueueCount>> {
+        Ok(Vec::new())
+    }
 
     /// Enqueue multiple jobs. Default implementation issues jobs one-by-one.
     /// Implementations backed by a transactional store should override this

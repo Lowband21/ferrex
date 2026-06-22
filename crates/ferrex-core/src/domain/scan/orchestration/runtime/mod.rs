@@ -7,6 +7,10 @@
 
 mod event_bus;
 mod supervisor;
+mod task_graph;
 
 pub use event_bus::*;
 pub use supervisor::*;
+pub use task_graph::{
+    LibraryActorHandle, OrchestratorCommand, OrchestratorRuntimeHandle,
+};
