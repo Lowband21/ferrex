@@ -1,13 +1,14 @@
-//! Repository port for the Phase 1 intelligence bounded context.
+//! Repository port for bounded intelligence context and runtime persistence.
 //!
 //! The [`IntelligenceRepository`] trait exposes the read-model refresh
-//! builders, bounded query services, artifact CRUD, and run/tool-call audit
-//! persistence used by downstream intelligence handlers. Implementations
-//! enforce caps and user scope internally so callers cannot accidentally
-//! exceed the stable API budgets or read another user's scoped rows.
+//! builders, bounded query services, artifact CRUD, draft artifact access, and
+//! run/tool-call/event persistence used by downstream intelligence handlers.
+//! Implementations enforce caps and user scope internally so callers cannot
+//! accidentally exceed the stable API budgets or read another user's scoped rows.
 //!
-//! Storage contracts live in migration `007_intelligence_foundation.sql` and
-//! the DTO boundary lives in [`crate::api::types::intelligence`].
+//! Storage contracts live in migrations `007_intelligence_foundation.sql` and
+//! `008_intelligence_runtime_ports.sql`; DTO boundaries live in
+//! [`crate::api::types::intelligence`].
 
 use async_trait::async_trait;
 use ferrex_model::{LibraryId, MediaID};
@@ -16,12 +17,15 @@ use uuid::Uuid;
 use crate::{
     api::types::intelligence::{
         IntelligenceArtifactKind, IntelligenceArtifactSearchRequest,
-        IntelligenceArtifactSearchResponse, IntelligenceCandidateSearchRequest,
-        IntelligenceCandidateSearchResponse, IntelligenceItemContextRequest,
+        IntelligenceArtifactSearchResponse, IntelligenceArtifactSourceEdge,
+        IntelligenceArtifactStatus, IntelligenceCandidateSearchRequest,
+        IntelligenceCandidateSearchResponse, IntelligenceDraftArtifactPayload,
+        IntelligenceError, IntelligenceItemContextRequest,
         IntelligenceItemContextResponse, IntelligenceLibraryOverviewRequest,
         IntelligenceLibraryOverviewResponse, IntelligenceRelatedContextRequest,
         IntelligenceRelatedContextResponse, IntelligenceRunAuditRequest,
-        IntelligenceRunAuditResponse,
+        IntelligenceRunAuditResponse, IntelligenceRunEvent,
+        IntelligenceRunEventKind, IntelligenceRunStatus as ApiRunStatus,
     },
     error::Result,
 };
@@ -163,6 +167,52 @@ pub struct IntelligenceArtifactUpsert {
     pub content: serde_json::Value,
     pub metadata: serde_json::Value,
     pub source_revision: i64,
+}
+
+/// Write payload for creating an intelligence draft artifact without making it
+/// visible through active artifact reads.
+#[derive(Debug, Clone)]
+pub struct IntelligenceDraftArtifactCreate {
+    /// Optional draft id; when `None` a new id is generated.
+    pub artifact_id: Option<Uuid>,
+    pub kind: IntelligenceArtifactKind,
+    pub scope: IntelligenceArtifactScope,
+    pub library_id: Option<LibraryId>,
+    pub media_id: Option<MediaID>,
+    pub run_id: Option<Uuid>,
+    pub title: String,
+    pub summary: Option<String>,
+    pub excerpt: Option<String>,
+    pub content: serde_json::Value,
+    pub metadata: serde_json::Value,
+    pub source_revision: i64,
+}
+
+/// Write payload for appending a durable runtime event to a run.
+#[derive(Debug, Clone)]
+pub struct IntelligenceRunEventCreate {
+    /// Optional event id; when `None` a new id is generated.
+    pub event_id: Option<Uuid>,
+    pub run_id: Uuid,
+    /// Explicit sequence for replay; when `None`, the repository appends after
+    /// the current max sequence for the run.
+    pub sequence: Option<i32>,
+    pub event_kind: IntelligenceRunEventKind,
+    pub status: Option<ApiRunStatus>,
+    pub tool_call_id: Option<Uuid>,
+    pub artifact_id: Option<Uuid>,
+    pub message: Option<String>,
+    pub payload: serde_json::Value,
+    pub error: Option<IntelligenceError>,
+}
+
+/// Filter for replaying ordered runtime events.
+#[derive(Debug, Clone)]
+pub struct IntelligenceRunEventListFilter {
+    pub run_id: Uuid,
+    pub after_sequence: Option<i32>,
+    pub limit: u16,
+    pub user_id: Option<Uuid>,
 }
 
 /// Write payload for creating an intelligence run.
@@ -370,11 +420,44 @@ pub trait IntelligenceRepository: Send + Sync {
         Option<crate::api::types::intelligence::IntelligenceArtifactSummary>,
     >;
 
-    /// Upsert a global or user-scoped artifact and return its id.
+    /// Upsert a global or user-scoped active artifact and return its id.
     async fn upsert_artifact(
         &self,
         upsert: IntelligenceArtifactUpsert,
     ) -> Result<Uuid>;
+
+    /// Create a global or user-scoped draft artifact without marking it active.
+    async fn create_draft_artifact(
+        &self,
+        create: IntelligenceDraftArtifactCreate,
+    ) -> Result<Uuid>;
+
+    /// Read a draft artifact payload, including its bounded content JSON and
+    /// source edges, without exposing non-draft/active artifacts through this
+    /// runtime-specific port.
+    async fn get_draft_artifact(
+        &self,
+        artifact_id: Uuid,
+        user_id: Option<Uuid>,
+    ) -> Result<Option<IntelligenceDraftArtifactPayload>>;
+
+    /// Set an artifact lifecycle status, used to promote drafts or mark failed
+    /// drafts while keeping ownership checks in the repository.
+    async fn set_artifact_status(
+        &self,
+        artifact_id: Uuid,
+        user_id: Option<Uuid>,
+        status: IntelligenceArtifactStatus,
+        reason: Option<&str>,
+    ) -> Result<()>;
+
+    /// Replace durable source/provenance edges for an artifact.
+    async fn replace_artifact_sources(
+        &self,
+        artifact_id: Uuid,
+        user_id: Option<Uuid>,
+        sources: Vec<IntelligenceArtifactSourceEdge>,
+    ) -> Result<()>;
 
     /// Invalidate an artifact by marking it `invalidated`.
     async fn invalidate_artifact(
@@ -410,6 +493,18 @@ pub trait IntelligenceRepository: Send + Sync {
         user_id: Option<Uuid>,
     ) -> Result<IntelligenceRunAuditResponse>;
 
+    /// Persist one ordered run event for durable replay.
+    async fn append_run_event(
+        &self,
+        create: IntelligenceRunEventCreate,
+    ) -> Result<IntelligenceRunEvent>;
+
+    /// Replay ordered run events after an optional sequence.
+    async fn list_run_events(
+        &self,
+        filter: IntelligenceRunEventListFilter,
+    ) -> Result<Vec<IntelligenceRunEvent>>;
+
     /// Create a tool-call audit record within a run and return its id.
     async fn create_tool_call(
         &self,
@@ -428,4 +523,11 @@ pub trait IntelligenceRepository: Send + Sync {
         &self,
         run_id: Uuid,
     ) -> Result<Vec<IntelligenceToolCallSummary>>;
+
+    /// Mark non-terminal local runtime rows from a previous process as failed
+    /// and cancel any queued/running tool-call rows they owned.
+    async fn mark_stale_in_flight_runs_terminal(
+        &self,
+        reason: &str,
+    ) -> Result<Vec<Uuid>>;
 }

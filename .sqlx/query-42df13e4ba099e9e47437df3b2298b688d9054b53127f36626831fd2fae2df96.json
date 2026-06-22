@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO intelligence_artifact_sources (\n                    artifact_id, source_ordinal, source_kind,\n                    source_media_context_id, source_search_document_id,\n                    source_artifact_id, source_run_id, source_tool_call_id,\n                    source_library_id, source_user_id, source_media_id,\n                    source_media_type, source_revision, source_content_hash,\n                    source_excerpt, source_locator\n                )\n                VALUES ($1, $2, $3::varchar, $4, $5, $6, $7, $8, $9, $10,\n                        $11, ($12::text)::media_type, $13, $14, $15, $16::jsonb)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Varchar",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int8",
+        "Text",
+        "Varchar",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "42df13e4ba099e9e47437df3b2298b688d9054b53127f36626831fd2fae2df96"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM intelligence_artifact_sources WHERE artifact_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1a3b9aadbb5d1aa3d4d7a4932fdb1c2940601dbd3fc374f12459b567fb0e4a14"
+}

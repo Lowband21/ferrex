@@ -26,6 +26,8 @@ pub struct FileConfig {
     pub security: FileSecurityConfig,
     #[serde(default)]
     pub auth: FileAuthConfig,
+    #[serde(default)]
+    pub intelligence: FileIntelligenceConfig,
     pub rate_limiter: Option<FileRateLimiterConfig>,
     pub scanner: Option<ScannerConfig>,
     pub dev_mode: Option<bool>,
@@ -121,6 +123,36 @@ pub struct FileAuthConfig {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
+pub struct FileIntelligenceConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_steps: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tool_calls: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tool_result_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_user_concurrency: Option<u32>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileRateLimiterConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
@@ -164,6 +196,19 @@ pub struct EnvConfig {
     pub auth_password_pepper: Option<String>,
     pub auth_token_key: Option<String>,
     pub setup_token: Option<String>,
+    pub intelligence_enabled: Option<bool>,
+    pub intelligence_base_url: Option<String>,
+    pub intelligence_api_key: Option<String>,
+    pub intelligence_model: Option<String>,
+    pub intelligence_model_timeout_ms: Option<u64>,
+    pub intelligence_tool_timeout_ms: Option<u64>,
+    pub intelligence_total_timeout_ms: Option<u64>,
+    pub intelligence_max_steps: Option<u32>,
+    pub intelligence_max_tool_calls: Option<u32>,
+    pub intelligence_max_output_bytes: Option<usize>,
+    pub intelligence_max_tool_result_bytes: Option<usize>,
+    pub intelligence_max_retries: Option<u32>,
+    pub intelligence_per_user_concurrency: Option<u32>,
     pub rate_limits: Option<RateLimitSpec>,
     pub scanner_config_path: Option<PathBuf>,
     pub scanner_config_json: Option<String>,
@@ -227,6 +272,40 @@ impl EnvConfig {
             auth_token_key: std::env::var("AUTH_TOKEN_KEY").ok(),
             setup_token: std::env::var("FERREX_SETUP_TOKEN").ok(),
 
+            intelligence_enabled: parse_bool_var("FERREX_INTELLIGENCE_ENABLED"),
+            intelligence_base_url: non_empty_var(
+                "FERREX_INTELLIGENCE_BASE_URL",
+            ),
+            intelligence_api_key: non_empty_var("FERREX_INTELLIGENCE_API_KEY"),
+            intelligence_model: optional_model_var("FERREX_INTELLIGENCE_MODEL"),
+            intelligence_model_timeout_ms: parse_u64_var(
+                "FERREX_INTELLIGENCE_MODEL_TIMEOUT_MS",
+            ),
+            intelligence_tool_timeout_ms: parse_u64_var(
+                "FERREX_INTELLIGENCE_TOOL_TIMEOUT_MS",
+            ),
+            intelligence_total_timeout_ms: parse_u64_var(
+                "FERREX_INTELLIGENCE_TOTAL_TIMEOUT_MS",
+            ),
+            intelligence_max_steps: parse_u32_var(
+                "FERREX_INTELLIGENCE_MAX_STEPS",
+            ),
+            intelligence_max_tool_calls: parse_u32_var(
+                "FERREX_INTELLIGENCE_MAX_TOOL_CALLS",
+            ),
+            intelligence_max_output_bytes: parse_usize_var(
+                "FERREX_INTELLIGENCE_MAX_OUTPUT_BYTES",
+            ),
+            intelligence_max_tool_result_bytes: parse_usize_var(
+                "FERREX_INTELLIGENCE_MAX_TOOL_RESULT_BYTES",
+            ),
+            intelligence_max_retries: parse_u32_var(
+                "FERREX_INTELLIGENCE_MAX_RETRIES",
+            ),
+            intelligence_per_user_concurrency: parse_u32_var(
+                "FERREX_INTELLIGENCE_PER_USER_CONCURRENCY",
+            ),
+
             rate_limits: rate_limit_spec_from_env(),
 
             scanner_config_path: std::env::var("SCANNER_CONFIG_PATH")
@@ -235,4 +314,30 @@ impl EnvConfig {
             scanner_config_json: std::env::var("SCANNER_CONFIG_JSON").ok(),
         }
     }
+}
+
+fn non_empty_var(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|raw| raw.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn optional_model_var(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|raw| raw.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn parse_u64_var(name: &str) -> Option<u64> {
+    std::env::var(name).ok().and_then(|raw| raw.parse().ok())
+}
+
+fn parse_u32_var(name: &str) -> Option<u32> {
+    std::env::var(name).ok().and_then(|raw| raw.parse().ok())
+}
+
+fn parse_usize_var(name: &str) -> Option<usize> {
+    std::env::var(name).ok().and_then(|raw| raw.parse().ok())
 }

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id AS \"id!\"\n        FROM intelligence_artifacts\n        WHERE status = 'draft'\n          AND (user_id IS NULL OR user_id = $1)\n          AND ($2::uuid IS NULL OR run_id = $2)\n        ORDER BY updated_at DESC, id\n        LIMIT $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "03938a14b18c25c8642ee0f20345e65e7e0c6f8e0cc2dfd43679d4aad149e05e"
+}

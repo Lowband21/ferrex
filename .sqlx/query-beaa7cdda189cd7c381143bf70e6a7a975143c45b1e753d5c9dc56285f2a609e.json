@@ -1,0 +1,107 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id AS \"id!\", artifact_kind::text AS \"artifact_kind!\",\n                   status::text AS \"status!\", library_id, user_id,\n                   media_id, media_type::text AS media_type, run_id,\n                   title AS \"title!\", summary, excerpt,\n                   content AS \"content!\", metadata AS \"metadata!\",\n                   created_at AS \"created_at!\", updated_at AS \"updated_at!\"\n            FROM intelligence_artifacts\n            WHERE id = $1\n              AND status = 'draft'\n              AND (user_id IS NULL OR user_id = $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "artifact_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "media_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "title!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "summary",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "excerpt",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "content!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "metadata!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      true,
+      true,
+      true,
+      null,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "beaa7cdda189cd7c381143bf70e6a7a975143c45b1e753d5c9dc56285f2a609e"
+}

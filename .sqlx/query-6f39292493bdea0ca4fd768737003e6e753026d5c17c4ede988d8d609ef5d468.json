@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT e.id AS \"id!\", e.run_id AS \"run_id!\",\n                   e.sequence AS \"sequence!\",\n                   e.event_kind::text AS \"event_kind!\",\n                   e.status::text AS status, e.tool_call_id, e.artifact_id,\n                   e.message, e.payload AS \"payload!\", e.error_code,\n                   e.error, e.created_at AS \"created_at!\"\n            FROM intelligence_run_events e\n            JOIN intelligence_runs r ON r.id = e.run_id\n            WHERE e.run_id = $1\n              AND ($2::integer IS NULL OR e.sequence > $2)\n              AND (r.user_id IS NULL OR r.user_id = $3)\n            ORDER BY e.sequence, e.id\n            LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "run_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "sequence!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "event_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "tool_call_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "message",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "payload!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "error_code",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "error",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "6f39292493bdea0ca4fd768737003e6e753026d5c17c4ede988d8d609ef5d468"
+}

@@ -26,22 +26,32 @@ use ferrex_server::{
 
 use ferrex_core::domain::setup::SetupClaimService;
 use ferrex_core::{
-    application::unit_of_work::AppUnitOfWork,
-    database::PostgresDatabase,
-    domain::users::auth::{
-        AuthCrypto,
-        domain::{
-            AuthenticationService, DeviceSessionRepository, DeviceTrustService,
-            PinManagementService, UserAuthenticationRepository,
-            repositories::{
-                AuthEventRepository, AuthSessionRepository,
-                DeviceChallengeRepository, RefreshTokenRepository,
-            },
+    application::{
+        intelligence_runtime::{
+            IntelligenceRunManager, IntelligenceRunManagerConfig,
         },
-        infrastructure::repositories::{
-            PostgresAuthEventRepository, PostgresAuthSessionRepository,
-            PostgresDeviceChallengeRepository, PostgresDeviceSessionRepository,
-            PostgresRefreshTokenRepository, PostgresUserAuthRepository,
+        unit_of_work::AppUnitOfWork,
+    },
+    database::PostgresDatabase,
+    domain::{
+        intelligence::IntelligenceModelProvider,
+        users::auth::{
+            AuthCrypto,
+            domain::{
+                AuthenticationService, DeviceSessionRepository,
+                DeviceTrustService, PinManagementService,
+                UserAuthenticationRepository,
+                repositories::{
+                    AuthEventRepository, AuthSessionRepository,
+                    DeviceChallengeRepository, RefreshTokenRepository,
+                },
+            },
+            infrastructure::repositories::{
+                PostgresAuthEventRepository, PostgresAuthSessionRepository,
+                PostgresDeviceChallengeRepository,
+                PostgresDeviceSessionRepository,
+                PostgresRefreshTokenRepository, PostgresUserAuthRepository,
+            },
         },
     },
     infra::{image_service::ImageService, providers::TmdbApiProvider},
@@ -70,6 +80,29 @@ impl TestApp {
 pub async fn build_test_app_with_hooks<H: StartupHooks>(
     pool: PgPool,
     hooks: &H,
+) -> Result<TestApp> {
+    build_test_app_internal(pool, hooks, None).await
+}
+
+#[allow(unused)]
+pub async fn build_test_app_with_hooks_and_intelligence_provider<
+    H: StartupHooks,
+>(
+    pool: PgPool,
+    hooks: &H,
+    config: IntelligenceRunManagerConfig,
+    provider: Arc<dyn IntelligenceModelProvider>,
+) -> Result<TestApp> {
+    build_test_app_internal(pool, hooks, Some((config, provider))).await
+}
+
+async fn build_test_app_internal<H: StartupHooks>(
+    pool: PgPool,
+    hooks: &H,
+    intelligence: Option<(
+        IntelligenceRunManagerConfig,
+        Arc<dyn IntelligenceModelProvider>,
+    )>,
 ) -> Result<TestApp> {
     // SAFETY: tests run in isolation and set the env var before any child threads read it.
     unsafe {
@@ -253,6 +286,15 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
         auth_crypto.clone(),
     ));
 
+    let intelligence_runtime = intelligence.map(|(config, provider)| {
+        Arc::new(IntelligenceRunManager::from_repositories(
+            config,
+            unit_of_work.intelligence.clone(),
+            unit_of_work.query.clone(),
+            provider,
+        ))
+    });
+
     let config_arc = Arc::new(config);
     let websocket_manager = Arc::new(ConnectionManager::new());
     let admin_sessions = Arc::new(Mutex::new(HashMap::new()));
@@ -267,6 +309,7 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
         Arc::clone(&auth_facade),
         auth_crypto.clone(),
         setup_claim_service.clone(),
+        intelligence_runtime,
         false,
         #[cfg(feature = "demo")]
         None,

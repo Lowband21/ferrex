@@ -6,7 +6,9 @@ use axum::{
 use serde_json::json;
 use std::fmt;
 
-use ferrex_core::error::MediaError;
+use ferrex_core::{
+    domain::intelligence::IntelligenceProviderError, error::MediaError,
+};
 
 pub type AppResult<T> = Result<T, AppError>;
 
@@ -85,6 +87,48 @@ impl From<MediaError> for AppError {
             MediaError::NotFound(msg) => Self::not_found(msg),
             MediaError::Internal(msg) => Self::internal(msg),
             _ => Self::internal(err.to_string()),
+        }
+    }
+}
+
+impl From<IntelligenceProviderError> for AppError {
+    fn from(err: IntelligenceProviderError) -> Self {
+        let message = err.to_string();
+        match err {
+            IntelligenceProviderError::NotConfigured { .. } => {
+                Self::new(StatusCode::SERVICE_UNAVAILABLE, message)
+            }
+            IntelligenceProviderError::Unavailable { .. } => {
+                Self::new(StatusCode::SERVICE_UNAVAILABLE, message)
+            }
+            IntelligenceProviderError::Unauthorized { .. } => {
+                Self::new(StatusCode::BAD_GATEWAY, message)
+            }
+            IntelligenceProviderError::RateLimited { .. } => {
+                Self::rate_limited(message)
+            }
+            IntelligenceProviderError::Timeout { .. } => {
+                Self::new(StatusCode::GATEWAY_TIMEOUT, message)
+            }
+            IntelligenceProviderError::Cancelled { .. } => {
+                Self::new(StatusCode::REQUEST_TIMEOUT, message)
+            }
+            IntelligenceProviderError::ModelUnavailable { .. } => {
+                Self::new(StatusCode::SERVICE_UNAVAILABLE, message)
+            }
+            IntelligenceProviderError::InvalidRequest { .. } => {
+                Self::bad_request(message)
+            }
+            IntelligenceProviderError::MalformedOutput { .. }
+            | IntelligenceProviderError::SchemaViolation { .. }
+            | IntelligenceProviderError::RetryExhausted { .. }
+            | IntelligenceProviderError::ProviderRejectedOptions { .. }
+            | IntelligenceProviderError::ProviderStatus { .. } => {
+                Self::new(StatusCode::BAD_GATEWAY, message)
+            }
+            IntelligenceProviderError::Internal { .. } => {
+                Self::internal(message)
+            }
         }
     }
 }

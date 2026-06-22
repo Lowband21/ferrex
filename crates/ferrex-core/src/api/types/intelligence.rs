@@ -1,9 +1,9 @@
-//! Stable Phase 1 DTOs for planned intelligence endpoints.
+//! Stable intelligence DTOs for planned context and runtime endpoints.
 //!
 //! These contracts intentionally expose compact summaries, stable media/artifact
-//! identifiers, grounding references, and audit envelopes. They avoid raw
-//! provider metadata dumps so future handlers can evolve storage/model internals
-//! without changing the external API boundary.
+//! identifiers, grounding references, runtime status/events, and audit envelopes.
+//! They avoid raw provider metadata dumps so future handlers can evolve storage/model
+//! internals without changing the external API boundary.
 
 use ferrex_model::{LibraryId, MediaID};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -554,6 +554,95 @@ pub enum IntelligenceArtifactKind {
     AuditRecord,
 }
 
+/// Durable artifact lifecycle states exposed to runtime and draft readers.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IntelligenceArtifactStatus {
+    Draft,
+    Active,
+    Stale,
+    Superseded,
+    Invalidated,
+    Deleted,
+    Failed,
+}
+
+impl IntelligenceArtifactStatus {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Active => "active",
+            Self::Stale => "stale",
+            Self::Superseded => "superseded",
+            Self::Invalidated => "invalidated",
+            Self::Deleted => "deleted",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Source edge kinds that can explain or ground a draft artifact.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IntelligenceArtifactSourceKind {
+    Media,
+    MediaContext,
+    SearchDocument,
+    Artifact,
+    Run,
+    ToolCall,
+    Manual,
+}
+
+impl IntelligenceArtifactSourceKind {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Media => "media",
+            Self::MediaContext => "media_context",
+            Self::SearchDocument => "search_document",
+            Self::Artifact => "artifact",
+            Self::Run => "run",
+            Self::ToolCall => "tool_call",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+/// Structured provenance/source edge for draft artifact payloads.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceArtifactSourceEdge {
+    pub source_ordinal: i32,
+    pub source_kind: IntelligenceArtifactSourceKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_media_context_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_search_document_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_artifact_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_run_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_tool_call_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_library_id: Option<LibraryId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_user_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_media_id: Option<MediaID>,
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub source_revision: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_content_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_excerpt: Option<IntelligenceSummary>,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub source_locator: serde_json::Value,
+}
+
+fn is_zero_i64(value: &i64) -> bool {
+    *value == 0
+}
+
 /// Bounded artifact summary. The raw artifact body remains out-of-band.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntelligenceArtifactSummary {
@@ -600,6 +689,78 @@ pub struct IntelligenceArtifactSearchResponse {
     pub page: IntelligencePageInfo,
     #[serde(default)]
     pub caps: IntelligenceCaps,
+}
+
+/// Request for reading a durable draft artifact payload by id.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceDraftArtifactReadRequest {
+    pub artifact_id: Uuid,
+}
+
+/// Query for listing visible draft artifacts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceDraftArtifactListRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<Uuid>,
+    #[serde(
+        default = "default_intelligence_page_limit",
+        deserialize_with = "deserialize_page_limit"
+    )]
+    pub limit: u16,
+}
+
+impl Default for IntelligenceDraftArtifactListRequest {
+    fn default() -> Self {
+        Self {
+            run_id: None,
+            limit: default_intelligence_page_limit(),
+        }
+    }
+}
+
+/// Raw draft artifact payload used by the runtime before a draft is promoted.
+///
+/// Unlike public artifact summaries, this payload intentionally includes the
+/// bounded `content` JSON body because draft readers are internal/runtime
+/// consumers that need to resume or inspect generated artifacts before they are
+/// marked active.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceDraftArtifactPayload {
+    pub artifact_id: Uuid,
+    pub kind: IntelligenceArtifactKind,
+    pub status: IntelligenceArtifactStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library_id: Option<LibraryId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_user_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_id: Option<MediaID>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<Uuid>,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<IntelligenceSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<IntelligenceSummary>,
+    #[serde(default)]
+    pub content: serde_json::Value,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<IntelligenceArtifactSourceEdge>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at_epoch_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at_epoch_seconds: Option<i64>,
+}
+
+/// Response for listing visible draft artifact payloads.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceDraftArtifactListResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drafts: Vec<IntelligenceDraftArtifactPayload>,
+    #[serde(default)]
+    pub page: IntelligencePageInfo,
 }
 
 /// Sources that can ground or explain an intelligence result.
@@ -756,6 +917,288 @@ pub enum IntelligenceRunStatus {
     Succeeded,
     Failed,
     Cancelled,
+}
+
+impl IntelligenceRunStatus {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Structured runtime error codes shared by status, events, and cancel responses.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IntelligenceErrorCode {
+    FeatureDisabled,
+    ProviderNotConfigured,
+    ProviderUnavailable,
+    ProviderUnauthorized,
+    ProviderRateLimited,
+    ProviderTimeout,
+    ProviderError,
+    ModelUnavailable,
+    InvalidRequest,
+    NotFound,
+    Conflict,
+    ConcurrencyLimit,
+    RunCancelled,
+    RunTimedOut,
+    ToolTimedOut,
+    StorageError,
+    Internal,
+}
+
+impl IntelligenceErrorCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FeatureDisabled => "feature_disabled",
+            Self::ProviderNotConfigured => "provider_not_configured",
+            Self::ProviderUnavailable => "provider_unavailable",
+            Self::ProviderUnauthorized => "provider_unauthorized",
+            Self::ProviderRateLimited => "provider_rate_limited",
+            Self::ProviderTimeout => "provider_timeout",
+            Self::ProviderError => "provider_error",
+            Self::ModelUnavailable => "model_unavailable",
+            Self::InvalidRequest => "invalid_request",
+            Self::NotFound => "not_found",
+            Self::Conflict => "conflict",
+            Self::ConcurrencyLimit => "concurrency_limit",
+            Self::RunCancelled => "run_cancelled",
+            Self::RunTimedOut => "run_timed_out",
+            Self::ToolTimedOut => "tool_timed_out",
+            Self::StorageError => "storage_error",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+/// Structured runtime error envelope with no provider-secret material.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceError {
+    pub code: IntelligenceErrorCode,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub retryable: bool,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub details: serde_json::Value,
+}
+
+/// Request for starting a runtime-backed intelligence run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceRunStartRequest {
+    pub purpose: IntelligenceRunPurpose,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library_id: Option<LibraryId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_id: Option<MediaID>,
+    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub caps: IntelligenceCaps,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub metadata: serde_json::Value,
+}
+
+/// Response returned once a run has been accepted for execution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceRunStartResponse {
+    pub run_id: Uuid,
+    pub status: IntelligenceRunStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queued_at_epoch_seconds: Option<i64>,
+}
+
+/// Response for polling current runtime status of a run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceRunStatusResponse {
+    pub run_id: Uuid,
+    pub purpose: IntelligenceRunPurpose,
+    pub status: IntelligenceRunStatus,
+    pub terminal: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queued_at_epoch_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at_epoch_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at_epoch_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_step: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_steps: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub draft_artifact_ids: Vec<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_summary: Option<IntelligenceSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<IntelligenceError>,
+}
+
+/// Request for cancelling a runtime-backed intelligence run.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceRunCancelRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Response returned after a cancel request is recorded.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceRunCancelResponse {
+    pub run_id: Uuid,
+    pub status: IntelligenceRunStatus,
+    pub cancellation_requested: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancelled_at_epoch_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<IntelligenceError>,
+}
+
+/// Runtime event classes used for durable replay and streaming surfaces.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IntelligenceRunEventKind {
+    Queued,
+    Started,
+    StatusChanged,
+    ModelToken,
+    ToolCallStarted,
+    ToolCallFinished,
+    DraftArtifactCreated,
+    DraftArtifactUpdated,
+    CancelRequested,
+    Cancelled,
+    Completed,
+    Failed,
+    Heartbeat,
+}
+
+impl IntelligenceRunEventKind {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Started => "started",
+            Self::StatusChanged => "status_changed",
+            Self::ModelToken => "model_token",
+            Self::ToolCallStarted => "tool_call_started",
+            Self::ToolCallFinished => "tool_call_finished",
+            Self::DraftArtifactCreated => "draft_artifact_created",
+            Self::DraftArtifactUpdated => "draft_artifact_updated",
+            Self::CancelRequested => "cancel_requested",
+            Self::Cancelled => "cancelled",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Heartbeat => "heartbeat",
+        }
+    }
+}
+
+/// A single ordered runtime event for replay or streaming.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceRunEvent {
+    pub event_id: Uuid,
+    pub run_id: Uuid,
+    pub sequence: i32,
+    pub event_kind: IntelligenceRunEventKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<IntelligenceRunStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub payload: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<IntelligenceError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at_epoch_seconds: Option<i64>,
+}
+
+/// Request for replaying persisted run events after an optional sequence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceRunEventsRequest {
+    pub run_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_sequence: Option<i32>,
+    #[serde(
+        default = "default_intelligence_page_limit",
+        deserialize_with = "deserialize_page_limit"
+    )]
+    pub limit: u16,
+}
+
+/// Ordered event replay response.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceRunEventsResponse {
+    pub run_id: Uuid,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<IntelligenceRunEvent>,
+    #[serde(default)]
+    pub page: IntelligencePageInfo,
+}
+
+/// Provider/model readiness exposed to clients and operators.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IntelligenceProviderState {
+    Disabled,
+    NotConfigured,
+    Ready,
+    Degraded,
+    Unavailable,
+}
+
+/// Per-model status in the configured provider.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceModelStatus {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub selected: bool,
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub supports_tools: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u32>,
+}
+
+/// Provider readiness without exposing configured secrets.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceProviderStatus {
+    pub enabled: bool,
+    pub provider_name: String,
+    pub base_url: String,
+    pub api_key_configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    pub state: IntelligenceProviderState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<IntelligenceModelStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked_at_epoch_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<IntelligenceError>,
 }
 
 /// Lifecycle status for an individual tool call within a run.
@@ -1010,6 +1453,168 @@ mod tests {
 
         assert_eq!(decoded_context, context);
         assert_eq!(decoded_audit, audit);
+    }
+
+    #[test]
+    fn runtime_contracts_round_trip_through_json() {
+        let run_id = Uuid::from_u128(10);
+        let artifact_id = Uuid::from_u128(11);
+        let tool_call_id = Uuid::from_u128(12);
+        let error = IntelligenceError {
+            code: IntelligenceErrorCode::ProviderTimeout,
+            message: "provider timed out".to_string(),
+            retryable: true,
+            details: serde_json::json!({"timeout_ms": 70000}),
+        };
+
+        let start = IntelligenceRunStartRequest {
+            purpose: IntelligenceRunPurpose::Recommendation,
+            library_id: Some(LibraryId(Uuid::from_u128(2))),
+            media_id: Some(MediaID::Movie(MovieID(Uuid::from_u128(1)))),
+            prompt: "Recommend something grounded in my library".to_string(),
+            idempotency_key: Some("recommend-1".to_string()),
+            model: Some("gemma-4-12b".to_string()),
+            caps: IntelligenceCaps::default(),
+            metadata: serde_json::json!({"source": "test"}),
+        };
+        let start_json =
+            serde_json::to_string(&start).expect("serialize start");
+        let decoded_start: IntelligenceRunStartRequest =
+            serde_json::from_str(&start_json).expect("deserialize start");
+        assert_eq!(decoded_start, start);
+
+        let status = IntelligenceRunStatusResponse {
+            run_id,
+            purpose: IntelligenceRunPurpose::Recommendation,
+            status: IntelligenceRunStatus::Running,
+            terminal: false,
+            current_phase: Some("tool_call_started".to_string()),
+            provider: Some("openai-compatible".to_string()),
+            model: Some("gemma-4-12b".to_string()),
+            queued_at_epoch_seconds: Some(1_700_000_000),
+            started_at_epoch_seconds: Some(1_700_000_001),
+            completed_at_epoch_seconds: None,
+            current_step: Some(2),
+            max_steps: Some(12),
+            draft_artifact_ids: vec![artifact_id],
+            output_summary: None,
+            error: None,
+        };
+        let status_json =
+            serde_json::to_string(&status).expect("serialize status");
+        let decoded_status: IntelligenceRunStatusResponse =
+            serde_json::from_str(&status_json).expect("deserialize status");
+        assert_eq!(decoded_status, status);
+
+        let cancel = IntelligenceRunCancelResponse {
+            run_id,
+            status: IntelligenceRunStatus::Cancelled,
+            cancellation_requested: true,
+            cancelled_at_epoch_seconds: Some(1_700_000_002),
+            message: Some("cancel recorded".to_string()),
+            error: Some(error.clone()),
+        };
+        let cancel_json =
+            serde_json::to_string(&cancel).expect("serialize cancel");
+        let decoded_cancel: IntelligenceRunCancelResponse =
+            serde_json::from_str(&cancel_json).expect("deserialize cancel");
+        assert_eq!(decoded_cancel, cancel);
+
+        let event = IntelligenceRunEvent {
+            event_id: Uuid::from_u128(13),
+            run_id,
+            sequence: 3,
+            event_kind: IntelligenceRunEventKind::ToolCallFinished,
+            status: Some(IntelligenceRunStatus::Running),
+            tool_call_id: Some(tool_call_id),
+            artifact_id: Some(artifact_id),
+            message: Some("tool call completed".to_string()),
+            payload: serde_json::json!({"tool": "library_search"}),
+            error: Some(error.clone()),
+            created_at_epoch_seconds: Some(1_700_000_003),
+        };
+        let events = IntelligenceRunEventsResponse {
+            run_id,
+            events: vec![event.clone()],
+            page: IntelligencePageInfo {
+                next_cursor: None,
+                limit: 20,
+                has_more: false,
+            },
+        };
+        let events_json =
+            serde_json::to_string(&events).expect("serialize events");
+        let decoded_events: IntelligenceRunEventsResponse =
+            serde_json::from_str(&events_json).expect("deserialize events");
+        assert_eq!(decoded_events, events);
+
+        let draft = IntelligenceDraftArtifactPayload {
+            artifact_id,
+            kind: IntelligenceArtifactKind::GeneratedAnswer,
+            status: IntelligenceArtifactStatus::Draft,
+            library_id: Some(LibraryId(Uuid::from_u128(2))),
+            owner_user_id: Some(Uuid::from_u128(14)),
+            media_id: Some(MediaID::Movie(MovieID(Uuid::from_u128(1)))),
+            run_id: Some(run_id),
+            title: "Draft answer".to_string(),
+            summary: Some(IntelligenceSummary::new("draft summary")),
+            excerpt: Some(IntelligenceSummary::new("draft excerpt")),
+            content: serde_json::json!({"body": "draft"}),
+            metadata: serde_json::json!({"version": 1}),
+            sources: vec![IntelligenceArtifactSourceEdge {
+                source_ordinal: 0,
+                source_kind: IntelligenceArtifactSourceKind::Media,
+                source_media_context_id: None,
+                source_search_document_id: None,
+                source_artifact_id: None,
+                source_run_id: Some(run_id),
+                source_tool_call_id: Some(tool_call_id),
+                source_library_id: Some(LibraryId(Uuid::from_u128(2))),
+                source_user_id: Some(Uuid::from_u128(14)),
+                source_media_id: Some(MediaID::Movie(MovieID(
+                    Uuid::from_u128(1),
+                ))),
+                source_revision: 4,
+                source_content_hash: Some(
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                ),
+                source_excerpt: Some(IntelligenceSummary::new(
+                    "grounded source excerpt",
+                )),
+                source_locator: serde_json::json!({"field": "overview"}),
+            }],
+            created_at_epoch_seconds: Some(1_700_000_004),
+            updated_at_epoch_seconds: Some(1_700_000_005),
+        };
+        let draft_json =
+            serde_json::to_string(&draft).expect("serialize draft");
+        let decoded_draft: IntelligenceDraftArtifactPayload =
+            serde_json::from_str(&draft_json).expect("deserialize draft");
+        assert_eq!(decoded_draft, draft);
+
+        let provider = IntelligenceProviderStatus {
+            enabled: true,
+            provider_name: "openai-compatible".to_string(),
+            base_url: "http://localhost:8081/v1".to_string(),
+            api_key_configured: false,
+            default_model: Some("gemma-4-12b".to_string()),
+            state: IntelligenceProviderState::Ready,
+            models: vec![IntelligenceModelStatus {
+                name: "gemma-4-12b".to_string(),
+                selected: true,
+                available: true,
+                supports_tools: true,
+                context_window_tokens: Some(8192),
+            }],
+            checked_at_epoch_seconds: Some(1_700_000_006),
+            error: None,
+        };
+        let provider_json =
+            serde_json::to_string(&provider).expect("serialize provider");
+        let decoded_provider: IntelligenceProviderStatus =
+            serde_json::from_str(&provider_json).expect("deserialize provider");
+        assert_eq!(decoded_provider, provider);
     }
 
     #[test]

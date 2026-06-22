@@ -5,6 +5,8 @@ pub mod cache;
 /// Demo-mode helpers for quickly seeding fake media libraries.
 #[cfg(feature = "demo")]
 pub mod demo;
+/// Provider-neutral intelligence runtime contracts.
+pub mod intelligence;
 pub mod media;
 /// Scan domain entrypoint bundling orchestrator, filesystem watch, and helper modules.
 #[cfg(feature = "scan-runtime")]
