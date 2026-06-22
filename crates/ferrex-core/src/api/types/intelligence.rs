@@ -697,6 +697,27 @@ pub struct IntelligenceDraftArtifactReadRequest {
     pub artifact_id: Uuid,
 }
 
+/// Query for listing visible draft artifacts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceDraftArtifactListRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<Uuid>,
+    #[serde(
+        default = "default_intelligence_page_limit",
+        deserialize_with = "deserialize_page_limit"
+    )]
+    pub limit: u16,
+}
+
+impl Default for IntelligenceDraftArtifactListRequest {
+    fn default() -> Self {
+        Self {
+            run_id: None,
+            limit: default_intelligence_page_limit(),
+        }
+    }
+}
+
 /// Raw draft artifact payload used by the runtime before a draft is promoted.
 ///
 /// Unlike public artifact summaries, this payload intentionally includes the
@@ -731,6 +752,15 @@ pub struct IntelligenceDraftArtifactPayload {
     pub created_at_epoch_seconds: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at_epoch_seconds: Option<i64>,
+}
+
+/// Response for listing visible draft artifact payloads.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelligenceDraftArtifactListResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drafts: Vec<IntelligenceDraftArtifactPayload>,
+    #[serde(default)]
+    pub page: IntelligencePageInfo,
 }
 
 /// Sources that can ground or explain an intelligence result.
@@ -997,6 +1027,9 @@ pub struct IntelligenceRunStatusResponse {
     pub run_id: Uuid,
     pub purpose: IntelligenceRunPurpose,
     pub status: IntelligenceRunStatus,
+    pub terminal: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1013,6 +1046,8 @@ pub struct IntelligenceRunStatusResponse {
     pub max_steps: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub draft_artifact_ids: Vec<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_summary: Option<IntelligenceSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<IntelligenceError>,
 }
@@ -1452,6 +1487,8 @@ mod tests {
             run_id,
             purpose: IntelligenceRunPurpose::Recommendation,
             status: IntelligenceRunStatus::Running,
+            terminal: false,
+            current_phase: Some("tool_call_started".to_string()),
             provider: Some("openai-compatible".to_string()),
             model: Some("gemma-4-12b".to_string()),
             queued_at_epoch_seconds: Some(1_700_000_000),
@@ -1460,6 +1497,7 @@ mod tests {
             current_step: Some(2),
             max_steps: Some(12),
             draft_artifact_ids: vec![artifact_id],
+            output_summary: None,
             error: None,
         };
         let status_json =

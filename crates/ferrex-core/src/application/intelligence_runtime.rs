@@ -36,7 +36,8 @@ use crate::{
         IntelligenceRunEventsResponse, IntelligenceRunPurpose,
         IntelligenceRunStartRequest, IntelligenceRunStartResponse,
         IntelligenceRunStatus as ApiRunStatus, IntelligenceRunStatusResponse,
-        clamp_intelligence_page_limit, default_intelligence_page_limit,
+        IntelligenceSummary, clamp_intelligence_page_limit,
+        default_intelligence_page_limit,
     },
     application::intelligence_tools::{
         IntelligenceToolCallContext, IntelligenceToolError,
@@ -56,6 +57,7 @@ use crate::{
         IntelligenceActionCompletionRequest, IntelligenceActionSpec,
         IntelligenceChatMessage, IntelligenceModelProvider,
         IntelligenceProviderError, IntelligenceProviderRequestOptions,
+        IntelligenceProviderResult,
     },
     error::{MediaError, Result},
 };
@@ -489,19 +491,62 @@ impl IntelligenceRunManager {
             .store
             .run_audit(&audit_request(run_id), user_id)
             .await?;
+        let events = self
+            .store
+            .list_run_events(IntelligenceRunEventListFilter {
+                run_id,
+                after_sequence: None,
+                limit: default_intelligence_page_limit(),
+                user_id,
+            })
+            .await?;
+        let current_phase = events
+            .last()
+            .map(|event| event.event_kind.as_db_str().to_string())
+            .or_else(|| Some(audit.run.status.as_db_str().to_string()));
+        let error = events.iter().rev().find_map(|event| event.error.clone());
+        let mut draft_artifact_ids = audit.run.artifact_ids.clone();
+        for event in &events {
+            if matches!(
+                event.event_kind,
+                IntelligenceRunEventKind::DraftArtifactCreated
+                    | IntelligenceRunEventKind::DraftArtifactUpdated
+            ) {
+                if let Some(artifact_id) = event.artifact_id {
+                    push_unique_uuid(&mut draft_artifact_ids, artifact_id);
+                }
+            }
+            if let Some(ids) = event
+                .payload
+                .get("draft_artifact_ids")
+                .and_then(|value| value.as_array())
+            {
+                for value in ids {
+                    if let Some(raw) = value.as_str()
+                        && let Ok(artifact_id) = Uuid::parse_str(raw)
+                    {
+                        push_unique_uuid(&mut draft_artifact_ids, artifact_id);
+                    }
+                }
+            }
+        }
+
         Ok(IntelligenceRunStatusResponse {
             run_id,
             purpose: audit.run.purpose,
             status: audit.run.status,
+            terminal: is_terminal_status(audit.run.status),
+            current_phase,
             provider: Some(self.config.provider_name.clone()),
             model: audit.run.model,
             queued_at_epoch_seconds: audit.run.queued_at_epoch_seconds,
             started_at_epoch_seconds: audit.run.started_at_epoch_seconds,
             completed_at_epoch_seconds: audit.run.completed_at_epoch_seconds,
-            current_step: None,
+            current_step: Some(audit.run.tool_calls.len() as u32),
             max_steps: Some(self.config.max_steps),
-            draft_artifact_ids: Vec::new(),
-            error: audit.run.output_summary.and_then(|_| None),
+            draft_artifact_ids,
+            output_summary: audit.run.output_summary,
+            error,
         })
     }
 
@@ -544,7 +589,9 @@ impl IntelligenceRunManager {
             .await
     }
 
-    pub async fn provider_status(&self) -> Result<IntelligenceProviderStatus> {
+    pub async fn provider_status(
+        &self,
+    ) -> IntelligenceProviderResult<IntelligenceProviderStatus> {
         if !self.config.enabled {
             return Ok(IntelligenceProviderStatus {
                 enabled: false,
@@ -565,7 +612,6 @@ impl IntelligenceRunManager {
                 cancellation_token: None,
             })
             .await
-            .map_err(provider_media_error)
     }
 
     async fn create_queued_run(
@@ -1164,6 +1210,7 @@ impl IntelligenceRunManager {
                 model,
                 current_step,
                 draft_artifact_ids,
+                Some(IntelligenceSummary::new(summary)),
                 None,
             ),
         })
@@ -1209,6 +1256,7 @@ impl IntelligenceRunManager {
                 model,
                 current_step,
                 draft_artifact_ids,
+                None,
                 Some(error),
             ),
         })
@@ -1262,6 +1310,7 @@ impl IntelligenceRunManager {
                 model,
                 current_step,
                 draft_artifact_ids,
+                None,
                 Some(error),
             ),
         })
@@ -1275,12 +1324,15 @@ impl IntelligenceRunManager {
         model: Option<String>,
         current_step: u32,
         draft_artifact_ids: Vec<Uuid>,
+        output_summary: Option<IntelligenceSummary>,
         error: Option<IntelligenceError>,
     ) -> IntelligenceRunStatusResponse {
         IntelligenceRunStatusResponse {
             run_id,
             purpose: request.purpose,
             status,
+            terminal: is_terminal_status(status),
+            current_phase: Some(status.as_db_str().to_string()),
             provider: Some(self.config.provider_name.clone()),
             model,
             queued_at_epoch_seconds: None,
@@ -1290,6 +1342,7 @@ impl IntelligenceRunManager {
             current_step: Some(current_step),
             max_steps: Some(self.config.max_steps),
             draft_artifact_ids,
+            output_summary,
             error,
         }
     }
@@ -1659,6 +1712,12 @@ fn is_terminal_status(status: ApiRunStatus) -> bool {
     )
 }
 
+fn push_unique_uuid(values: &mut Vec<Uuid>, value: Uuid) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
 fn audit_request(run_id: Uuid) -> IntelligenceRunAuditRequest {
     IntelligenceRunAuditRequest {
         run_id,
@@ -1693,10 +1752,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     hex::encode(hasher.finalize())
-}
-
-fn provider_media_error(error: IntelligenceProviderError) -> MediaError {
-    MediaError::InvalidMedia(sanitized_provider_error(&error).message)
 }
 
 fn sanitized_provider_error(

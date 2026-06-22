@@ -291,8 +291,33 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             post(intelligence_handlers::related_context_handler),
         )
         .route(
+            v1::intelligence::RUN_START,
+            post(intelligence_handlers::run_start_handler),
+        )
+        .route(
+            v1::intelligence::RUN_STATUS,
+            get(intelligence_handlers::run_status_handler)
+                .post(intelligence_handlers::run_cancel_handler),
+        )
+        .route(
+            v1::intelligence::RUN_EVENTS,
+            get(intelligence_handlers::run_events_sse_handler),
+        )
+        .route(
             v1::intelligence::RUN_AUDIT,
             post(intelligence_handlers::run_audit_handler),
+        )
+        .route(
+            v1::intelligence::DRAFT_ARTIFACT_LIST,
+            get(intelligence_handlers::draft_artifact_list_handler),
+        )
+        .route(
+            v1::intelligence::DRAFT_ARTIFACT_DETAIL,
+            get(intelligence_handlers::draft_artifact_detail_handler),
+        )
+        .route(
+            v1::intelligence::PROVIDER_STATUS,
+            get(intelligence_handlers::provider_status_handler),
         )
         // Query system
         .route(v1::media::QUERY, post(query_media_handler))
