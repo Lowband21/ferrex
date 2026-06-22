@@ -523,4 +523,11 @@ pub trait IntelligenceRepository: Send + Sync {
         &self,
         run_id: Uuid,
     ) -> Result<Vec<IntelligenceToolCallSummary>>;
+
+    /// Mark non-terminal local runtime rows from a previous process as failed
+    /// and cancel any queued/running tool-call rows they owned.
+    async fn mark_stale_in_flight_runs_terminal(
+        &self,
+        reason: &str,
+    ) -> Result<Vec<Uuid>>;
 }

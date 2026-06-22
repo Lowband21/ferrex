@@ -12,7 +12,10 @@ use crate::{
 };
 use ferrex_core::domain::setup::SetupClaimService;
 use ferrex_core::{
-    application::unit_of_work::AppUnitOfWork,
+    application::{
+        intelligence_runtime::IntelligenceRunManager,
+        unit_of_work::AppUnitOfWork,
+    },
     database::{
         PostgresDatabase, repository_ports::setup_claims::SetupClaimsRepository,
     },
@@ -32,6 +35,7 @@ pub struct AppContext {
     auth_facade: Arc<AuthApplicationFacade>,
     auth_crypto: Arc<AuthCrypto>,
     setup_claim_service: Arc<SetupClaimService<dyn SetupClaimsRepository>>,
+    intelligence_runtime: Option<Arc<IntelligenceRunManager>>,
     cache_enabled: bool,
     #[cfg(feature = "demo")]
     demo: Option<Arc<DemoCoordinator>>,
@@ -56,6 +60,7 @@ impl AppContext {
         auth_facade: Arc<AuthApplicationFacade>,
         auth_crypto: Arc<AuthCrypto>,
         setup_claim_service: Arc<SetupClaimService<dyn SetupClaimsRepository>>,
+        intelligence_runtime: Option<Arc<IntelligenceRunManager>>,
         cache_enabled: bool,
         #[cfg(feature = "demo")] demo: Option<Arc<DemoCoordinator>>,
     ) -> Self {
@@ -70,6 +75,7 @@ impl AppContext {
             auth_facade,
             auth_crypto,
             setup_claim_service,
+            intelligence_runtime,
             cache_enabled,
             #[cfg(feature = "demo")]
             demo,
@@ -124,6 +130,10 @@ impl AppContext {
         &self,
     ) -> Arc<SetupClaimService<dyn SetupClaimsRepository>> {
         Arc::clone(&self.setup_claim_service)
+    }
+
+    pub fn intelligence_runtime(&self) -> Option<Arc<IntelligenceRunManager>> {
+        self.intelligence_runtime.clone()
     }
 
     #[cfg(feature = "demo")]

@@ -267,6 +267,7 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
         Arc::clone(&auth_facade),
         auth_crypto.clone(),
         setup_claim_service.clone(),
+        None,
         false,
         #[cfg(feature = "demo")]
         None,

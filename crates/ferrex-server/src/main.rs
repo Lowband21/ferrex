@@ -22,29 +22,45 @@
 // ```
 
 use ferrex_core::{
+    application::{
+        intelligence_runtime::{
+            IntelligenceRunManager, IntelligenceRunManagerConfig,
+        },
+        unit_of_work::AppUnitOfWork,
+    },
     database::{
         PostgresDatabase, context::DatabaseContext,
         repository_ports::media_files::MediaFileFilter,
     },
-    domain::users::auth::{
-        AuthCrypto,
-        domain::{
-            repositories::{
-                AuthEventRepository, AuthSessionRepository,
-                DeviceChallengeRepository, DeviceSessionRepository,
-                RefreshTokenRepository, UserAuthenticationRepository,
+    domain::{
+        intelligence::IntelligenceModelProvider,
+        users::auth::{
+            AuthCrypto,
+            domain::{
+                repositories::{
+                    AuthEventRepository, AuthSessionRepository,
+                    DeviceChallengeRepository, DeviceSessionRepository,
+                    RefreshTokenRepository, UserAuthenticationRepository,
+                },
+                services::{
+                    AuthenticationService, DeviceTrustService,
+                    PinManagementService,
+                },
             },
-            services::{
-                AuthenticationService, DeviceTrustService, PinManagementService,
+            infrastructure::repositories::{
+                PostgresAuthEventRepository, PostgresAuthSessionRepository,
+                PostgresDeviceChallengeRepository,
+                PostgresDeviceSessionRepository,
+                PostgresRefreshTokenRepository, PostgresUserAuthRepository,
             },
-        },
-        infrastructure::repositories::{
-            PostgresAuthEventRepository, PostgresAuthSessionRepository,
-            PostgresDeviceChallengeRepository, PostgresDeviceSessionRepository,
-            PostgresRefreshTokenRepository, PostgresUserAuthRepository,
         },
     },
-    infra::media::{image_service::ImageService, providers::TmdbApiProvider},
+    infra::{
+        intelligence::{
+            OpenAiCompatibleProvider, OpenAiCompatibleProviderConfig,
+        },
+        media::{image_service::ImageService, providers::TmdbApiProvider},
+    },
     types::LibraryReference,
 };
 
@@ -627,6 +643,23 @@ async fn wire_app_resources(
         auth_crypto.clone(),
     ));
 
+    let intelligence_runtime = Arc::new(
+        build_intelligence_run_manager(&config, unit_of_work.clone())
+            .context("failed to initialize intelligence runtime")?,
+    );
+    let recovered_intelligence_runs = intelligence_runtime
+        .recover_stale_runs()
+        .await
+        .context("failed to recover stale intelligence runs")?;
+    if recovered_intelligence_runs.is_empty() {
+        info!("intelligence runtime recovery found no stale runs");
+    } else {
+        info!(
+            recovered_runs = recovered_intelligence_runs.len(),
+            "marked stale intelligence runs terminal"
+        );
+    }
+
     let admin_sessions = Arc::new(Mutex::new(HashMap::new()));
     let app_context = Arc::new(AppContext::new(
         Arc::clone(&config),
@@ -639,6 +672,7 @@ async fn wire_app_resources(
         Arc::clone(&auth_facade),
         auth_crypto,
         setup_claim_service,
+        Some(intelligence_runtime),
         with_cache,
         #[cfg(feature = "demo")]
         demo_coordinator,
@@ -655,6 +689,48 @@ async fn wire_app_resources(
         context: app_context,
         state,
     })
+}
+
+fn build_intelligence_run_manager(
+    config: &Config,
+    unit_of_work: Arc<AppUnitOfWork>,
+) -> anyhow::Result<IntelligenceRunManager> {
+    let runtime = &config.intelligence;
+    let limits = &runtime.limits;
+    let provider_defaults = OpenAiCompatibleProviderConfig::default();
+    let provider_config = OpenAiCompatibleProviderConfig {
+        base_url: runtime.provider.base_url.clone(),
+        api_key: runtime.provider.api_key.clone(),
+        default_model: runtime.provider.model.clone(),
+        request_timeout: limits.model_timeout,
+        max_retries: runtime.retry.max_retries,
+        max_output_bytes: limits.max_output_bytes,
+        ..provider_defaults
+    };
+    let manager_config = IntelligenceRunManagerConfig {
+        enabled: runtime.enabled,
+        provider_name: provider_config.provider_name.clone(),
+        default_model: provider_config.default_model.clone(),
+        model_timeout: limits.model_timeout,
+        tool_timeout: limits.tool_timeout,
+        total_timeout: limits.total_timeout,
+        max_steps: limits.max_steps,
+        max_tool_calls: limits.max_tool_calls,
+        max_malformed_retries: runtime.retry.max_retries,
+        max_output_bytes: limits.max_output_bytes,
+        max_tool_result_bytes: limits.max_tool_result_bytes,
+    };
+    let provider: Arc<dyn IntelligenceModelProvider> = Arc::new(
+        OpenAiCompatibleProvider::new(provider_config)
+            .context("failed to initialize OpenAI-compatible provider")?,
+    );
+
+    Ok(IntelligenceRunManager::from_repositories(
+        manager_config,
+        unit_of_work.intelligence.clone(),
+        unit_of_work.query.clone(),
+        provider,
+    ))
 }
 
 #[derive(Debug, Default, Clone)]

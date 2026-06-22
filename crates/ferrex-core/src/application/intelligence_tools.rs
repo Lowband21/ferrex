@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
@@ -380,6 +381,7 @@ pub enum IntelligenceToolErrorCode {
     ScopeViolation,
     BudgetExceeded,
     ToolTimedOut,
+    Cancelled,
     NotFound,
     InvalidRequest,
     StorageError,
@@ -395,6 +397,7 @@ impl IntelligenceToolErrorCode {
             Self::ScopeViolation => "scope_violation",
             Self::BudgetExceeded => "budget_exceeded",
             Self::ToolTimedOut => "tool_timed_out",
+            Self::Cancelled => "cancelled",
             Self::NotFound => "not_found",
             Self::InvalidRequest => "invalid_request",
             Self::StorageError => "storage_error",
@@ -449,10 +452,9 @@ impl IntelligenceToolError {
                 "tool request was rejected by the Ferrex repository",
             ),
             MediaError::Cancelled(_) => Self::new(
-                IntelligenceToolErrorCode::ToolTimedOut,
+                IntelligenceToolErrorCode::Cancelled,
                 "tool execution was cancelled",
-            )
-            .retryable(true),
+            ),
             MediaError::Conflict(_) => Self::new(
                 IntelligenceToolErrorCode::InvalidRequest,
                 "tool request conflicted with current Ferrex state",
@@ -483,6 +485,19 @@ impl IntelligenceToolError {
             .retryable(true),
         }
     }
+}
+
+/// Optional runtime controls for one tool execution.
+#[derive(Debug, Clone, Default)]
+pub struct IntelligenceToolExecutionControls {
+    /// Runtime-wide tool deadline. The stricter per-tool registry budget still
+    /// applies when this is larger than the approved tool budget.
+    pub timeout: Option<Duration>,
+    /// Cancellation token checked before and during tool dispatch.
+    pub cancellation_token: Option<CancellationToken>,
+    /// Preallocated audit id used by run orchestration to emit ordered events
+    /// before the tool backend starts.
+    pub tool_call_id: Option<Uuid>,
 }
 
 /// Successful tool execution returned to the runtime.
@@ -819,6 +834,24 @@ impl IntelligenceToolRegistry {
         arguments: Value,
     ) -> std::result::Result<IntelligenceToolExecution, IntelligenceToolError>
     {
+        self.execute_with_controls(
+            context,
+            tool_name,
+            arguments,
+            IntelligenceToolExecutionControls::default(),
+        )
+        .await
+    }
+
+    /// Execute one tool call with caller-supplied runtime controls.
+    pub async fn execute_with_controls(
+        &self,
+        context: &IntelligenceToolCallContext,
+        tool_name: &str,
+        arguments: Value,
+        controls: IntelligenceToolExecutionControls,
+    ) -> std::result::Result<IntelligenceToolExecution, IntelligenceToolError>
+    {
         let Some(name) = IntelligenceToolName::parse(tool_name) else {
             return Err(IntelligenceToolError::new(
                 IntelligenceToolErrorCode::UnknownTool,
@@ -830,11 +863,35 @@ impl IntelligenceToolRegistry {
             })));
         };
 
+        if controls
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err(cancelled_tool_error(name));
+        }
+
         let budget = name.budget();
         let redacted_arguments = redact_json_for_model(arguments.clone());
         let tool_call_id = self
-            .create_audit_record(context, name, redacted_arguments)
+            .create_audit_record(
+                context,
+                name,
+                redacted_arguments,
+                controls.tool_call_id,
+            )
             .await?;
+
+        if controls
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            let error = cancelled_tool_error(name);
+            self.mark_tool_cancelled(tool_call_id, &error).await?;
+            return Err(error);
+        }
+
         self.mark_tool_running(tool_call_id).await?;
 
         let parsed = match parse_tool_input(name, arguments) {
@@ -854,29 +911,30 @@ impl IntelligenceToolRegistry {
         };
 
         let operation = self.dispatch_tool(name, scoped, context, tool_call_id);
-        let raw_output =
-            match timeout(Duration::from_millis(budget.max_time_ms), operation)
-                .await
-            {
-                Ok(Ok(output)) => output,
-                Ok(Err(error)) => {
-                    self.mark_tool_failed(tool_call_id, &error).await?;
+        let per_tool_timeout = Duration::from_millis(budget.max_time_ms);
+        let effective_timeout = controls
+            .timeout
+            .map(|runtime_timeout| runtime_timeout.min(per_tool_timeout))
+            .unwrap_or(per_tool_timeout);
+
+        let raw_output = if let Some(token) =
+            controls.cancellation_token.clone()
+        {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    let error = cancelled_tool_error(name);
+                    self.mark_tool_cancelled(tool_call_id, &error).await?;
                     return Err(error);
                 }
-                Err(_) => {
-                    let error = IntelligenceToolError::new(
-                        IntelligenceToolErrorCode::ToolTimedOut,
-                        "Ferrex tool execution exceeded its time budget",
-                    )
-                    .retryable(true)
-                    .with_details(json!({
-                        "tool": name.as_str(),
-                        "max_time_ms": budget.max_time_ms,
-                    }));
-                    self.mark_tool_failed(tool_call_id, &error).await?;
-                    return Err(error);
+                result = timeout(effective_timeout, operation) => {
+                    self.tool_operation_result(name, tool_call_id, budget, result).await?
                 }
-            };
+            }
+        } else {
+            let result = timeout(effective_timeout, operation).await;
+            self.tool_operation_result(name, tool_call_id, budget, result)
+                .await?
+        };
 
         let execution = match finalize_tool_output(
             name,
@@ -901,11 +959,12 @@ impl IntelligenceToolRegistry {
         context: &IntelligenceToolCallContext,
         name: IntelligenceToolName,
         redacted_arguments: Value,
+        tool_call_id: Option<Uuid>,
     ) -> std::result::Result<Uuid, IntelligenceToolError> {
         let input_hash = Some(stable_json_hash(&redacted_arguments));
         self.backend
             .create_tool_call(IntelligenceToolCallCreate {
-                tool_call_id: None,
+                tool_call_id,
                 run_id: context.run_id,
                 sequence: context.sequence,
                 tool_kind: name.tool_kind(),
@@ -922,6 +981,38 @@ impl IntelligenceToolRegistry {
                 )
                 .retryable(true)
             })
+    }
+
+    async fn tool_operation_result(
+        &self,
+        name: IntelligenceToolName,
+        tool_call_id: Uuid,
+        budget: IntelligenceToolBudget,
+        result: std::result::Result<
+            std::result::Result<RawToolOutput, IntelligenceToolError>,
+            tokio::time::error::Elapsed,
+        >,
+    ) -> std::result::Result<RawToolOutput, IntelligenceToolError> {
+        match result {
+            Ok(Ok(output)) => Ok(output),
+            Ok(Err(error)) => {
+                self.mark_tool_failed(tool_call_id, &error).await?;
+                Err(error)
+            }
+            Err(_) => {
+                let error = IntelligenceToolError::new(
+                    IntelligenceToolErrorCode::ToolTimedOut,
+                    "Ferrex tool execution exceeded its time budget",
+                )
+                .retryable(true)
+                .with_details(json!({
+                    "tool": name.as_str(),
+                    "max_time_ms": budget.max_time_ms,
+                }));
+                self.mark_tool_failed(tool_call_id, &error).await?;
+                Err(error)
+            }
+        }
     }
 
     async fn mark_tool_running(
@@ -999,6 +1090,36 @@ impl IntelligenceToolRegistry {
                 IntelligenceToolError::new(
                     IntelligenceToolErrorCode::AuditError,
                     "failed to mark Ferrex tool-call audit record failed",
+                )
+                .retryable(true)
+            })
+    }
+
+    async fn mark_tool_cancelled(
+        &self,
+        tool_call_id: Uuid,
+        error: &IntelligenceToolError,
+    ) -> std::result::Result<(), IntelligenceToolError> {
+        let excerpt = IntelligenceSummary::with_max_chars(
+            format!("{}: {}", error.code.as_str(), error.message),
+            DEFAULT_INTELLIGENCE_SUMMARY_CHARS,
+        )
+        .text;
+        self.backend
+            .update_tool_call(
+                tool_call_id,
+                IntelligenceToolCallUpdate {
+                    status: Some(ToolCallStatusInternal::Cancelled),
+                    error_excerpt: Some(excerpt),
+                    finished_at: Some(Utc::now()),
+                    ..IntelligenceToolCallUpdate::default()
+                },
+            )
+            .await
+            .map_err(|_| {
+                IntelligenceToolError::new(
+                    IntelligenceToolErrorCode::AuditError,
+                    "failed to mark Ferrex tool-call audit record cancelled",
                 )
                 .retryable(true)
             })
@@ -1197,6 +1318,14 @@ impl IntelligenceToolRegistry {
             }
         }
     }
+}
+
+fn cancelled_tool_error(name: IntelligenceToolName) -> IntelligenceToolError {
+    IntelligenceToolError::new(
+        IntelligenceToolErrorCode::Cancelled,
+        "Ferrex tool execution was cancelled",
+    )
+    .with_details(json!({"tool": name.as_str()}))
 }
 
 fn definition_for(name: IntelligenceToolName) -> IntelligenceToolDefinition {

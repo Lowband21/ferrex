@@ -13,7 +13,9 @@ use crate::infra::config::Config;
 use crate::infra::scan::scan_manager::ScanControlPlane;
 use crate::infra::thumbnail_service::ThumbnailService;
 use crate::infra::websocket::ConnectionManager;
-use ferrex_core::application::unit_of_work::AppUnitOfWork;
+use ferrex_core::application::{
+    intelligence_runtime::IntelligenceRunManager, unit_of_work::AppUnitOfWork,
+};
 use ferrex_core::database::PostgresDatabase;
 use ferrex_core::database::repository_ports::setup_claims::SetupClaimsRepository;
 use ferrex_core::domain::setup::SetupClaimService;
@@ -143,6 +145,10 @@ impl AppState {
         &self,
     ) -> Arc<SetupClaimService<dyn SetupClaimsRepository>> {
         self.context.setup_claim_service()
+    }
+
+    pub fn intelligence_runtime(&self) -> Option<Arc<IntelligenceRunManager>> {
+        self.context.intelligence_runtime()
     }
 
     #[cfg(feature = "demo")]

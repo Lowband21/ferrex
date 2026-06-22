@@ -3979,6 +3979,63 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         }
         Ok(out)
     }
+
+    async fn mark_stale_in_flight_runs_terminal(
+        &self,
+        reason: &str,
+    ) -> Result<Vec<Uuid>> {
+        let pool = self.pool();
+        let reason = truncate_chars(reason, 2048);
+        let mut tx = pool.begin().await.map_err(|e| {
+            internal_err(format!("begin stale run transaction failed: {e}"))
+        })?;
+
+        let run_ids: Vec<Uuid> = sqlx::query_scalar!(
+            r#"
+            UPDATE intelligence_runs
+            SET status = 'failed',
+                error_excerpt = $1,
+                finished_at = COALESCE(finished_at, now()),
+                updated_at = now()
+            WHERE status IN ('queued', 'running')
+            RETURNING id AS "id!"
+            "#,
+            &reason
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| {
+            internal_err(format!("mark stale intelligence runs failed: {e}"))
+        })?;
+
+        if !run_ids.is_empty() {
+            sqlx::query!(
+                r#"
+                UPDATE intelligence_tool_calls
+                SET status = 'cancelled',
+                    error_excerpt = COALESCE(error_excerpt, $2),
+                    finished_at = COALESCE(finished_at, now()),
+                    updated_at = now()
+                WHERE run_id = ANY($1)
+                  AND status IN ('queued', 'running')
+                "#,
+                &run_ids,
+                &reason
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                internal_err(format!(
+                    "mark stale intelligence tool calls failed: {e}"
+                ))
+            })?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            internal_err(format!("commit stale run transaction failed: {e}"))
+        })?;
+        Ok(run_ids)
+    }
 }
 
 // ---------------------------------------------------------------------------
