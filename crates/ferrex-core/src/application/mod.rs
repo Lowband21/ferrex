@@ -3,6 +3,9 @@
 //! This layer coordinates domain services, repository ports, and database units
 //! of work without depending on HTTP transport details.
 
+/// Bounded grounded LLM tool registry over intelligence/query repositories.
+#[cfg(feature = "database")]
+pub mod intelligence_tools;
 /// Bootstrap helpers for role-based access control state.
 #[cfg(feature = "database")]
 pub mod rbac_bootstrap;
