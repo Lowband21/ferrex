@@ -1,3 +1,9 @@
+//! Identifier traits for movie, series, season, and episode ids.
+//!
+//! The trait abstracts over owned model ids and archived rkyv ids while keeping a
+//! small stack-allocated formatting buffer available for allocation-sensitive UI
+//! and cache paths.
+
 use uuid::Uuid;
 
 use ferrex_model::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
@@ -12,21 +18,29 @@ fn uuid_to_str(uuid: Uuid, buffer: &mut [u8; 45]) -> &str {
     encoded
 }
 
-/// Trait that allows us to treat archived MediaIDs the same as MediaIDs.
+/// Common interface for UUID-backed media identifiers.
 pub trait MediaIDLike {
+    /// Concrete media id type produced by [`MediaIDLike::to_media_id`].
     type MediaId: MediaIDLike;
 
+    /// Borrow the id as its concrete type.
     fn as_ref(&self) -> &Self;
+    /// Convert or clone the id into its concrete media-id representation.
     fn to_media_id(self) -> Self::MediaId;
 
+    /// Format the UUID into the caller-provided buffer and return it as a string slice.
     fn as_str<'a>(&self, buffer: &'a mut [u8; 45]) -> &'a str;
+    /// Format the UUID into the caller-provided buffer and copy it into an owned string.
     fn to_string_buf(&self, buffer: &mut [u8; 45]) -> String {
         String::from(self.as_str(buffer))
     }
 
+    /// Borrow the underlying UUID.
     fn as_uuid(&self) -> &Uuid;
+    /// Convert the id into the underlying UUID.
     fn to_uuid(self) -> Uuid;
 
+    /// Compare this id with another media-id wrapper by UUID.
     fn sub_eq(&self, other: &impl MediaIDLike) -> bool;
 
     /// The playable media category for this id.

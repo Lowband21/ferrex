@@ -1,3 +1,8 @@
+//! Media enum access traits shared by owned and archived references.
+//!
+//! `MediaLike` lets player and repository code branch on media shape through a
+//! trait instead of matching every owned/archived representation separately.
+
 use super::{id::MediaIDLike, media_ops::MediaOps};
 use ferrex_model::media::{
     EpisodeReference, Media, MovieReference, SeasonReference, Series,
@@ -5,43 +10,48 @@ use ferrex_model::media::{
 use ferrex_model::media_id::MediaID;
 use ferrex_model::media_type::VideoMediaType;
 
-// A trait that allows us to treat archived and non-archived media references as the same type
+/// Trait that normalizes access to owned and archived media enum variants.
 pub trait MediaLike {
+    /// Movie reference type returned by movie accessors.
     type MovieRef: MediaOps;
+    /// Series reference type returned by series accessors.
     type SeriesRef: MediaOps;
+    /// Season reference type returned by season accessors.
     type SeasonRef: MediaOps;
+    /// Episode reference type returned by episode accessors.
     type EpisodeRef: MediaOps;
+    /// Media id type associated with this media representation.
     type MediaID: MediaIDLike;
 
-    /// Try to extract owned movie reference
+    /// Try to extract an owned movie reference.
     fn to_movie(self) -> Option<Self::MovieRef>;
 
-    /// Try to extract owned series reference
+    /// Try to extract an owned series reference.
     fn to_series(self) -> Option<Self::SeriesRef>;
 
-    /// Try to extract owned season reference
+    /// Try to extract an owned season reference.
     fn to_season(self) -> Option<Self::SeasonRef>;
 
-    /// Try to extract owned episode reference
+    /// Try to extract an owned episode reference.
     fn to_episode(self) -> Option<Self::EpisodeRef>;
 
-    /// Try to extract movie reference
+    /// Try to borrow the movie reference.
     fn as_movie(&self) -> Option<&Self::MovieRef>;
 
-    /// Try to extract series reference
+    /// Try to borrow the series reference.
     fn as_series(&self) -> Option<&Self::SeriesRef>;
 
-    /// Try to extract season reference
+    /// Try to borrow the season reference.
     fn as_season(&self) -> Option<&Self::SeasonRef>;
 
-    /// Try to extract episode reference
+    /// Try to borrow the episode reference.
     fn as_episode(&self) -> Option<&Self::EpisodeRef>;
 
     /*
     /// Get id of the media reference
     fn media_id(&self) -> Self::MediaID;*/
 
-    /// Helper to get media type
+    /// Return the playable media category for the current variant.
     fn media_type(&self) -> VideoMediaType;
 }
 

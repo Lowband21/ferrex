@@ -1,3 +1,8 @@
+//! Series-bundle cache and index structures.
+//!
+//! Series bundles group series, seasons, and episodes for efficient TV library
+//! browsing and archived snapshot lookup.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

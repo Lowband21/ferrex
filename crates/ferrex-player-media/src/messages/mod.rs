@@ -1,3 +1,8 @@
+//! Media/watch-state domain messages.
+//!
+//! Message types here describe progress updates, watch-state refreshes, season
+//! details, and subscription events independent of a concrete UI shell.
+
 use ferrex_core::player_prelude::MediaID;
 
 pub mod subscriptions;

@@ -1,3 +1,8 @@
+//! Aggregated watch-state DTOs for series, seasons, episodes, and next-up hints.
+//!
+//! These types are shared by the server and players when calculating resume
+//! progress, completed counts, in-progress badges, and next-episode suggestions.
+
 use uuid::Uuid;
 
 #[cfg(feature = "serde")]

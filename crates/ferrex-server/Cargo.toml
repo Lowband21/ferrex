@@ -13,14 +13,14 @@ description = "High-performance media server with real-time transcoding, streami
 [lints.rustdoc]
 broken_intra_doc_links = "warn"
 private_intra_doc_links = "warn"
-missing_crate_level_docs = "allow"
+missing_crate_level_docs = "warn"
 private_doc_tests = "warn"
 invalid_codeblock_attributes = "warn"
 invalid_rust_codeblocks = "warn"
 bare_urls = "warn"
 
 [lints.rust]
-# Server is a bin crate with extensive surface; allow during 0.1.0-alpha
+# Server transport modules expose many pre-alpha handler/infra types; detailed item docs will land incrementally.
 missing_docs = "allow"
 missing_debug_implementations = "warn"
 

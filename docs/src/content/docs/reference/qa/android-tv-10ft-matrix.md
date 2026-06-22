@@ -1,0 +1,105 @@
+---
+title: "Android TV 10-foot QA matrix"
+description: "LOW-363/LOW-533 Android TV focus, D-pad, Back, recovery, compact-grid, and hardware evidence matrix."
+sidebar:
+  order: 7
+---
+
+> **Evidence status:** This page preserves a dated QA packet. Treat rows marked blocked, pending hardware QA, or release-readiness follow-up as stale evidence until they are rerun on current devices and builds.
+
+This evidence packet covers the Android TV focus, D-pad, OK, Back, recovery, remote-input, and compact library-grid density contract requested by LOW-339/LOW-363 and refreshed for LOW-533 as TV browse surfaces evolve.
+
+## Execution summary
+
+| Area | Result | Evidence |
+| --- | --- | --- |
+| Android build/unit/lint gate | Pass | `assembleMobileDebug`, `assembleTvDebug`, `testMobileDebugUnitTest`, `testTvDebugUnitTest`, `lintMobileDebug`, and `lintTvDebug` completed with `BUILD SUCCESSFUL`. Unit XML totals: mobile `227 tests, 0 failures, 0 errors, 0 skipped`; TV `227 tests, 0 failures, 0 errors, 0 skipped`. |
+| Focused library-grid QA contract tests | Pass | `FerrexVisualQaScenariosTest` `9/9` and `FerrexDesignTokensTest` `14/14` passed for both mobile and TV debug unit-test variants. These cover compact controls, dense-grid tokens, stable tags, fixture privacy, and no-wipe recovery labels. |
+| Emulator D-pad run | Blocked in this workspace | Device/API/resolution: not available for Android TV because the final `adb devices -l` returned an empty device list. No TV emulator or physical TV target was available for D-pad execution. |
+| Physical Android TV remote run | Release-readiness follow-up | No physical Android TV or remote target was attached (`adb devices -l` empty). This matrix must be re-run on hardware before promoting Android TV beyond `dev`. |
+| Screenshots/video/logcat | Not captured | No device was available. Future captures must redact server URLs, usernames where sensitive, playback ticket URLs, auth headers, and tokens before attaching. |
+
+## Exact validation commands and results
+
+```bash
+cd mobile/android && ANDROID_HOME=/home/lowband/Android/Sdk ANDROID_SDK_ROOT=/home/lowband/Android/Sdk ./gradlew :app:testMobileDebugUnitTest :app:testTvDebugUnitTest --tests 'com.ferrex.android.ui.qa.FerrexVisualQaScenariosTest' --tests 'com.ferrex.android.ui.theme.FerrexDesignTokensTest' --no-daemon --stacktrace -Pandroid.aapt2FromMavenOverride=/home/lowband/Android/Sdk/build-tools/35.0.0/aapt2
+```
+
+Result: `BUILD SUCCESSFUL in 5s`; focused evidence totals from XML: mobile `FerrexVisualQaScenariosTest` `9 tests, 0 failures, 0 errors, 0 skipped`, mobile `FerrexDesignTokensTest` `14 tests, 0 failures, 0 errors, 0 skipped`, TV `FerrexVisualQaScenariosTest` `9 tests, 0 failures, 0 errors, 0 skipped`, TV `FerrexDesignTokensTest` `14 tests, 0 failures, 0 errors, 0 skipped`.
+
+```bash
+cd mobile/android && ANDROID_HOME=/home/lowband/Android/Sdk ANDROID_SDK_ROOT=/home/lowband/Android/Sdk ./gradlew :app:assembleMobileDebug :app:assembleTvDebug :app:testMobileDebugUnitTest :app:testTvDebugUnitTest :app:lintMobileDebug :app:lintTvDebug --no-daemon --stacktrace -Pandroid.aapt2FromMavenOverride=/home/lowband/Android/Sdk/build-tools/35.0.0/aapt2
+```
+
+Result: `BUILD SUCCESSFUL in 5s`; `105 actionable tasks: 2 executed, 1 from cache, 102 up-to-date`. Unit XML totals: mobile `227 tests, 0 failures, 0 errors, 0 skipped`; TV `227 tests, 0 failures, 0 errors, 0 skipped`. Lint reports were generated at `mobile/android/app/build/reports/lint-results-mobileDebug.html` and `mobile/android/app/build/reports/lint-results-tvDebug.html`.
+
+Device/emulator commands run:
+
+```bash
+adb devices -l
+```
+
+Result: no ADB devices were attached in the final workspace check, so Android TV device/API/resolution and D-pad input evidence were unavailable.
+
+## Shared Ferrex visual pass criteria (LOW-393)
+
+- TV scaffold and full-screen surfaces use the shared Ferrex private-cinema gradient, slate background, and TV spacing tokens; screens should read as the same dark slate / signal cyan / private violet identity as phone without shrinking 10-foot layouts.
+- D-pad focus on TV buttons, poster cards, search rows, playback controls, and track rows must use shared focus scale, border width, elevation, and semantic role colors: primary/retry = signal cyan, cache/secondary = violet/slate, destructive/error = rose.
+- Home rails keep the standard TV poster dimensions (`190dp` rail width, `338dp` card minimum height); full-library grids use dense poster tokens below compact top controls so substantially more posters are visible without shrinking unrelated rails or regressing to permanent huge-card rows.
+- Recovery, diagnostics, stale/offline, search miss, detail error, and playback error panels should use shared status-card/action-panel tones while preserving all existing Retry, Back, Sign out, Change server, Reset connection, cache clear, and diagnostics exits.
+- Playback overlay controls and track pickers should use the same Ferrex status/focus tokens, while retaining the current reducer-defined hidden-controls, Back, and picker focus behavior.
+
+## Compact library-grid control/density contract (LOW-533)
+
+- Full-library browse starts from `grid-top-controls`: Back, Media type, Library, Sort/filter, and Status/More are compact D-pad buttons at the top of the surface instead of separate permanent rows.
+- Posters live under `grid-cards` as a dense grid with stable `tv.poster.grid-cards.<item>` tags. The debug `tv-grid-focus` scenario uses 12 synthetic cards so a 1080p/4K visual pass can distinguish dense poster rows from a vertical list of oversized cards.
+- Sort/filter and status/recovery open modal panels (`grid-movie-controls-panel`, `grid-status-panel`). Back dismisses an open panel before leaving the grid; dismissed panels restore focus to the compact top controls.
+- Recovery exits remain no-wipe and reachable from Status/More: Retry selected library, Retry all libraries, Clear selected cache, Clear all cache, Change server, Reset connection, and Diagnostics / Export diagnostics.
+- Evidence artifacts must redact private server URLs, account identifiers, auth headers/tokens, playback ticket URLs, local paths, and private media/artwork before attachment.
+
+## Manual matrix
+
+Manual result statuses below are **Ready / blocked**: the expected behavior is defined and backed by automated build/unit coverage where available, but emulator and physical D-pad execution could not be completed without an attached/runnable Android TV target.
+
+| Surface | Expected initial focus | D-pad traversal | OK action | Back action | Focus restore target | Visible focus state | Recovery exits | Pass/fail notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Server connect | Server URL text field (`TvAuthRecoveryPolicy.initialServerFocusTarget()`). | Down/right reaches `Retry / Connect`, then `Reset connection`; text field handles Enter/center submit only when non-empty. | On URL field with text or `Retry / Connect`, attempts server check. On `Reset connection`, clears connection state without OS app-data wipe. | Consumed on TV auth routes; user remains on explicit recovery UI. | Failed connect restores Server URL field; success advances to login/home state. | Focused TV buttons scale and show a primary/destructive/secondary border; field cursor/focus is visible. | `Reset connection`. | Automated policy/build pass. Manual D-pad blocked by no device. |
+| Login | Username field for normal login; recovery action panel for setup-required/registration-closed fatal login states. | Username -> password -> Sign in -> recovery actions. Fatal states start on recovery actions. | Username center/Enter advances to password; password/sign-in submits credentials; recovery buttons execute their labeled exits. | Consumed on TV auth route to avoid dead-end back navigation. | Failed login restores Username if blank, otherwise Password; success advances to authenticated Home. | Focused action buttons have border/scale; fatal recovery actions autofocus. | Retry, Sign out, Change server, Reset connection. | `TvAuthRecoveryPolicyTest` covers focus/back decisions. Manual D-pad blocked. |
+| PIN-required copy | Home copy appears when authenticated state reports `requiresPinSetup`; focus policy still prefers active media/search/library/recovery rather than the copy text. | Copy is static; D-pad skips it and reaches Home actions, shelves, library, and recovery panels. | No fake PIN setup route is exposed. | Top-level Home Back follows Android system behavior; recovery routes stay explicit. | Existing Home focus restore remains unchanged after copy appears/disappears. | Copy uses primary text color but is not focusable. | Home recovery panel remains reachable: Retry, clear cache, Sign out, Change server, Reset connection as available. | Static copy validated by build. Manual D-pad blocked. |
+| Recovery failures | First enabled recovery action (`Retry`) on `SessionState.RecoverableFailure`. | Vertical action panel order: Retry, Sign out, Change server, Reset connection. | Runs selected recovery operation. | Consumed; no hidden route traps the user behind invalid saved state. | Recovery action panel after retry failure; state transition target after success/sign-out/change/reset. | Focused action uses primary/secondary/destructive styling and border. | Retry, Sign out, Change server, Reset connection. | `TvAuthRecoveryPolicyTest` covers Back consumption. Manual D-pad blocked. |
+| Sign out | The focused `Sign out` action in login/recovery/home recovery panels. | Horizontal/vertical movement follows the action panel containing Sign out. | Clears local session and returns to login/signed-out state. | On login/recovery, Back is consumed; on Home, Android system Back remains available. | Login username field for non-fatal sign-in, or recovery action if server setup prevents login. | Secondary/recovery styled focus ring. | Change server and Reset connection remain available after sign out. | Automated auth/session tests included in TV unit gate. Manual D-pad blocked. |
+| Change server | The focused `Change server` action wherever exposed. | Reached from login/recovery, Home recovery panel, grid recovery actions, detail recovery, and playback error panel. | Enters NoServer/ChangeServer state; saved URL should change only after a successful server check. | Back consumed on server connect route. | Server URL field. | Secondary/settings-exit styled focus ring. | Reset connection is also present on server connect; Retry/Connect validates new URL. | Matrix marks this as a wipe-free recovery path. Manual D-pad blocked. |
+| Reset connection | The focused `Reset connection` destructive action. | Reached from server connect, login/recovery, Home, grid, and detail recovery panels. | Clears saved connection plus server/user-scoped caches; returns to NoServer/ResetConnection without requiring OS app-data wipe. | Back consumed on resulting server connect route. | Server URL field with reset explanatory copy. | Destructive focused button uses error container/border. | Retry/Connect remains available after entering a URL. | Preflight docs and build confirm reset path remains wired. Manual D-pad blocked. |
+| Home | Continue Watching first item when present; otherwise Search; otherwise first library action; otherwise first recovery action (`TvHomeFocusPolicy.initialHomeTarget`). | Vertical scroll traverses title/copy, Home actions, Continue Watching row, shelves, library tabs, chooser, library actions, and recovery panel. Rows move horizontally; shelves/grids keep stable item keys. | Search opens search; poster cards open detail; tabs switch type; library chooser selects library; Browse opens full grid; recovery buttons execute exits. | Authenticated Home has no custom BackHandler; Android system Back/launcher behavior applies. | Last focused Home surface/item if still available, otherwise policy fallback. | TV focusable buttons/cards scale and show primary/secondary/destructive border/elevation. | Retry cache sync, Clear selected cache, Clear all cache, Sign out, Change server, Reset connection as state allows. | `TvFocusRestoreModelTest` covers initial/restore policy. Manual D-pad blocked. |
+| Library chooser | Selected/restored library row when returning to the chooser surface; otherwise first available library in the selected media type. | Left/right across library chips; up/down to library tabs/actions/recovery. | Selects the library id and updates cached count/copy; does not open detail by itself. | On Home, system Back; in full grid, Back returns Home. | Last chooser item if still available; fallback to first enabled library. | Selected library uses primary role; focused chip scales/borders. | Retry selected library, clear selected/all cache, Change server, Reset connection. | Automated model covers restore fallback when item disappears. Manual D-pad blocked. |
+| Full grids | First/restored dense grid card (`grid-cards`) when posters exist; empty state focuses the recovery action panel. | D-pad traverses compact top controls (`grid-top-controls`) and dense poster rows/columns; media type, library chooser, movie sort/filter, and status/recovery actions open modal panels instead of permanent rows or huge-card vertical lists. | Card opens detail; top controls open panels; sort/filter controls update movie ordering/filtering; recovery controls run cache/server exits. | Back dismisses an open grid control panel first; with no panel open, BackHandler returns to Home. | Last visible grid card/control/panel item if still available; disappearing cards move to empty recovery, dismissed panels restore top controls, and returning from detail restores the prior card/surface. | Poster cards use dense media-art focus scale/border; selected top controls and panel actions use primary role. | Retry selected, Retry all, Clear selected cache, Clear all cache, Change server, Reset connection, Diagnostics. | `tv-grid-focus` debug scenario and focused QA/unit tests define the contract; manual D-pad remains blocked without a TV target. |
+| Search | Search text field. | D-pad can reach Back, Retry search, Clear search, then result rows/retry panels. | Text IME Search or Retry re-runs search; result row opens detail; cache-miss retry re-syncs/searches. | BackHandler returns Home. | Returning from detail recreates Search with focus on the text field. | Result rows use `TvFocusableSurface` border/scale; action buttons use TV button focus. | Retry search; cache-miss retry. Change/reset remain available after returning Home. | Search transport/repository tests included in TV gate. Manual D-pad blocked. |
+| Detail | Back button (`detail-back`) auto-focused. | Down reaches artwork/title/watch state, playback/watch actions, and detail recovery panels when missing. | Resume/Start over launches TV player; watch actions mutate progress; retry/clear/change/reset recover missing cache/detail states. | BackHandler returns to the originating surface: Home, Search, or Grid. | Origin surface (`Home`, `Search`, or `Grid`) rather than a stale detail-only target. | Back/action buttons use TV focus styling; artwork/copy are static. | Retry cache sync, Clear selected cache, Change server, Reset connection for missing details; Retry watch state for watch failures. | Detail cache/watch tests included in TV gate. Manual D-pad blocked. |
+| Player controls | TV overlay starts visible with safe focus on Play/Pause. | Left/right across `-10s`, Play/Pause, `+30s`; down/up to Audio/Subtitles row; hidden overlay maps D-pad center/left/right/up/down to play-pause/seek/show-controls. | Center toggles focused control; when hidden, center toggles play/pause and shows controls. | First Back with hidden controls shows controls and restores safe focus; Back with controls visible exits playback; loading/error states Back returns to detail. | Safe Play/Pause control when controls are shown; detail origin after exit. | Focused control scales with white border; progress strip remains visible when controls are shown. | Playback error panel exposes Retry playback when retryable, Back to details, Change server, and Sign out. | `TvPlaybackOverlayReducerTest` covers hidden controls, Back sequencing, picker dismissal, and stopped playback focus. Manual D-pad blocked. |
+| Tracks | Audio/Subtitles buttons in visible player controls; picker initial focus is first selectable option, or Close if no selectable tracks. | D-pad moves through picker options in a bounded list; Close is reachable. | Select applies audio/subtitle choice; Subtitle Off disables text; Close dismisses. | Back dismisses picker and restores safe player focus before any playback exit. | Safe Play/Pause/player control after picker close/selection. | Picker options show focus border; selected option shows check mark/selected background; unsupported options are disabled/dimmed. | Back to details/change server/sign out only through playback error or exiting player. | `PlaybackTrackOptionsTest` and `TvPlaybackOverlayReducerTest` pass in full gate. Manual D-pad blocked. |
+| Dialogs / transient panels | Action-panel or track-picker first enabled action; no non-dismissable TV modal should own focus indefinitely. | D-pad remains within the panel while visible and can reach Close/Back/Retry. | Executes focused panel action. | Dismisses picker/panel where applicable or returns to safe parent focus. | Parent safe focus: player Play/Pause, Search field, Home/Grid remembered surface, or Detail Back. | Focused panel buttons/options have clear border/scale/selected state. | Panel-specific retry/change/server/sign-out/reset actions. | Track picker behavior is unit-covered; manual confirmation blocked. |
+| Errors | Error panel first retry/recovery action; playback loading/error state uses Back to details. | D-pad reaches Retry, Back to details, Change server, Sign out, or screen-specific cache recovery actions. | Runs selected retry/recovery without clearing app data unless explicitly Reset connection/Clear cache. | Returns to safe parent route or is consumed on auth/recovery screens. | Parent route or recovery panel after retry failure. | Error/recovery panels use focused button styling and explicit copy. | Retry, Back to details, Change server, Sign out, Reset connection, cache clear depending on surface. | Recovery/error paths are represented in unit tests and lint/build. Manual D-pad blocked. |
+| Back behavior | Current active surface decides: auth/recovery consumes, grid/search/detail handle Back to parent, player handles two-step Back, top-level Home uses Android system Back. | D-pad is not required for Back, but focus must remain visible after Back-cancel flows. | N/A. | No route should require OS app-data wipe to escape. | Auth field/action, Home/Grid remembered target, Search field, Detail origin, or Player safe control. | Focus reappears on a reachable control after handled Back. | Recovery actions remain visible after handled Back. | Unit coverage exists for auth Back and player Back. Manual D-pad blocked. |
+| Post-reset navigation | After Reset connection, Server URL field with ResetConnection copy. | Enter URL -> Retry/Connect -> login -> Home; recovery actions remain reachable at each step. | Connect validates server, login authenticates, Home resumes normal focus policy. | Back consumed until authenticated; Home then uses system Back. | Server URL after reset/failure; Username/Password after login failure; Home initial target after success. | Same TV focus border/scale as server/login/home rows. | Reset connection can be repeated; Change server/sign-out paths remain explicit after login failures. | Critical data-wipe-class recovery story is documented and wired. Manual D-pad blocked. |
+
+## Emulator / hardware runbook for release readiness
+
+Use this exact shape when an Android TV emulator or physical TV is available:
+
+```bash
+cd mobile/android
+ANDROID_HOME=/home/lowband/Android/Sdk ANDROID_SDK_ROOT=/home/lowband/Android/Sdk ./gradlew :app:assembleTvDebug --no-daemon --stacktrace -Pandroid.aapt2FromMavenOverride=/home/lowband/Android/Sdk/build-tools/35.0.0/aapt2
+adb devices -l
+adb shell getprop ro.build.version.sdk
+adb shell getprop ro.build.version.release
+adb shell getprop ro.product.model
+adb shell wm size
+adb install -r app/build/outputs/apk/tv/debug/app-tv-debug.apk
+adb shell monkey -p com.ferrex.android.tv.debug -c android.intent.category.LEANBACK_LAUNCHER 1
+adb shell input keyevent KEYCODE_DPAD_DOWN
+adb shell input keyevent KEYCODE_DPAD_RIGHT
+adb shell input keyevent KEYCODE_DPAD_CENTER
+adb shell input keyevent KEYCODE_BACK
+```
+
+Record device model, API level, Android release, and resolution for each run. For screenshots/video/logcat, capture only after replacing private server URLs, auth headers, tokens, playback ticket URLs, and identifying account data with redacted placeholders.

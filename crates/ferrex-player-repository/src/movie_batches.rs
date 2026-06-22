@@ -1,3 +1,8 @@
+//! Movie-batch cache and index structures.
+//!
+//! Movie batch caches keep large library movie lists addressable by batch id
+//! while preserving archived payload access for efficient UI browsing.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

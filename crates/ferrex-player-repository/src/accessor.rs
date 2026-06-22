@@ -1,3 +1,9 @@
+//! Typed accessors for shared media repository handles.
+//!
+//! Accessors encode read-only versus read/write capabilities at the type level so
+//! domain crates can share repository state without handing every caller mutable
+//! access.
+
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::marker::PhantomData;

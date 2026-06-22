@@ -1,3 +1,10 @@
+//! Core movie, series, season, and episode reference DTOs.
+//!
+//! References in this module are the compact media shapes used for library
+//! listings, caches, API responses, and player navigation. They carry stable ids,
+//! endpoints, metadata summaries, and file links without owning server runtime
+//! dependencies.
+
 use super::{
     files::MediaFile,
     ids::{EpisodeID, LibraryId, MovieBatchId, MovieID, SeasonID, SeriesID},

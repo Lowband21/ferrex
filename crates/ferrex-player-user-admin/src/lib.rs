@@ -5,7 +5,9 @@
 
 #![forbid(unsafe_code)]
 
+/// User-administration message types.
 pub mod messages;
+/// UI-agnostic user-administration reducers and effects.
 pub mod update;
 
 use ferrex_core::player_prelude::UserPermissions;

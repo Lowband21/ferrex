@@ -1,5 +1,10 @@
+//! Runtime configuration model types shared by `ferrexctl` and `ferrex-server`.
+
+/// Rate-limit config models.
 pub mod rate_limits;
+/// Scanner config models.
 pub mod scanner;
+/// Value-source metadata for configuration diagnostics.
 pub mod sources;
 
 use crate::constants::{DEFAULT_PASSWORD_PEPPER, DEFAULT_TOKEN_KEY};

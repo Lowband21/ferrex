@@ -1,3 +1,8 @@
+//! UI-agnostic library update logic.
+//!
+//! Reducers in this module mutate `LibraryDomainState` and produce domain tasks
+//! without depending on the desktop player's root state or view layer.
+
 use crate::{
     LibrariesLoadState,
     messages::LibraryMessage,

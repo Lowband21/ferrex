@@ -1,3 +1,5 @@
+//! Errors returned while composing Ferrex runtime configuration.
+
 use super::super::validation::ConfigGuardRailError;
 
 use std::path::PathBuf;

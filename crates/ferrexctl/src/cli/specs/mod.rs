@@ -1,3 +1,9 @@
+//! Declarative command specs for init/check stack orchestration.
+//!
+//! Specs make CLI orchestration testable by describing commands, environment,
+//! working directories, and expected readiness checks before processes are run.
+
+/// Initial setup command specification helpers.
 pub mod init_spec;
 
 use crate::{

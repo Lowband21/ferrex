@@ -1,3 +1,8 @@
+//! Transcoding job status and progress response DTOs.
+//!
+//! Server APIs use these shapes to report queued/running/completed transcode
+//! work and clients use them to render playback preparation progress.
+
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TranscodingJobResponse {

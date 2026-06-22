@@ -1,3 +1,9 @@
+//! Concrete authentication manager for player clients.
+//!
+//! The manager coordinates server login, local encrypted storage, device identity,
+//! token refresh, setup claims, and recovery/reset behavior behind the
+//! `AuthService` trait.
+
 use crate::dto::UserListItemDto;
 use crate::errors::{
     AuthError, AuthResult, DeviceError, NetworkError, StorageError, TokenError,

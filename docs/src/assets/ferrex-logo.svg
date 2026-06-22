@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+  <title id="title">Ferrex mark</title>
+  <desc id="desc">A stylized media frame with a play triangle and warm accent glow.</desc>
+  <defs>
+    <linearGradient id="ferrex-frame" x1="12" y1="12" x2="84" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fb923c" />
+      <stop offset="0.52" stop-color="#f97316" />
+      <stop offset="1" stop-color="#0ea5e9" />
+    </linearGradient>
+    <linearGradient id="ferrex-play" x1="38" y1="31" x2="65" y2="65" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7ed" />
+      <stop offset="1" stop-color="#bae6fd" />
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="24" fill="#111827" />
+  <rect x="15" y="20" width="66" height="56" rx="14" fill="none" stroke="url(#ferrex-frame)" stroke-width="7" />
+  <path d="M41 34.5c0-2.3 2.5-3.7 4.5-2.5l23 13.5c2 1.2 2 4.1 0 5.3l-23 13.5c-2 1.2-4.5-.2-4.5-2.5V34.5Z" fill="url(#ferrex-play)" />
+  <path d="M25 69h46" stroke="#fed7aa" stroke-width="4" stroke-linecap="round" opacity="0.68" />
+</svg>

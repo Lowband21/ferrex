@@ -1,0 +1,59 @@
+---
+title: Documentation map
+description: How Ferrex documentation is organized across operator, developer, reference, and release material.
+sidebar:
+  order: 1
+  label: Map
+---
+
+Ferrex documentation is organized by the job a reader is trying to complete. Use the role lanes below instead of browsing the old flat Markdown directory.
+
+## Reader lanes
+
+### Operators
+
+Operators need safe setup, configuration, security, playback behavior, and recovery guidance. Start with:
+
+- [Configuration](/operator/configuration/)
+- [Authentication security model](/operator/auth-security/)
+- [Unraid deployment notes](/operator/unraid/)
+- [Demo mode](/operator/demo-mode/)
+- [FAQ](/operator/faq/)
+
+### Developers
+
+Developers need repository setup, architecture boundaries, validation commands, generated contracts, and client-specific workflows. Start with:
+
+- [Architecture](/developer/architecture/)
+- [Player dependency boundaries](/developer/player-dependency-boundaries/)
+- [UI testing workflow](/developer/ui-testing-workflow/)
+- [SQLx dynamic query policy and allowlist](/developer/sqlx-dynamic-query-allowlist/)
+- [Disposable SQLx PostgreSQL workflow](/developer/sqlx-postgres-workflow/)
+
+### Reference readers
+
+Reference material is stable, searchable, and specific: contracts, policies, workflow inventories, path maps, compatibility notes, and dated QA evidence. Start with:
+
+- [Mobile contracts](/reference/mobile/)
+- [QA and evidence](/reference/qa/)
+- [Project policies](/reference/project-policies/)
+- [Crate README inventory](/reference/crate-readmes/)
+- [Legacy Markdown pointers](/reference/existing-docs/)
+
+### Release maintainers
+
+Release documentation covers packaging targets, preflight checks, changelog expectations, and promotion from development integration to stable release channels. Start with [Release and packaging](/release/) and [Flathub submission guide](/release/flathub-submission/).
+
+## Adding a page
+
+1. Choose the reader lane before choosing a filename.
+2. Add the page under `src/content/docs/<lane>/` with a concise `title`, `description`, and `sidebar.order`.
+3. Link to Starlight pages for migrated docs; link to canonical repository files only when GitHub or package tooling expects those files to remain authoritative.
+4. Include verification commands or recovery steps on pages that change how a user operates Ferrex.
+5. Run the documented local checks from the repository root:
+
+```bash
+pnpm --dir docs install --frozen-lockfile
+pnpm --dir docs run check
+pnpm --dir docs run build
+```

@@ -1,3 +1,8 @@
+//! Packaging and release metadata loaded from `packaging.toml`.
+//!
+//! These structs describe Flatpak, preflight, version, and release settings used
+//! by tooling before artifacts are built or published.
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;

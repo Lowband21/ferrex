@@ -1,3 +1,9 @@
+//! Media-root browser state and helpers.
+//!
+//! The browser tracks server directory listings, breadcrumbs, selected roots,
+//! loading/error state, and recovery-friendly retry/reset behavior for choosing
+//! library scan paths.
+
 use ferrex_core::player_prelude::{
     MediaRootBreadcrumb, MediaRootBrowseResponse, MediaRootEntry,
 };

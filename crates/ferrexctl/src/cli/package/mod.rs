@@ -1,3 +1,8 @@
+//! Packaging commands for Flatpak and release preflight workflows.
+//!
+//! These helpers are used by the CLI to verify packaging prerequisites, create
+//! source archives, and build `ferrex-player` Flatpak artifacts.
+
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use sha2::{Digest, Sha256};

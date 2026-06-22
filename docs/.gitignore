@@ -1,0 +1,10 @@
+# Astro/Starlight local artifacts
+.astro/
+dist/
+
+# Package manager install output
+node_modules/
+
+# The repository root ignores *.ts as media files; the docs app needs TypeScript config files.
+!src/**/*.ts
+!src/**/*.d.ts

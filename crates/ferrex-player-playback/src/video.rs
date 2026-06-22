@@ -1,3 +1,8 @@
+//! Video backend wiring and stream URL handling.
+//!
+//! This module coordinates the unified video backend, stream URL redaction,
+//! loading flags, and playback state transitions around media file playback.
+
 use crate::{
     PlayerMessage,
     diagnostics::redact_playback_url,

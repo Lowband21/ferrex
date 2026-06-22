@@ -1,3 +1,8 @@
+//! Sum type over concrete movie, series, season, and episode ids.
+//!
+//! `MediaID` is the shared key used when callers need to address any playable or
+//! browsable media entity without erasing the underlying media category.
+
 use crate::{
     ids::{EpisodeID, MovieID, SeasonID, SeriesID},
     media_type::VideoMediaType,

@@ -1,0 +1,38 @@
+---
+title: "Legacy Markdown pointers"
+description: "Map from old repository Markdown paths to their canonical Starlight pages after the documentation migration."
+sidebar:
+  order: 6
+---
+
+The old flat Markdown notes now act as lightweight pointers. This lets existing inbound repository, issue, and review links continue to land somewhere useful while preventing duplicate long-form content from drifting away from the Starlight site.
+
+## Migrated `docs/*.md` paths
+
+| Legacy path | Canonical Starlight page |
+| --- | --- |
+| `docs/architecture.md` | [Architecture](/developer/architecture/) |
+| `docs/auth-security.md` | [Authentication security model](/operator/auth-security/) |
+| `docs/configuration.md` | [Configuration](/operator/configuration/) |
+| `docs/demo-mode.md` | [Demo mode](/operator/demo-mode/) |
+| `docs/faq.md` | [FAQ](/operator/faq/) |
+| `docs/intelligence-foundation.md` | [Phase 1 intelligence foundation](/developer/intelligence-foundation/) |
+| `docs/mobile-device-auth-flatbuffers.md` | [Mobile device-auth FlatBuffers contract](/reference/mobile/device-auth-flatbuffers/) |
+| `docs/playback-auth-regression-qa.md` | [Playback auth regression QA](/reference/qa/playback-auth-regression/) |
+| `docs/player-dependency-boundaries.md` | [Player dependency boundaries](/developer/player-dependency-boundaries/) |
+| `docs/sqlx-dynamic-query-allowlist.md` | [SQLx dynamic query policy and allowlist](/developer/sqlx-dynamic-query-allowlist/) |
+| `docs/sqlx-postgres-workflow.md` | [Disposable SQLx PostgreSQL workflow](/developer/sqlx-postgres-workflow/) |
+| `docs/ui-testing-workflow.md` | [UI testing workflow](/developer/ui-testing-workflow/) |
+| `docs/unraid.md` | [Unraid deployment notes](/operator/unraid/) |
+
+## Migrated package docs
+
+| Legacy path | Canonical Starlight page |
+| --- | --- |
+| `packaging/flathub/README.md` | [Flathub submission guide](/release/flathub-submission/) |
+
+## Canonical files intentionally not migrated
+
+- `.github/CONTRIBUTING.md`, `.github/SECURITY.md`, `.github/TRADEMARKS.md`, and `.github/CODE_OF_CONDUCT.md` remain canonical GitHub policy files. See [Project policies](/reference/project-policies/).
+- Crate/package READMEs remain canonical at package paths. See [Crate README inventory](/reference/crate-readmes/).
+- `docs/bench_results/*.json` remain benchmark data artifacts and are not rendered as guide pages.

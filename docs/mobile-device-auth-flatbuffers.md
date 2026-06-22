@@ -1,5 +1,8 @@
-# Mobile device-auth FlatBuffers contract
+# Moved: Mobile device-auth FlatBuffers contract
 
-`mobile/shared/schemas/auth.fbs` defines the mobile DTOs for the device password-login, PIN challenge/login, device status, device-management summary, and known-device profile-selection flows. Rust bindings are generated into `ferrex-flatbuffers`; Kotlin bindings are generated on demand for Android/TV by `mobile/shared/codegen/generate-kotlin.sh`.
+This legacy Markdown path has moved into the Starlight documentation tree. Do not add new content here; update the Starlight page so the public site and repository source stay in sync.
 
-As of this contract slice, Ferrex server device-auth endpoints (`/api/v1/auth/device/login`, `/pin`, `/pin/challenge`, and `/known-users`) still use JSON extractors and do not participate in request/response content negotiation. The FlatBuffers schema is therefore a shared client contract for follow-up mobile work; server-side FlatBuffers handler tests should be added when those endpoints accept `application/x-flatbuffers`.
+- Public docs: <https://ferrexmedia.org/reference/mobile/device-auth-flatbuffers/>
+- Source page: `docs/src/content/docs/reference/mobile/device-auth-flatbuffers.md`
+
+Existing inbound repository links can keep using this pointer during the migration, but new links should target the public docs page or the Starlight source page.

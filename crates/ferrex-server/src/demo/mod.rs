@@ -1,3 +1,10 @@
+//! Demo-mode coordinator for seeded Ferrex libraries.
+//!
+//! Demo mode creates disposable libraries, users, and media-file placeholders for
+//! screenshots and exploratory testing. The coordinator keeps all generated
+//! paths under the configured demo root and exposes reset/resize operations used
+//! by admin handlers.
+
 pub use crate::db::derive_demo_database_url;
 use crate::infra::scan::scan_manager::ScanControlPlane;
 use crate::infra::{app_state::AppState, config::Config};
@@ -31,6 +38,7 @@ use resize::{
     remove_item_subtree, structure_nodes_to_paths,
 };
 
+/// Source of filesystem seed plans for demo libraries.
 #[async_trait]
 pub trait DemoPlanProvider: Send + Sync {
     async fn generate_plan(
@@ -80,6 +88,7 @@ pub trait DemoPlanProvider: Send + Sync {
     }
 }
 
+/// Optional movie/series count overrides for demo reset requests.
 #[derive(Debug, Clone, Default)]
 pub struct DemoSizeOverrides {
     pub movie_count: Option<usize>,
@@ -95,6 +104,7 @@ impl From<DemoResetRequest> for DemoSizeOverrides {
     }
 }
 
+/// Demo plan provider backed by TMDB metadata lookups.
 #[derive(Debug)]
 pub struct TmdbPlanProvider {
     tmdb: Arc<TmdbApiProvider>,
@@ -171,6 +181,7 @@ impl DemoPlanProvider for TmdbPlanProvider {
     }
 }
 
+/// Stateful coordinator for creating, resetting, and resizing demo libraries.
 pub struct DemoCoordinator {
     options: Arc<Mutex<DemoSeedOptions>>,
     plan: Mutex<demo::DemoSeedPlan>,

@@ -1,3 +1,8 @@
+//! Thread-safe yoke cache for archived media payloads.
+//!
+//! The cache keeps recently used archived byte buffers alive while exposing
+//! borrowed archived model references to repository callers.
+
 use parking_lot::RwLock;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

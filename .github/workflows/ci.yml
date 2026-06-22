@@ -18,6 +18,29 @@ env:
   SQLX_OFFLINE: "true"
 
 jobs:
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install docs dependencies
+        run: corepack pnpm --dir docs install --frozen-lockfile
+
+      - name: Check docs app
+        run: corepack pnpm --dir docs run check
+
+      - name: Build docs site
+        run: corepack pnpm --dir docs run build
+
   sqlx-enforcement:
     name: SQLx enforcement
     runs-on: ubuntu-latest

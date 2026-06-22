@@ -8,10 +8,15 @@
 //! `ferrex-player` keeps the installed binary name and re-exports this crate as
 //! a compatibility facade for historical `ferrex_player::*` imports.
 
+/// Iced application boot/runtime composition.
 pub mod app;
+/// Screenshot capture helpers used by QA and tooling.
 pub mod screenshot;
+/// App-shell subscription composition.
 pub mod subscriptions;
+/// App-shell update routing across domains.
 pub mod update;
+/// App-shell view composition.
 pub mod view;
 
 /// Compatibility re-export of shared player utilities and message types.

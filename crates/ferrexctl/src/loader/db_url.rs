@@ -143,7 +143,7 @@ pub fn read_secret_file(
 /// Resolve the effective PostgreSQL connection URL and the source used.
 ///
 /// This first prefers `config.database.primary_url` as produced by
-/// [`ConfigLoader`]. When that is absent or empty, it falls back to
+/// [`super::ConfigLoader`]. When that is absent or empty, it falls back to
 /// environment-only configuration by checking `PGDATABASE` and then
 /// `DATABASE_NAME`, returning a simple `postgresql:///<db>` URL when set.
 pub fn resolve_effective_database_url_with_source(

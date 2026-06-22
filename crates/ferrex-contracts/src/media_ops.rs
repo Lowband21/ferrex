@@ -15,25 +15,27 @@ use ferrex_model::{
 
 use std::time::Duration;
 
-/// Common interface for all media reference types
+/// Common interface for all media reference types.
 pub trait MediaOps: Send + Sync {
+    /// Identifier wrapper used by this reference type.
     type Id: MediaIDLike;
 
+    /// Return the type-specific id for this reference.
     fn id(&self) -> Self::Id;
 
-    /// Get the unique media ID
+    /// Get the unique media ID.
     fn media_id(&self) -> MediaID;
 
-    /// Get theme color if available
+    /// Get theme color if available.
     fn theme_color(&self) -> Option<&str>;
 
-    /// Get the API endpoint
+    /// Get the API endpoint.
     fn endpoint(&self) -> String;
 }
 
-/// Specialized trait for media that can be played
+/// Specialized trait for media that can be played.
 pub trait Playable: MediaOps {
-    /// Get the media file
+    /// Get the media file.
     fn file(&self) -> &MediaFile;
 
     /// Get duration if available from metadata
@@ -52,23 +54,24 @@ pub trait Playable: MediaOps {
     }
 }
 
+/// Specialized trait for media references that expose display metadata.
 pub trait Details: MediaOps {
-    /// Get release/air year if available
+    /// Get release/air year if available.
     fn year(&self) -> Option<u16>;
 
-    /// Get rating if available
+    /// Get rating if available.
     fn rating(&self) -> Option<f32>;
 
-    /// Get genres if available
+    /// Get genres if available.
     fn genres(&self) -> Option<&Vec<String>>;
 }
 
-/// Specialized trait for media that contains other media
+/// Specialized trait for media that contains other media.
 pub trait Browsable: MediaOps {
-    /// Get the number of child items if known
+    /// Get the number of child items if known.
     fn child_count(&self) -> Option<u16>;
 
-    /// Get the library ID this media belongs to
+    /// Get the library ID this media belongs to.
     fn library_id(&self) -> LibraryId;
 }
 

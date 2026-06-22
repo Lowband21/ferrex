@@ -1,0 +1,30 @@
+---
+title: Content standards
+description: Writing standards for Ferrex documentation pages, including scope, audience, and validation evidence.
+sidebar:
+  order: 2
+---
+
+Ferrex documentation should read like operating guidance, not a changelog of implementation steps. Each page should make its audience, scope, and validation path clear.
+
+## Required shape for durable guides
+
+Every durable guide should include:
+
+- **Audience:** operator, developer, release maintainer, or contributor.
+- **Scope:** the part of Ferrex covered by the page and the part intentionally left to another page.
+- **Inputs:** files, environment variables, services, generated contracts, or commands the reader needs before starting.
+- **Procedure or model:** the sequence of steps or the mental model that makes the feature understandable.
+- **Validation:** commands, screenshots, logs, or state checks that prove the procedure worked.
+- **Recovery:** how to retry or back out when the page changes data, client state, server state, generated files, or caches.
+
+## Linking rules
+
+- Link to Starlight pages for maintained docs-site content.
+- Use repository paths for source files and existing markdown that remain authoritative.
+- Prefer stable paths over branch-specific URLs in prose; the global edit-link configuration already points at the `dev` branch for page edits.
+- Keep external hosting, DNS, secrets, and deployment-provider instructions out of this app until the deployment plan is approved.
+
+## Search metadata
+
+Page titles should match the phrase a reader would search for. Descriptions should summarize the problem solved by the page in one sentence. This keeps Starlight's Pagefind index useful without hand-maintained keyword lists.

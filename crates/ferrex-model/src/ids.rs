@@ -1,3 +1,9 @@
+//! Strongly typed UUID identifiers for Ferrex model entities.
+//!
+//! Newtype wrappers distinguish movies, series, seasons, episodes, libraries,
+//! and batch cursors at compile time while preserving UUID interoperability for
+//! storage and API contracts.
+
 use crate::error::ModelError as MediaError;
 use std::num::NonZeroU32;
 use uuid::Uuid;

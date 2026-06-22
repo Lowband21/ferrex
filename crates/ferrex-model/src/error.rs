@@ -1,3 +1,8 @@
+//! Model-layer error types.
+//!
+//! Constructors and validation helpers return these errors when API inputs,
+//! identifiers, titles, or normalized keys do not meet model invariants.
+
 use std::fmt::{self, Display};
 
 /// Errors produced by model constructors and validation routines.

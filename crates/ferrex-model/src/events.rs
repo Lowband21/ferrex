@@ -1,3 +1,8 @@
+//! Generic event envelope and event-kind helpers.
+//!
+//! Runtime publishers use these types to label media events with stable string
+//! kinds while keeping strongly typed payloads in the model layer.
+
 use std::{fmt, str::FromStr};
 
 use crate::media_events::MediaEvent;

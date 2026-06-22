@@ -1,0 +1,44 @@
+---
+title: "Ferrex documentation"
+description: "Entry point for Ferrex operator, developer, reference, and release documentation."
+sidebar:
+  order: 1
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+Ferrex combines a Rust media server, native desktop playback, Android and Android TV clients, packaging, and generated mobile contracts. This site is the canonical public documentation target at `https://ferrexmedia.org/`.
+
+<CardGrid>
+  <Card title="Operate Ferrex" icon="setting" href="/operator/configuration/">
+    Configure self-hosted deployments, understand auth/security behavior, run demo mode, and find recovery-oriented answers.
+  </Card>
+  <Card title="Build and extend" icon="rocket" href="/developer/architecture/">
+    Navigate the Rust workspace, player crate boundaries, UI testing, and SQLx workflows used by contributors.
+  </Card>
+  <Card title="Mobile and QA reference" icon="document" href="/reference/qa/">
+    Find Android/TV QA packets, playback/auth evidence, visual accessibility runbooks, and mobile FlatBuffers contracts.
+  </Card>
+  <Card title="Release and packaging" icon="star" href="/release/flathub-submission/">
+    Follow packaging references such as the Flathub submission guide and release-preflight source material.
+  </Card>
+</CardGrid>
+
+## Start with your role
+
+| Reader goal | Go to |
+| --- | --- |
+| Run Ferrex locally or self-host it | [Configuration](/operator/configuration/) |
+| Check deployment/security assumptions | [Authentication security model](/operator/auth-security/) and [project policies](/reference/project-policies/) |
+| Understand the codebase | [Architecture](/developer/architecture/) |
+| Change desktop player crates or UI | [Player dependency boundaries](/developer/player-dependency-boundaries/) and [UI testing workflow](/developer/ui-testing-workflow/) |
+| Work on database/query metadata | [SQLx dynamic query policy](/developer/sqlx-dynamic-query-allowlist/) and [SQLx PostgreSQL workflow](/developer/sqlx-postgres-workflow/) |
+| Review Android/TV readiness | [QA and evidence reference](/reference/qa/) |
+| Work with mobile generated contracts | [Mobile device-auth FlatBuffers contract](/reference/mobile/device-auth-flatbuffers/) |
+
+## Site conventions
+
+- Operator pages explain observable behavior, configuration, recovery paths, and validation commands before implementation details.
+- Developer pages link architecture decisions to the crates, scripts, tests, and Nix shells that enforce them.
+- Reference pages preserve dated QA evidence and canonical repository documents with explicit status labels so reviewers can tell current guidance from historical packets.
+- Release pages summarize packaging workflows while leaving deployment, DNS, and secret-dependent hosting automation to separate approved work.

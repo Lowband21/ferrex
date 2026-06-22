@@ -1,0 +1,23 @@
+---
+title: "Operator guide"
+description: "Setup, configuration, security, recovery, demo, Unraid, and FAQ documentation for running Ferrex."
+sidebar:
+  order: 1
+  label: "Overview"
+---
+
+The operator guide is the home for running Ferrex safely. It prioritizes configuration, user data, recovery paths, and observable service behavior over implementation internals.
+
+## Core operator pages
+
+| Page | Use it for |
+| --- | --- |
+| [Configuration](/operator/configuration/) | `.env`, Compose overlays, Nix shells, scanner policy, logging, TLS, and safe defaults. |
+| [Authentication security model](/operator/auth-security/) | Password sessions, device PIN sessions, remember-device trust, lockout, revoke, and no-wipe recovery. |
+| [Unraid deployment notes](/operator/unraid/) | Compose-first Unraid setup, appdata paths, `PUID`/`PGID`, and the performance overlay. |
+| [Demo mode](/operator/demo-mode/) | Disposable synthetic media libraries, demo credentials, reset endpoints, and demo caveats. |
+| [FAQ](/operator/faq/) | Short answers for platform support, HDR, MPV hand-off, SQLx errors, logging, demo mode, and UI tests. |
+
+## Recovery-first rule
+
+Any operator-facing change should document how to retry, reset, or recover without deleting more data than intended. Android and Android TV recovery guidance in the QA reference is especially strict: data-wipe-class problems should be treated as release blockers until a no-wipe exit exists.

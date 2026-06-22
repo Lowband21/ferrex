@@ -1,3 +1,8 @@
+//! UI-facing filter value objects for library browsing.
+//!
+//! These enums keep genre, decade, resolution, and watch-status filter labels
+//! consistent across server query DTOs and player presentation code.
+
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

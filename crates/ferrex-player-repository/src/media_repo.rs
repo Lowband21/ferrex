@@ -1,3 +1,8 @@
+//! In-memory media repository indexes and lookup helpers.
+//!
+//! The repository stores library media references, movie batch indexes, series
+//! bundle indexes, and watch-state-friendly lookup structures for player domains.
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 

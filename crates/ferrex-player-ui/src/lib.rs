@@ -8,11 +8,17 @@
 //! UI/domain surfaces for compatibility. The `ferrex-player` package keeps the
 //! installed binary/facade.
 
-/// Core module declaration as library to enable application module reuse in tests.
+/// Common UI messages, helpers, and presentation primitives.
 pub mod common;
+/// UI-facing domain modules and compatibility surfaces.
 pub mod domains;
+/// UI infrastructure such as shader widgets, testing helpers, and services.
 pub mod infra;
+/// Central UI state facade used by views and reducers.
 pub mod state;
+/// UI subscription helpers.
 pub mod subscriptions;
+/// UI update/routing helpers.
 pub mod update;
+/// Iced view modules and widgets.
 pub mod view;

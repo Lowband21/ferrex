@@ -1,3 +1,8 @@
+//! UI-agnostic media/watch-state reducer logic.
+//!
+//! Reducers mutate `MediaDomainState` and emit domain tasks while leaving
+//! concrete UI effects to the app shell.
+
 use crate::{MediaDomainState, messages::MediaMessage};
 use ferrex_core::player_prelude::{
     EpisodeKey, MediaID, MediaIDLike, UpdateProgressRequest, UserWatchState,

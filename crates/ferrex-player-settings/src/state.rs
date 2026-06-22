@@ -1,3 +1,8 @@
+//! Unified settings state and section enums.
+//!
+//! State in this module is UI-renderable but UI-framework agnostic, allowing
+//! settings reducers to own form values, validation flags, and section grouping.
+
 use ferrex_core::player_prelude::UserScale;
 
 use ferrex_player_auth::security::secure_credential::SecureCredential;

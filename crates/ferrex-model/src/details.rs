@@ -1,3 +1,9 @@
+//! Rich media detail records sourced from metadata providers.
+//!
+//! These structs capture TMDB-style movie, series, season, episode, credit,
+//! release, and localization details used by server persistence and client
+//! presentation surfaces.
+
 use crate::image::MediaImages;
 use std::fmt;
 use std::path::PathBuf;

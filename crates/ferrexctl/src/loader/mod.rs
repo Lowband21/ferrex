@@ -1,3 +1,9 @@
+//! Configuration loading from environment, `.env`, and generated defaults.
+//!
+//! The loader tracks which source provided each value so warnings can explain
+//! whether settings came from managed defaults, user overrides, or process env.
+
+/// Database URL parsing and normalization helpers.
 pub mod db_url;
 
 use super::{
@@ -18,12 +24,14 @@ use crate::{
 use std::path::{Path, PathBuf};
 use tracing::error;
 
+/// Options that control where configuration is loaded from.
 #[derive(Debug, Default, Clone)]
 pub struct ConfigLoaderOptions {
     pub config_path: Option<PathBuf>,
     pub env_file: Option<PathBuf>,
 }
 
+/// Loader that composes environment, `.env`, defaults, and warnings into a config snapshot.
 #[derive(Debug, Default)]
 pub struct ConfigLoader {
     options: ConfigLoaderOptions,
@@ -383,6 +391,7 @@ mod tests {
     }
 }
 
+/// Error types returned by configuration loading.
 pub mod error;
 
 fn default_cors_origins() -> Vec<String> {
@@ -411,6 +420,7 @@ fn default_cors_headers() -> Vec<String> {
     ]
 }
 
+/// Result of loading configuration and non-fatal warnings.
 #[derive(Debug)]
 pub struct ConfigLoad {
     pub config: Config,

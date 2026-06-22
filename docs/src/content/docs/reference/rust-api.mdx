@@ -1,0 +1,57 @@
+---
+title: Rust API and crate map
+description: Workspace crate responsibilities, public API boundaries, and rustdoc entry points for Ferrex maintainers.
+sidebar:
+  order: 3
+---
+
+Ferrex's Rust workspace is split into reusable model/core crates, the HTTP server, configuration tooling, and extracted desktop-player domain crates. Use this map when deciding where a public type should live, where rustdoc should point reviewers, and which crate owns a boundary.
+
+## Build local rustdoc
+
+Run local API documentation from the repository root:
+
+```bash
+cargo doc --workspace --no-deps --all-features
+```
+
+The generated entry point is `target/doc/ferrex_core/index.html` and the crate list in the rustdoc sidebar should match the workspace members listed below. Canonical docs.rs links are included for packages that are published or will be published under the current package names.
+
+## Foundational crates
+
+| Crate | Manifest | Responsibility | Key public surfaces | Rustdoc |
+| --- | --- | --- | --- | --- |
+| `ferrex-model` | `crates/ferrex-model/Cargo.toml` | Dependency-light data models shared by server, player, FlatBuffers, and tooling. | `Media`, `Library`, typed ids, details, image DTOs, scan events, watch-state DTOs, `prelude`. | [docs.rs](https://docs.rs/ferrex-model/latest/ferrex_model/) |
+| `ferrex-contracts` | `crates/ferrex-contracts/Cargo.toml` | Trait layer over `ferrex-model` values and rkyv archives. | `MediaIDLike`, `MediaOps`, `MediaLike`, `Playable`, `Browsable`, `prelude`. | [docs.rs](https://docs.rs/ferrex-contracts/latest/ferrex_contracts/) |
+| `ferrex-core` | `crates/ferrex-core/Cargo.toml` | Reusable domain, API DTOs, query layer, database ports, and application facades. | `api`, `domain`, `query`, `database`, `player_prelude`, `types`, `traits`. | [docs.rs](https://docs.rs/ferrex-core/latest/ferrex_core/) |
+| `ferrex-flatbuffers` | `crates/ferrex-flatbuffers/Cargo.toml` | Rust side of the mobile FlatBuffers contract. | `fb` generated namespace, `conversions`, `uuid_helpers`, `FLATBUFFERS_MIME`. | [docs.rs](https://docs.rs/ferrex-flatbuffers/latest/ferrex_flatbuffers/) |
+| `ferrexctl` | `crates/ferrexctl/Cargo.toml` | Shared config bootstrapper and CLI library used by tooling and server startup. | `ConfigLoader`, config model re-exports, validation warnings, packaging config, runner helpers. | [docs.rs](https://docs.rs/ferrexctl/latest/ferrexctl/) |
+| `ferrex-server` | `crates/ferrex-server/Cargo.toml` | Axum HTTP server composition around core domain crates. | `application`, `handlers`, `infra`, `routes`, database URL guards, demo coordinator. | [docs.rs](https://docs.rs/ferrex-server/latest/ferrex_server/) |
+
+## Desktop player crates
+
+The desktop player has been split so reusable domains do not depend on the final UI shell. See `docs/player-dependency-boundaries.md` for the dependency policy.
+
+| Crate | Manifest | Responsibility | Key public surfaces | Rustdoc |
+| --- | --- | --- | --- | --- |
+| `ferrex-player-foundation` | `crates/ferrex-player-foundation/Cargo.toml` | Dependency-light primitives at the bottom of the player stack. | Auth policy DTOs, `DomainTask`, repository errors, unit helpers. | [docs.rs](https://docs.rs/ferrex-player-foundation/latest/ferrex_player_foundation/) |
+| `ferrex-player-api` | `crates/ferrex-player-api/Cargo.toml` | HTTP client, service traits, API adapters, and player-facing DTO exports. | `ApiClient`, `ApiClientAdapter`, `api_types`, `AuthService`-adjacent API DTOs, service traits. | [docs.rs](https://docs.rs/ferrex-player-api/latest/ferrex_player_api/) |
+| `ferrex-player-auth` | `crates/ferrex-player-auth/Cargo.toml` | Authentication state, local encrypted storage, device identity, PIN policy, and auth service adapter. | `AuthDomainState`, `AuthService`, `AuthManager`, auth DTO/error re-exports. | [docs.rs](https://docs.rs/ferrex-player-auth/latest/ferrex_player_auth/) |
+| `ferrex-player-repository` | `crates/ferrex-player-repository/Cargo.toml` | Player media repository, disk cache, yoke-backed archived snapshots, and typed repository accessors. | `Accessor`, `MediaRepo`, cache types, `MaybeYoked`, yoke aliases. | [docs.rs](https://docs.rs/ferrex-player-repository/latest/ferrex_player_repository/) |
+| `ferrex-player-library` | `crates/ferrex-player-library/Cargo.toml` | Library domain state, scan/media subscriptions, library forms, and repository compatibility exports. | `LibraryDomainState`, `LibraryDomain`, `LibrariesLoadState`, scan tracking helpers. | [docs.rs](https://docs.rs/ferrex-player-library/latest/ferrex_player_library/) |
+| `ferrex-player-media` | `crates/ferrex-player-media/Cargo.toml` | Current media selection, season details, cached watch state, and progress helpers. | `MediaDomainState`, `MediaDomain`, watch-progress selectors and messages. | [docs.rs](https://docs.rs/ferrex-player-media/latest/ferrex_player_media/) |
+| `ferrex-player-metadata` | `crates/ferrex-player-metadata/Cargo.toml` | Non-UI metadata constants and future shared metadata contracts. | Image retry and cache-budget constants. | [docs.rs](https://docs.rs/ferrex-player-metadata/latest/ferrex_player_metadata/) |
+| `ferrex-player-playback` | `crates/ferrex-player-playback/Cargo.toml` | Playback state machine, video backend wiring, controls, track selection, and diagnostics. | `PlayerDomainState`, `PlayerDomain`, `PlayerMessage`, `redact_playback_url`. | [docs.rs](https://docs.rs/ferrex-player-playback/latest/ferrex_player_playback/) |
+| `ferrex-player-search` | `crates/ferrex-player-search/Cargo.toml` | Search state, service strategy selection, calibration, metrics, and 10-foot keyboard model. | `SearchDomain`, `SearchState`, `SearchService`, keyboard types, search events. | [docs.rs](https://docs.rs/ferrex-player-search/latest/ferrex_player_search/) |
+| `ferrex-player-settings` | `crates/ferrex-player-settings/Cargo.toml` | Settings state, section messages, view-model DTOs, and UI-agnostic reducers. | `SettingsDomainState`, `SettingsSection`, color/scale re-exports. | [docs.rs](https://docs.rs/ferrex-player-settings/latest/ferrex_player_settings/) |
+| `ferrex-player-user-admin` | `crates/ferrex-player-user-admin/Cargo.toml` | Admin user-management state, messages, and reducers. | `UserManagementDomainState`, `UserManagementMessage`, update effects. | [docs.rs](https://docs.rs/ferrex-player-user-admin/latest/ferrex_player_user_admin/) |
+| `ferrex-player-ui` | `crates/ferrex-player-ui/Cargo.toml` | Iced UI surfaces, widgets, shader assets, themes, and 10-foot views. | `common`, `domains`, `infra`, `state`, `view`. | [docs.rs](https://docs.rs/ferrex-player-ui/latest/ferrex_player_ui/) |
+| `ferrex-player-app` | `crates/ferrex-player-app/Cargo.toml` | Runtime application shell that assembles UI/domain/API crates. | `AppConfig`, `run`, `State`, compatibility shell modules. | [docs.rs](https://docs.rs/ferrex-player-app/latest/ferrex_player_app/) |
+| `ferrex-player` | `crates/ferrex-player/Cargo.toml` | Installed desktop-player package and compatibility facade. | Re-exports `ferrex-player-app` for historical `ferrex_player::*` imports. | [docs.rs](https://docs.rs/ferrex-player/latest/ferrex_player/) |
+
+## Documentation lint policy
+
+- Workspace rustdoc now warns on missing crate-level docs; each public crate should explain its responsibility at the crate root.
+- Broad `missing_docs = "allow"` entries remain only where pre-alpha crates expose transitional state fields or generated code. Each remaining allow should carry a comment explaining why full enforcement is not yet feasible.
+- `ferrex-flatbuffers` keeps a crate-level missing-docs allow because most public tables are generated from `.fbs` schemas. Hand-written conversion and helper modules should be documented.
+- `ferrex-contracts` uses the workspace missing-docs warning instead of a crate-level suppression, because its public trait surface is small enough to document directly.

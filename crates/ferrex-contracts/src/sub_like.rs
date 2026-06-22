@@ -1,3 +1,9 @@
+//! Type-specific media traits for movie, series, season, and episode references.
+//!
+//! These traits layer domain-specific accessors on top of `MediaOps` so caller
+//! code can request details, titles, files, and counts without committing to
+//! owned versus archived model representations.
+
 use super::{
     details_like::{SeasonDetailsLike, SeriesDetailsLike},
     media_ops::MediaOps,
@@ -13,16 +19,23 @@ use ferrex_model::{
     files::MediaFile,
 };
 
+/// Accessors specific to playable movie references.
 pub trait MovieLike: MediaOps {
+    /// Concrete movie reference type.
     type Movie: MediaOps;
+    /// Movie detail record type.
     type Details;
 
+    /// Movie title shown to users.
     fn title(&self) -> &str;
 
+    /// Consume the reference and return its playable file.
     fn file(self) -> MediaFile;
 
+    /// Borrow the movie detail record.
     fn details(&self) -> &Self::Details;
 
+    /// Extract the release year if the metadata includes a release date.
     fn release_year(&self) -> Option<&str>;
 }
 
@@ -50,14 +63,20 @@ impl MovieLike for Box<MovieReference> {
     }
 }
 
+/// Accessors specific to series references.
 pub trait SeriesLike: MediaOps {
+    /// Concrete series reference type.
     type Series: MediaOps;
+    /// Series detail record type.
     type Details: SeriesDetailsLike;
 
+    /// Series title shown to users.
     fn title(&self) -> &str;
 
+    /// Borrow the series detail record.
     fn details(&self) -> &Self::Details;
 
+    /// Number of seasons, defaulting missing provider data to zero.
     fn num_seasons(&self) -> u16 {
         self.details().num_seasons().unwrap_or_default()
     }
@@ -75,12 +94,17 @@ impl SeriesLike for Box<Series> {
     }
 }
 
+/// Accessors specific to season references.
 pub trait SeasonLike: MediaOps {
+    /// Concrete season reference type.
     type Season: MediaOps;
+    /// Season detail record type.
     type Details: SeasonDetailsLike;
 
+    /// Borrow the season detail record.
     fn details(&self) -> &Self::Details;
 
+    /// Number of episodes in the season.
     fn num_episodes(&self) -> u16 {
         self.details().num_episodes()
     }
@@ -95,12 +119,17 @@ impl SeasonLike for Box<SeasonReference> {
     }
 }
 
+/// Accessors specific to playable episode references.
 pub trait EpisodeLike: MediaOps {
+    /// Concrete episode reference type.
     type Episode: MediaOps;
+    /// Episode detail record type.
     type Details;
 
+    /// Borrow the episode detail record.
     fn details(&self) -> &Self::Details;
 
+    /// Consume the reference and return its playable file.
     fn file(self) -> MediaFile;
 }
 

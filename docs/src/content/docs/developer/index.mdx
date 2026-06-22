@@ -1,0 +1,26 @@
+---
+title: "Developer guide"
+description: "Architecture, player boundaries, UI testing, SQLx workflows, and contribution references for changing Ferrex."
+sidebar:
+  order: 1
+  label: "Overview"
+---
+
+The developer guide explains how to change Ferrex with confidence. It connects architecture decisions to the commands and files that keep the Rust server, desktop player, Android clients, and generated contracts consistent.
+
+## Core developer pages
+
+| Page | Use it for |
+| --- | --- |
+| [Architecture](/developer/architecture/) | Workspace layout, server/player/core responsibilities, data flow, and security/deployment notes. |
+| [Phase 1 intelligence foundation](/developer/intelligence-foundation/) | Backend-only intelligence read models, bounded DTO contracts, and audit storage for future LLM features. |
+| [Player dependency boundaries](/developer/player-dependency-boundaries/) | Crate layering rules, compatibility shims, and the player boundary guard. |
+| [UI testing workflow](/developer/ui-testing-workflow/) | Deterministic screenshots, `.ice` replay, visual QA matrices, and renderer troubleshooting. |
+| [SQLx dynamic query policy and allowlist](/developer/sqlx-dynamic-query-allowlist/) | Compile-checked SQLx policy, reviewed dynamic-query exceptions, and guard commands. |
+| [Disposable SQLx PostgreSQL workflow](/developer/sqlx-postgres-workflow/) | Per-worktree PostgreSQL setup for migrations and SQLx offline metadata updates. |
+
+## Related canonical references
+
+- [Contributing guide](https://github.com/Lowband21/ferrex/blob/dev/.github/CONTRIBUTING.md) remains the canonical GitHub-facing contribution document.
+- [Crate README inventory](/reference/crate-readmes/) links package-facing READMEs without duplicating them in the docs site.
+- [Mobile device-auth FlatBuffers contract](/reference/mobile/device-auth-flatbuffers/) captures the current generated-contract boundary for mobile clients.

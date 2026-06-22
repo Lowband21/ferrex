@@ -26,9 +26,9 @@ Only `ferrex-player-app`, `ferrex-player-ui`, and the extracted
 `ferrex-player-playback` video domain own Iced/subwave runtime code. The lower
 player crates expose state, selectors, service contracts, domain tasks, or
 stream builders that the UI crate adapts; settings only shares `iced_core`
-color/point DTOs for accent-color state. See
-`../../docs/player-dependency-boundaries.md` for the guard policy and intentional
-compatibility shims.
+color/point DTOs for accent-color state. See the
+[Player dependency boundaries](https://ferrexmedia.org/developer/player-dependency-boundaries/)
+for the guard policy and intentional compatibility shims.
 
 ## Build prerequisites
 

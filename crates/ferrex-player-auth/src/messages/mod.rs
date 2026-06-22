@@ -1,3 +1,8 @@
+//! Authentication domain messages and event payloads.
+//!
+//! Messages in this module describe auth/setup/user-selection actions without
+//! depending on a concrete UI framework or root application state.
+
 use ferrex_core::{
     api::types::setup::{ConfirmClaimResponse, StartClaimResponse},
     player_prelude::{User, UserPermissions, UserWatchState},

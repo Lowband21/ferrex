@@ -1,3 +1,8 @@
+//! Styling helpers for playback overlay controls.
+//!
+//! Theme functions centralize colors, borders, shadows, and widget styles used by
+//! the playback view.
+
 use iced::{
     Background, Border, Color, Shadow, Vector,
     widget::{button, container, pick_list, slider, text, toggler},

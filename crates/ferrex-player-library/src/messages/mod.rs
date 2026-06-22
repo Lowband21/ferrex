@@ -1,5 +1,13 @@
+//! Library domain messages and realtime subscription payloads.
+//!
+//! Message types here describe library CRUD, scan lifecycle, media event, and
+//! subscription updates independently of a concrete UI shell.
+
+/// Media event subscription messages.
 pub mod media_events_subscription;
+/// Scan progress subscription messages.
 pub mod scan_subscription;
+/// Subscription factories and stream wiring helpers.
 pub mod subscriptions;
 
 use crate::media_root_browser;

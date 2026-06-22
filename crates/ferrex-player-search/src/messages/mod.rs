@@ -1,10 +1,14 @@
-//! Search domain messages
+//! Search domain messages and subscription DTOs.
+//!
+//! Message types cover query updates, result selection, calibration, keyboard
+//! input, and search execution outcomes.
 
 use super::keyboard::{TenFootKeyboardDirection, TenFootKeyboardKey};
 use super::metrics::SearchPerformanceMetrics;
 use super::types::{SearchMode, SearchResponse};
 use ferrex_player_api::api_types::Media;
 
+/// Search subscription payloads.
 pub mod subscriptions;
 
 /// Search domain messages

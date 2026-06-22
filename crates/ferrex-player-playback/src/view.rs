@@ -1,3 +1,8 @@
+//! Playback overlay views for the optional UI feature.
+//!
+//! Views here render the playback surface from `PlayerDomainState` without
+//! owning app-shell state transitions.
+
 use super::messages::PlayerMessage;
 use super::state::{PlayerDomainState, TrackNotification};
 use super::theme;
