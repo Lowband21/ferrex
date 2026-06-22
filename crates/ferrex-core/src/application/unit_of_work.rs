@@ -7,6 +7,7 @@ use crate::database::repositories::watch_status::PostgresWatchStatusRepository;
 use crate::database::{
     postgres::PostgresDatabase,
     repositories::{
+        collections::PostgresCollectionRepository,
         folder_inventory::PostgresFolderInventoryRepository,
         images::PostgresImageRepository, indices::PostgresIndicesRepository,
         intelligence::PostgresIntelligenceRepository,
@@ -22,6 +23,7 @@ use crate::database::{
         watch_metrics::PostgresWatchMetricsRepository,
     },
     repository_ports::{
+        collections::CollectionRepository,
         folder_inventory::FolderInventoryRepository, images::ImageRepository,
         indices::IndicesRepository, intelligence::IntelligenceRepository,
         library::LibraryRepository, media_files::MediaFilesReadPort,
@@ -53,6 +55,7 @@ pub struct AppUnitOfWork {
     pub media_files_write: Arc<dyn MediaFilesWritePort>,
     pub images: Arc<dyn ImageRepository>,
     pub query: Arc<dyn QueryRepository>,
+    pub collections: Arc<dyn CollectionRepository>,
 
     pub users: Arc<dyn UsersRepository>,
     pub rbac: Arc<dyn RbacRepository>,
@@ -87,6 +90,7 @@ impl fmt::Debug for AppUnitOfWork {
             )
             .field("images", &type_name_of_val(self.images.as_ref()))
             .field("query", &type_name_of_val(self.query.as_ref()))
+            .field("collections", &type_name_of_val(self.collections.as_ref()))
             .field("users", &type_name_of_val(self.users.as_ref()))
             .field("rbac", &type_name_of_val(self.rbac.as_ref()))
             .field(
@@ -136,6 +140,7 @@ pub struct AppUnitOfWorkBuilder {
     media_files_write: Option<Arc<dyn MediaFilesWritePort>>,
     images: Option<Arc<dyn ImageRepository>>,
     query: Option<Arc<dyn QueryRepository>>,
+    collections: Option<Arc<dyn CollectionRepository>>,
 
     users: Option<Arc<dyn UsersRepository>>,
     rbac: Option<Arc<dyn RbacRepository>>,
@@ -164,6 +169,7 @@ impl fmt::Debug for AppUnitOfWorkBuilder {
             .field("media_files_write", &self.media_files_write.is_some())
             .field("images", &self.images.is_some())
             .field("query", &self.query.is_some())
+            .field("collections", &self.collections.is_some())
             .field("users", &self.users.is_some())
             .field("rbac", &self.rbac.is_some())
             .field("security_settings", &self.security_settings.is_some())
@@ -217,6 +223,13 @@ impl AppUnitOfWorkBuilder {
     }
     pub fn with_query(mut self, repo: Arc<dyn QueryRepository>) -> Self {
         self.query = Some(repo);
+        self
+    }
+    pub fn with_collections(
+        mut self,
+        repo: Arc<dyn CollectionRepository>,
+    ) -> Self {
+        self.collections = Some(repo);
         self
     }
     pub fn with_users(mut self, repo: Arc<dyn UsersRepository>) -> Self {
@@ -316,6 +329,9 @@ impl AppUnitOfWorkBuilder {
             query: self
                 .query
                 .ok_or_else(|| "missing QueryRepository".to_string())?,
+            collections: self
+                .collections
+                .ok_or_else(|| "missing CollectionRepository".to_string())?,
             users: self
                 .users
                 .ok_or_else(|| "missing UsersRepository".to_string())?,
@@ -392,6 +408,10 @@ impl AppUnitOfWorkBuilder {
         let query: Arc<dyn QueryRepository> =
             Arc::new(PostgresQueryRepository::new(pool.clone()));
         self.query = Some(query);
+
+        let collections: Arc<dyn CollectionRepository> =
+            Arc::new(PostgresCollectionRepository::new(pool.clone()));
+        self.collections = Some(collections);
 
         let users: Arc<dyn UsersRepository> =
             Arc::new(PostgresUsersRepository::new(pool.clone()));

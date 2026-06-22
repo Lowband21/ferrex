@@ -133,3 +133,8 @@ sqlx.workspace = true
 name = "intelligence_repository"
 path = "tests/intelligence_repository.rs"
 required-features = ["database", "scan-runtime"]
+
+[[test]]
+name = "collection_repository"
+path = "tests/collection_repository.rs"
+required-features = ["database", "scan-runtime"]

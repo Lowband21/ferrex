@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH input AS (\n                SELECT unnest($1::uuid[]) AS id\n            ), resolved AS (\n                SELECT\n                    input.id,\n                    COALESCE(sm.name, 'Season ' || sr.season_number::text) AS title,\n                    CASE WHEN sr.id IS NULL THEN NULL ELSE 'Season ' || sr.season_number::text END AS subtitle,\n                    sr.id IS NOT NULL AS exists,\n                    COUNT(er.id)::bigint AS episode_count,\n                    COUNT(er.id) FILTER (WHERE mf.is_available)::bigint AS available_count,\n                    COUNT(er.id) FILTER (WHERE mf.id IS NOT NULL AND NOT mf.is_available)::bigint AS tombstoned_count\n                FROM input\n                LEFT JOIN season_references sr ON sr.id = input.id\n                LEFT JOIN season_metadata sm ON sm.season_id = sr.id\n                LEFT JOIN episode_references er ON er.season_id = sr.id\n                LEFT JOIN media_files mf ON mf.id = er.file_id\n                GROUP BY input.id, sr.id, sr.season_number, sm.name\n            )\n            SELECT\n                id AS \"id!: Uuid\",\n                title AS \"title?\",\n                subtitle AS \"subtitle?\",\n                CASE\n                    WHEN NOT exists THEN 'missing'\n                    WHEN available_count > 0 THEN 'available'\n                    WHEN tombstoned_count > 0 THEN 'tombstoned'\n                    WHEN episode_count > 0 THEN 'unavailable'\n                    ELSE 'unavailable'\n                END AS \"status!\",\n                CASE\n                    WHEN NOT exists THEN 'season reference was not found'\n                    WHEN available_count > 0 THEN NULL\n                    WHEN tombstoned_count > 0 THEN 'all season media files are tombstoned'\n                    WHEN episode_count > 0 THEN 'season has no available episodes'\n                    ELSE 'season has no episodes'\n                END AS reason\n            FROM resolved\n            ORDER BY id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "subtitle?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "92ea743d68010f386b7cc9af171543572a4b2cfe336ae43c27e2cf4ca724daa9"
+}

@@ -491,6 +491,7 @@ pub enum CollectionMemberAvailabilityStatus {
     Pending,
     Missing,
     Unavailable,
+    Tombstoned,
     Archived,
 }
 
@@ -1364,6 +1365,13 @@ mod tests {
             serde_json::to_string(&CollectionPresentationMode::Playlist)
                 .unwrap(),
             "\"playlist\""
+        );
+        assert_eq!(
+            serde_json::to_string(
+                &CollectionMemberAvailabilityStatus::Tombstoned
+            )
+            .unwrap(),
+            "\"tombstoned\""
         );
 
         let request: ListCollectionsRequest =

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE collection_definitions\n            SET\n                title = COALESCE($2, title),\n                description = COALESCE($3, description),\n                visibility = COALESCE($4::varchar, visibility),\n                presentation = COALESCE($5::varchar, presentation),\n                media_scope = COALESCE($6::jsonb, media_scope),\n                duplicate_policy = COALESCE($7::varchar, duplicate_policy),\n                artwork = COALESCE($8::jsonb, artwork),\n                theme = COALESCE($9::jsonb, theme),\n                revision = revision + 1,\n                etag = concat('collection:', id::text, ':v', revision + 1),\n                updated_at = NOW()\n            WHERE id = $1\n              AND deleted_at IS NULL\n              AND ($10::bigint IS NULL OR revision = $10)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Jsonb",
+        "Varchar",
+        "Jsonb",
+        "Jsonb",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d7a911913a35f786e56577aac0526ffcdecaf66ac870a28dd4f8cf6b932d3c7b"
+}

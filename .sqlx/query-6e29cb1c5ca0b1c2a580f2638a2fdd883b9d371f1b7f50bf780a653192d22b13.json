@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH input AS (\n                SELECT unnest($1::uuid[]) AS id\n            ), resolved AS (\n                SELECT\n                    input.id,\n                    s.title,\n                    NULL::text AS subtitle,\n                    s.id IS NOT NULL AS exists,\n                    COUNT(er.id)::bigint AS episode_count,\n                    COUNT(er.id) FILTER (WHERE mf.is_available)::bigint AS available_count,\n                    COUNT(er.id) FILTER (WHERE mf.id IS NOT NULL AND NOT mf.is_available)::bigint AS tombstoned_count\n                FROM input\n                LEFT JOIN series s ON s.id = input.id\n                LEFT JOIN episode_references er ON er.series_id = s.id\n                LEFT JOIN media_files mf ON mf.id = er.file_id\n                GROUP BY input.id, s.id, s.title\n            )\n            SELECT\n                id AS \"id!: Uuid\",\n                title AS \"title?\",\n                subtitle AS \"subtitle?\",\n                CASE\n                    WHEN NOT exists THEN 'missing'\n                    WHEN available_count > 0 THEN 'available'\n                    WHEN tombstoned_count > 0 THEN 'tombstoned'\n                    WHEN episode_count > 0 THEN 'unavailable'\n                    ELSE 'unavailable'\n                END AS \"status!\",\n                CASE\n                    WHEN NOT exists THEN 'series reference was not found'\n                    WHEN available_count > 0 THEN NULL\n                    WHEN tombstoned_count > 0 THEN 'all series media files are tombstoned'\n                    WHEN episode_count > 0 THEN 'series has no available episodes'\n                    ELSE 'series has no episodes'\n                END AS reason\n            FROM resolved\n            ORDER BY id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "subtitle?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "6e29cb1c5ca0b1c2a580f2638a2fdd883b9d371f1b7f50bf780a653192d22b13"
+}

@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS collection_manual_memberships (
         media_type IN ('movie'::media_type, 'series'::media_type, 'season'::media_type, 'episode'::media_type)
     ),
     CONSTRAINT collection_manual_memberships_position_key_check CHECK (position_key >= 0),
-    CONSTRAINT collection_manual_memberships_availability_check CHECK (availability_status IN ('available', 'pending', 'missing', 'unavailable', 'archived')),
+    CONSTRAINT collection_manual_memberships_availability_check CHECK (availability_status IN ('available', 'pending', 'missing', 'unavailable', 'tombstoned', 'archived')),
     CONSTRAINT collection_manual_memberships_metadata_object_check CHECK (jsonb_typeof(metadata) = 'object')
 );
 
