@@ -7,7 +7,10 @@
 use crate::api_types::{DemoResetRequest, DemoStatus};
 use async_trait::async_trait;
 use ferrex_core::{
-    api::types::setup::{ConfirmClaimResponse, StartClaimResponse},
+    api::types::{
+        collections::*,
+        setup::{ConfirmClaimResponse, StartClaimResponse},
+    },
     player_prelude::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice,
         CreateLibraryRequest, FilterIndicesRequest, ImageManifestRequest,
@@ -263,6 +266,124 @@ pub trait ApiService: Send + Sync + Debug {
         &self,
         query: MediaQuery,
     ) -> RepositoryResult<Vec<MediaWithStatus>>;
+
+    // === Collection operations ===
+
+    /// List player collections with filtering and pagination.
+    async fn list_collections(
+        &self,
+        request: ListCollectionsRequest,
+    ) -> RepositoryResult<ListCollectionsResponse>;
+
+    /// Fetch collection detail and optional rule/item/shelf expansions.
+    async fn get_collection_detail(
+        &self,
+        collection_id: CollectionId,
+        request: GetCollectionDetailRequest,
+    ) -> RepositoryResult<GetCollectionDetailResponse>;
+
+    /// List materialized collection members with pagination.
+    async fn list_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ListCollectionItemsRequest,
+    ) -> RepositoryResult<ListCollectionItemsResponse>;
+
+    /// Create a collection definition.
+    async fn create_collection(
+        &self,
+        request: CreateCollectionRequest,
+    ) -> RepositoryResult<CreateCollectionResponse>;
+
+    /// Update a collection definition.
+    async fn update_collection(
+        &self,
+        collection_id: CollectionId,
+        request: UpdateCollectionRequest,
+    ) -> RepositoryResult<UpdateCollectionResponse>;
+
+    /// Archive or unarchive a collection.
+    async fn archive_collection(
+        &self,
+        collection_id: CollectionId,
+        request: ArchiveCollectionRequest,
+    ) -> RepositoryResult<ArchiveCollectionResponse>;
+
+    /// Add items to a manual collection.
+    async fn manual_add_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualAddCollectionItemsRequest,
+    ) -> RepositoryResult<ManualAddCollectionItemsResponse>;
+
+    /// Remove items from a manual collection.
+    async fn manual_remove_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualRemoveCollectionItemsRequest,
+    ) -> RepositoryResult<ManualRemoveCollectionItemsResponse>;
+
+    /// Reorder items in a manual collection.
+    async fn manual_reorder_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualReorderCollectionItemsRequest,
+    ) -> RepositoryResult<ManualReorderCollectionItemsResponse>;
+
+    /// Validate a dynamic collection rule.
+    async fn validate_collection_rule(
+        &self,
+        request: ValidateCollectionRuleRequest,
+    ) -> RepositoryResult<ValidateCollectionRuleResponse>;
+
+    /// Preview dynamic collection rule results.
+    async fn preview_collection_rule(
+        &self,
+        request: PreviewCollectionRuleRequest,
+    ) -> RepositoryResult<PreviewCollectionRuleResponse>;
+
+    /// Refresh a collection's dynamic rule materialization.
+    async fn refresh_collection_rule(
+        &self,
+        collection_id: CollectionId,
+        request: RefreshCollectionRuleRequest,
+    ) -> RepositoryResult<RefreshCollectionRuleResponse>;
+
+    /// List shelf placements.
+    async fn list_shelf_placements(
+        &self,
+        request: ListShelfPlacementsRequest,
+    ) -> RepositoryResult<ListShelfPlacementsResponse>;
+
+    /// Pin or unpin a collection on a shelf.
+    async fn pin_shelf_placement(
+        &self,
+        request: PinShelfPlacementRequest,
+    ) -> RepositoryResult<PinShelfPlacementResponse>;
+
+    /// Reorder shelf placements.
+    async fn reorder_shelf_placements(
+        &self,
+        request: ReorderShelfPlacementsRequest,
+    ) -> RepositoryResult<ReorderShelfPlacementsResponse>;
+
+    /// List TMDB collections available for import.
+    async fn list_tmdb_collections(
+        &self,
+        request: TmdbListCollectionsRequest,
+    ) -> RepositoryResult<TmdbListCollectionsResponse>;
+
+    /// Import a TMDB collection/list or refresh an existing imported collection.
+    async fn import_tmdb_collection(
+        &self,
+        request: TmdbImportCollectionRequest,
+    ) -> RepositoryResult<TmdbImportCollectionResponse>;
+
+    /// Refresh an existing TMDB-backed collection using the import contract.
+    async fn refresh_tmdb_collection(
+        &self,
+        request: TmdbImportCollectionRequest,
+    ) -> RepositoryResult<TmdbImportCollectionResponse>;
 
     /// Fetch filtered index positions for a library based on the provided filter spec
     async fn fetch_filtered_indices(
