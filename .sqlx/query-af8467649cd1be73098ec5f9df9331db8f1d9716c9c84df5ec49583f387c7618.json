@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT p.name AS \"name!\"\n            FROM (\n                SELECT sc.person_id, COALESCE(sc.order_index, 32767) AS order_key\n                FROM series_cast sc\n                WHERE sc.series_id = $1\n                UNION ALL\n                SELECT sc.person_id, 32767 AS order_key\n                FROM series_crew sc\n                WHERE sc.series_id = $1\n            ) credits\n            JOIN persons p ON p.id = credits.person_id\n            ORDER BY credits.order_key, p.name\n            LIMIT 12\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "af8467649cd1be73098ec5f9df9331db8f1d9716c9c84df5ec49583f387c7618"
+}

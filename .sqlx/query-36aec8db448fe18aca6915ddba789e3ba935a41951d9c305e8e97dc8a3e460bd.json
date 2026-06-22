@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT EXISTS (\n                        SELECT 1 FROM episode_references er\n                        JOIN series s ON er.series_id = s.id AND s.library_id = $2\n                        JOIN media_files mf ON er.file_id = mf.id\n                            AND mf.is_available = TRUE\n                            AND mf.tombstoned_at IS NULL\n                        WHERE er.season_id = $1\n                    ) AS \"exists!\"\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "36aec8db448fe18aca6915ddba789e3ba935a41951d9c305e8e97dc8a3e460bd"
+}

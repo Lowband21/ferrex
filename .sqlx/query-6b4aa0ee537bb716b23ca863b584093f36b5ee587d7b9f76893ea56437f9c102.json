@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT mr.id AS \"media_id!\", mr.title AS \"title!\",\n                           mm.overview, mm.release_date, mm.runtime,\n                           mm.vote_average, mm.primary_certification\n                    FROM movie_references mr\n                    JOIN media_files mf ON mr.file_id = mf.id\n                        AND mf.is_available = TRUE\n                        AND mf.tombstoned_at IS NULL\n                    LEFT JOIN movie_metadata mm ON mm.movie_id = mr.id\n                    WHERE mr.id = $1 AND mr.library_id = $2\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "release_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 4,
+        "name": "runtime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "vote_average",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 6,
+        "name": "primary_certification",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "6b4aa0ee537bb716b23ca863b584093f36b5ee587d7b9f76893ea56437f9c102"
+}

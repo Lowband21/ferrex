@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE intelligence_artifacts\n                    SET artifact_kind = $2::varchar,\n                        scope = $3::varchar,\n                        library_id = $4,\n                        user_id = $5,\n                        media_id = $6,\n                        media_type = ($7::text)::media_type,\n                        run_id = $8,\n                        title = $9,\n                        summary = $10,\n                        excerpt = $11,\n                        content = $12::jsonb,\n                        metadata = $13::jsonb,\n                        source_revision = $14,\n                        source_updated_at = now(),\n                        content_hash = $15,\n                        status = 'active',\n                        invalidated_at = NULL,\n                        invalidation_reason = NULL,\n                        updated_at = now()\n                    WHERE id = $1\n                      AND (($5::uuid IS NULL AND user_id IS NULL) OR user_id = $5)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Jsonb",
+        "Jsonb",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "46faf1c3242498470632aa0f7aca3a81ba78f784a4a6f662a0b6e0b02fcf9dbe"
+}

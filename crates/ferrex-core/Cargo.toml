@@ -127,3 +127,8 @@ ffi = []
 tempfile.workspace = true
 tokio.workspace = true
 sqlx.workspace = true
+
+[[test]]
+name = "intelligence_repository"
+path = "tests/intelligence_repository.rs"
+required-features = ["database", "scan-runtime"]

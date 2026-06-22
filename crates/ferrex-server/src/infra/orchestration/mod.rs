@@ -182,7 +182,8 @@ impl ScanOrchestrator {
                 dispatcher_actors,
                 correlations.clone(),
             )
-            .with_delta_repository(delta_repo),
+            .with_delta_repository(delta_repo)
+            .with_intelligence_repository(unit_of_work.intelligence.clone()),
         );
 
         let watch_cfg = config.watch.clone();

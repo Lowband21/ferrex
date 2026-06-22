@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT er.id AS \"id!\", er.season_number AS \"season_number!\", er.episode_number AS \"episode_number!\",\n               s.library_id AS \"library_id!\", em.name, em.overview, em.air_date,\n               em.runtime, em.primary_thumbnail_image_id AS \"primary_thumbnail_image_id?\"\n        FROM episode_references er\n        JOIN series s ON er.series_id = s.id\n        LEFT JOIN episode_metadata em ON em.episode_id = er.id\n        WHERE er.id = $1\n          AND ($2::uuid IS NULL OR s.library_id = $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "season_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "library_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 7,
+        "name": "runtime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "primary_thumbnail_image_id?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "95a90fc1eede1699a05c521a850fe4b92af45c4e6de34d692efbc0301529e21d"
+}

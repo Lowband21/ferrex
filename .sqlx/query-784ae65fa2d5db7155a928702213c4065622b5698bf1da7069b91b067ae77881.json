@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH RECURSIVE\n        media_context_rows AS (\n            SELECT id\n            FROM intelligence_media_context\n            WHERE library_id = $1\n              AND media_id = $2\n              AND media_type = ($3::text)::media_type\n              AND (\n                  $4::text = 'all'\n                  OR ($4::text = 'global' AND user_id IS NULL)\n                  OR ($4::text = 'user' AND user_id = $5)\n              )\n        ),\n        search_document_rows AS (\n            SELECT id\n            FROM intelligence_search_documents\n            WHERE library_id = $1\n              AND media_id = $2\n              AND media_type = ($3::text)::media_type\n              AND (\n                  $4::text = 'all'\n                  OR ($4::text = 'global' AND user_id IS NULL)\n                  OR ($4::text = 'user' AND user_id = $5)\n              )\n        ),\n        dependent_artifacts(artifact_id) AS (\n            SELECT ia.id\n            FROM intelligence_artifacts ia\n            WHERE ia.library_id = $1\n              AND ia.media_id = $2\n              AND ia.media_type = ($3::text)::media_type\n              AND ia.status IN ('draft', 'active', 'stale')\n              AND (\n                  $4::text = 'all'\n                  OR ($4::text = 'global' AND ia.user_id IS NULL)\n                  OR ($4::text = 'user' AND ia.user_id = $5)\n              )\n            UNION\n            SELECT src.artifact_id\n            FROM intelligence_artifact_sources src\n            JOIN intelligence_artifacts ia ON ia.id = src.artifact_id\n            WHERE src.status <> 'invalidated'\n              AND ia.status IN ('draft', 'active', 'stale')\n              AND (\n                  $4::text = 'all'\n                  OR ($4::text = 'global' AND ia.user_id IS NULL)\n                  OR ($4::text = 'user' AND ia.user_id = $5)\n              )\n              AND (\n                  (\n                      src.source_kind = 'media'\n                      AND src.source_library_id = $1\n                      AND src.source_media_id = $2\n                      AND src.source_media_type = ($3::text)::media_type\n                  )\n                  OR src.source_media_context_id IN (SELECT id FROM media_context_rows)\n                  OR src.source_search_document_id IN (SELECT id FROM search_document_rows)\n              )\n            UNION\n            SELECT src.artifact_id\n            FROM intelligence_artifact_sources src\n            JOIN dependent_artifacts dep ON src.source_artifact_id = dep.artifact_id\n            JOIN intelligence_artifacts ia ON ia.id = src.artifact_id\n            WHERE src.status <> 'invalidated'\n              AND ia.status IN ('draft', 'active', 'stale')\n              AND (\n                  $4::text = 'all'\n                  OR ($4::text = 'global' AND ia.user_id IS NULL)\n                  OR ($4::text = 'user' AND ia.user_id = $5)\n              )\n        )\n        SELECT artifact_id AS \"artifact_id!\" FROM dependent_artifacts\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "784ae65fa2d5db7155a928702213c4065622b5698bf1da7069b91b067ae77881"
+}

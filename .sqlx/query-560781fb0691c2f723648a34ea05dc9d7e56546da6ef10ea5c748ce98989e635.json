@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        UPDATE intelligence_artifacts\n                        SET status = 'superseded',\n                            invalidated_at = COALESCE(invalidated_at, now()),\n                            invalidation_reason = $3,\n                            updated_at = now()\n                        WHERE id = $1\n                          AND (($2::uuid IS NULL AND user_id IS NULL) OR user_id = $2)\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "560781fb0691c2f723648a34ea05dc9d7e56546da6ef10ea5c748ce98989e635"
+}

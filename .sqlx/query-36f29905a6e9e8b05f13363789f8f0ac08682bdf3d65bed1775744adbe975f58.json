@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE intelligence_media_context\n        SET status = 'invalidated',\n            source_revision = $7,\n            source_updated_at = now(),\n            invalidated_at = now(),\n            invalidation_reason = $1,\n            updated_at = now()\n        WHERE library_id = $2\n          AND media_id = $3\n          AND media_type = ($4::text)::media_type\n          AND (\n              $5::text = 'all'\n              OR ($5::text = 'global' AND user_id IS NULL)\n              OR ($5::text = 'user' AND user_id = $6)\n          )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "36f29905a6e9e8b05f13363789f8f0ac08682bdf3d65bed1775744adbe975f58"
+}

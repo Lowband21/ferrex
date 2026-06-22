@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH fts AS (\n                SELECT sd.media_id, sd.media_type::text AS media_type,\n                       sd.library_id, sd.title, sd.summary, sd.search_excerpt,\n                       ts_rank(sd.search_vector, plainto_tsquery('simple', $1)) AS rank\n                FROM intelligence_search_documents sd\n                WHERE sd.status = 'active'\n                  AND sd.invalidated_at IS NULL\n                  AND (array_length($2::uuid[], 1) IS NULL OR sd.library_id = ANY($2::uuid[]))\n                  AND (array_length($3::text[], 1) IS NULL OR sd.media_type::text = ANY($3::text[]))\n                  AND (sd.user_id IS NULL OR sd.user_id = $4)\n                  AND sd.search_vector @@ plainto_tsquery('simple', $1)\n            ),\n            trgm AS (\n                SELECT sd.media_id, sd.media_type::text AS media_type,\n                       sd.library_id, sd.title, sd.summary, sd.search_excerpt,\n                       similarity(sd.title, $1) AS rank\n                FROM intelligence_search_documents sd\n                WHERE sd.status = 'active'\n                  AND sd.invalidated_at IS NULL\n                  AND (array_length($2::uuid[], 1) IS NULL OR sd.library_id = ANY($2::uuid[]))\n                  AND (array_length($3::text[], 1) IS NULL OR sd.media_type::text = ANY($3::text[]))\n                  AND (sd.user_id IS NULL OR sd.user_id = $4)\n                  AND sd.title %> $1\n            )\n            SELECT media_id AS \"media_id!\", media_type AS \"media_type!\", library_id AS \"library_id!\",\n                   title AS \"title!\", summary, search_excerpt, max(rank)::real AS \"rank?\"\n            FROM (\n                SELECT * FROM fts\n                UNION ALL\n                SELECT * FROM trgm\n            ) combined\n            GROUP BY media_id, media_type, library_id, title, summary, search_excerpt\n            ORDER BY max(rank) DESC, title ASC, media_id ASC\n            LIMIT $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "library_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "title!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "summary",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "search_excerpt",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "rank?",
+        "type_info": "Float4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "UuidArray",
+        "TextArray",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0a139e4c65a98d80929cf9675330dcc5da4896cbad5f3a2198b144f797cb6c85"
+}

@@ -5,6 +5,7 @@ pub mod folder_inventory;
 mod fuzzy_title_search;
 pub mod images;
 pub mod indices;
+pub mod intelligence;
 pub mod library;
 pub mod media;
 pub mod media_references;

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT sr.season_number AS \"season_number!\", sm.name, sm.overview, sm.air_date,\n               sm.primary_poster_image_id AS \"primary_poster_image_id?\", sm.runtime\n        FROM season_references sr\n        LEFT JOIN season_metadata sm ON sm.season_id = sr.id\n        WHERE sr.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "season_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 4,
+        "name": "primary_poster_image_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "runtime",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "07eb280f23128af44b0a6484ade6a079064714b6e0d5a4961d5b06e1195e7ca9"
+}

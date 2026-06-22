@@ -96,6 +96,12 @@ pub trait FolderDeltaRepository: Send + Sync {
         reason: &str,
     ) -> Result<u64>;
 
+    async fn list_media_by_prefixes(
+        &self,
+        library_id: LibraryId,
+        prefixes: Vec<String>,
+    ) -> Result<Vec<MediaID>>;
+
     async fn mark_unavailable_by_prefixes(
         &self,
         library_id: LibraryId,
@@ -151,6 +157,14 @@ impl FolderDeltaRepository for NoopFolderDeltaRepository {
         _reason: &str,
     ) -> Result<u64> {
         Ok(0)
+    }
+
+    async fn list_media_by_prefixes(
+        &self,
+        _library_id: LibraryId,
+        _prefixes: Vec<String>,
+    ) -> Result<Vec<MediaID>> {
+        Ok(Vec::new())
     }
 
     async fn mark_unavailable_by_prefixes(

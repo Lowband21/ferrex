@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT p.name AS \"name!\"\n            FROM (\n                SELECT mc.person_id, COALESCE(mc.order_index, 32767) AS order_key\n                FROM movie_cast mc\n                WHERE mc.movie_id = $1\n                UNION ALL\n                SELECT mc.person_id, 32767 AS order_key\n                FROM movie_crew mc\n                WHERE mc.movie_id = $1\n            ) credits\n            JOIN persons p ON p.id = credits.person_id\n            ORDER BY credits.order_key, p.name\n            LIMIT 12\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1c9eb6c4e78b7b31efc69df9ea3d31f9f3885130ff93f5a92280b6ee9daf8633"
+}

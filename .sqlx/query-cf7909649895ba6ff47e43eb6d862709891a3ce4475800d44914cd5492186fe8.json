@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\" FROM intelligence_artifacts\n        WHERE library_id = $1\n          AND status = 'active'\n          AND invalidated_at IS NULL\n          AND (user_id IS NULL OR user_id = $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cf7909649895ba6ff47e43eb6d862709891a3ce4475800d44914cd5492186fe8"
+}

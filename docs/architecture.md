@@ -20,6 +20,7 @@ Ferrex is a Rust workspace with these primary crates:
 
 Related docs:
 - Scan/orchestration runtime details: `crates/ferrex-core/src/domain/scan/orchestration/runtime/README.md`
+- Phase 1 backend intelligence foundation: `docs/intelligence-foundation.md`
 - Player specifics and platform notes: `crates/ferrex-player/README.md`
 - Player crate dependency boundaries: `docs/player-dependency-boundaries.md`
 - Demo mode: `docs/demo-mode.md`
@@ -58,6 +59,7 @@ nix develop .#ferrex-player --command cargo test -p ferrex-core --lib
   - Scan and index libraries, fetch metadata/artwork, derive and cache image variants.
   - Expose REST/WS endpoints for authentication, library content, watch progress/events.
   - Orchestrate background jobs (scan, analyze, enrich, index) with durable leases and retries.
+  - Maintain bounded backend intelligence read models, artifact summaries, and run/tool-call audit surfaces for future LLM features without invoking model providers.
 - Orchestration runtime:
   - Worker pools per JobKind; jobs leased with TTL and renewed pre‑expiry.
   - Expired leases are resurrected by housekeeping.

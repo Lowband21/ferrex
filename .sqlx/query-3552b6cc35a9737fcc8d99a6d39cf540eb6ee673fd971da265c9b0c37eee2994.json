@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT uwp.media_uuid AS \"media_uuid!\", uwp.media_type AS \"media_type!\",\n               uwp.position AS \"position!\", uwp.duration AS \"duration!\",\n               uwp.last_watched AS \"last_watched!\", COALESCE(m.title, e.title, s.title, sm.name,\n                                          uwp.media_uuid::text) AS \"title!\",\n               COALESCE(m.library_id, s.library_id, sr.library_id, e.library_id) AS \"library_id!\"\n        FROM user_watch_progress uwp\n        LEFT JOIN movie_references m\n            ON uwp.media_uuid = m.id AND uwp.media_type = 0\n        LEFT JOIN series s\n            ON uwp.media_uuid = s.id AND uwp.media_type = 1\n        LEFT JOIN season_references sr\n            ON uwp.media_uuid = sr.id AND uwp.media_type = 2\n        LEFT JOIN season_metadata sm\n            ON sm.season_id = sr.id AND uwp.media_type = 2\n        LEFT JOIN (\n            SELECT er.id AS id, s.library_id AS library_id, em.name AS title\n            FROM episode_references er\n            JOIN series s ON er.series_id = s.id\n            LEFT JOIN episode_metadata em ON em.episode_id = er.id\n        ) e ON uwp.media_uuid = e.id AND uwp.media_type = 3\n        WHERE uwp.user_id = $1\n          AND COALESCE(m.library_id, s.library_id, sr.library_id, e.library_id) = $2\n          AND (\n            (uwp.media_type = 0 AND EXISTS (\n                SELECT 1 FROM movie_references am\n                JOIN media_files mf ON am.file_id = mf.id\n                    AND mf.is_available = TRUE\n                    AND mf.tombstoned_at IS NULL\n                WHERE am.id = uwp.media_uuid AND am.library_id = $2\n            ))\n            OR (uwp.media_type = 1 AND EXISTS (\n                SELECT 1 FROM episode_references ae\n                JOIN series avs ON ae.series_id = avs.id AND avs.library_id = $2\n                JOIN media_files mf ON ae.file_id = mf.id\n                    AND mf.is_available = TRUE\n                    AND mf.tombstoned_at IS NULL\n                WHERE ae.series_id = uwp.media_uuid\n            ))\n            OR (uwp.media_type = 2 AND EXISTS (\n                SELECT 1 FROM episode_references ae\n                JOIN series avs ON ae.series_id = avs.id AND avs.library_id = $2\n                JOIN media_files mf ON ae.file_id = mf.id\n                    AND mf.is_available = TRUE\n                    AND mf.tombstoned_at IS NULL\n                WHERE ae.season_id = uwp.media_uuid\n            ))\n            OR (uwp.media_type = 3 AND EXISTS (\n                SELECT 1 FROM episode_references ae\n                JOIN series avs ON ae.series_id = avs.id AND avs.library_id = $2\n                JOIN media_files mf ON ae.file_id = mf.id\n                    AND mf.is_available = TRUE\n                    AND mf.tombstoned_at IS NULL\n                WHERE ae.id = uwp.media_uuid\n            ))\n          )\n        ORDER BY uwp.last_watched DESC, uwp.media_uuid\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_uuid!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_type!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "position!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 3,
+        "name": "duration!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_watched!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "title!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "library_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "3552b6cc35a9737fcc8d99a6d39cf540eb6ee673fd971da265c9b0c37eee2994"
+}

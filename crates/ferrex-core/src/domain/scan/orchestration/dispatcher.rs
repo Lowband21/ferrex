@@ -6,6 +6,7 @@ use ferrex_model::VideoMediaType;
 use tracing::{Instrument, debug, debug_span, warn};
 use uuid::Uuid;
 
+use crate::database::repository_ports::intelligence::IntelligenceRepository;
 use crate::domain::scan::actors::image_fetch::ImageFetchActor;
 use crate::domain::scan::actors::index::{IndexCommand, IndexerActor};
 use crate::domain::scan::actors::metadata::{
@@ -126,6 +127,7 @@ where
     series_states: Arc<Box<dyn SeriesScanStateRepository>>,
     series_resolver: Arc<dyn SeriesResolverPort>,
     deltas: Arc<dyn FolderDeltaRepository>,
+    intelligence: Option<Arc<dyn IntelligenceRepository>>,
 }
 
 impl<Q, E, C> fmt::Debug for DefaultJobDispatcher<Q, E, C>
@@ -144,6 +146,7 @@ where
             .field("series_states", &"SeriesScanStateRepository")
             .field("series_resolver", &"SeriesResolverPort")
             .field("deltas", &"FolderDeltaRepository")
+            .field("intelligence", &self.intelligence.is_some())
             .finish()
     }
 }
@@ -172,6 +175,7 @@ where
             series_states,
             series_resolver,
             deltas: Arc::new(NoopFolderDeltaRepository),
+            intelligence: None,
         }
     }
 
@@ -181,6 +185,41 @@ where
     ) -> Self {
         self.deltas = deltas;
         self
+    }
+
+    pub fn with_intelligence_repository(
+        mut self,
+        intelligence: Arc<dyn IntelligenceRepository>,
+    ) -> Self {
+        self.intelligence = Some(intelligence);
+        self
+    }
+
+    async fn invalidate_intelligence_catalog_change(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+        media_id: ferrex_model::MediaID,
+        reason: &str,
+    ) -> Result<()> {
+        if let Some(intelligence) = &self.intelligence {
+            intelligence
+                .invalidate_media_catalog_change(library_id, media_id, reason)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn refresh_intelligence_read_model(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+        media_id: ferrex_model::MediaID,
+    ) -> Result<()> {
+        if let Some(intelligence) = &self.intelligence {
+            intelligence
+                .refresh_media_read_model(library_id, media_id, None)
+                .await?;
+        }
+        Ok(())
     }
 
     fn handle_media_error(&self, err: MediaError) -> DispatchStatus {
@@ -367,12 +406,31 @@ where
             return DispatchStatus::Success;
         }
 
+        let affected_media = match self
+            .deltas
+            .list_media_by_prefixes(library_id, prefixes.clone())
+            .await
+        {
+            Ok(media) => media,
+            Err(err) => return self.handle_media_error(err),
+        };
+
         if let Err(err) = self
             .deltas
             .mark_unavailable_by_prefixes(library_id, prefixes.clone(), reason)
             .await
         {
             return self.handle_media_error(err);
+        }
+        for media_id in affected_media {
+            if let Err(err) = self
+                .invalidate_intelligence_catalog_change(
+                    library_id, media_id, reason,
+                )
+                .await
+            {
+                return self.handle_media_error(err);
+            }
         }
         if let Err(err) = self
             .deltas
@@ -481,6 +539,15 @@ where
                 )
                 .await
                 .map_err(|err| self.handle_media_error(err))?;
+            for removed in &delta.removals {
+                self.invalidate_intelligence_catalog_change(
+                    library_id,
+                    removed.media_id,
+                    "folder_delta_file_missing",
+                )
+                .await
+                .map_err(|err| self.handle_media_error(err))?;
+            }
         }
 
         let known_cursor_paths = self
@@ -1211,6 +1278,13 @@ where
             Ok(result) => result,
             Err(err) => return self.handle_media_error(err),
         };
+
+        if let Err(err) = self
+            .refresh_intelligence_read_model(job.library_id, job.media_id)
+            .await
+        {
+            return self.handle_media_error(err);
+        }
 
         if let Err(err) = self
             .events

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT s.title AS \"title!\", sm.overview, sm.first_air_date,\n               sm.primary_poster_image_id AS \"primary_poster_image_id?\", sm.primary_content_rating,\n               sm.vote_average\n        FROM series s\n        LEFT JOIN series_metadata sm ON sm.series_id = s.id\n        WHERE s.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "title!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "first_air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 3,
+        "name": "primary_poster_image_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "primary_content_rating",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "vote_average",
+        "type_info": "Float4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "3cd5ce0d2b47fe284204c59bae2d2df41c3ae9e7fc2f7e79ee5218b776953134"
+}

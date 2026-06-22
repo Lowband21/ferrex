@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id AS \"id!\", run_kind::text AS \"run_kind!\", status::text AS \"status!\",\n                   library_id, user_id, media_id, media_type::text AS media_type,\n                   correlation_id AS \"correlation_id!\", idempotency_key, model_name,\n                   started_at, finished_at, created_at AS \"created_at!\", updated_at AS \"updated_at!\"\n            FROM intelligence_runs\n            WHERE ($1::uuid IS NULL OR library_id = $1)\n              AND ($2::uuid IS NULL OR user_id = $2)\n              AND ($3::text IS NULL OR run_kind = $3::varchar)\n              AND ($4::text IS NULL OR status = $4::varchar)\n            ORDER BY created_at DESC, id\n            LIMIT $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "run_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "media_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "correlation_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "idempotency_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "model_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      true,
+      true,
+      true,
+      null,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "5d8f8e4dccb348a12ec0c743fb4ac0657d17e708edbba72efcab24460cda85f8"
+}

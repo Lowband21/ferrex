@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH target_prefixes AS (\n                SELECT root,\n                       root || '/%' AS child_pattern\n                FROM UNNEST($2::text[]) AS root\n            )\n            SELECT DISTINCT mf.media_id AS \"media_id!\", mf.media_type::text AS \"media_type!\"\n            FROM media_files AS mf\n            JOIN target_prefixes AS p\n              ON mf.file_path = p.root OR mf.file_path LIKE p.child_pattern\n            WHERE mf.library_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_type!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "50534e0e6201d09e050396dca4259eef80d6cd18292a3276cecb34f7d8c79fea"
+}

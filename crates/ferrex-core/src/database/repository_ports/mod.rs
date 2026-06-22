@@ -7,6 +7,7 @@ pub mod file_watch;
 pub mod folder_inventory;
 pub mod images;
 pub mod indices;
+pub mod intelligence;
 pub mod library;
 pub mod media_files;
 pub mod media_references;

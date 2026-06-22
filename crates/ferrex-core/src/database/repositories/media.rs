@@ -1295,6 +1295,50 @@ impl FolderDeltaRepository for PostgresMediaRepository {
         Ok(result.rows_affected())
     }
 
+    async fn list_media_by_prefixes(
+        &self,
+        library_id: LibraryId,
+        prefixes: Vec<String>,
+    ) -> Result<Vec<MediaID>> {
+        if prefixes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let roots: Vec<String> = prefixes
+            .iter()
+            .map(|prefix| prefix.trim_end_matches('/').to_owned())
+            .collect();
+
+        let rows = sqlx::query!(
+            r#"
+            WITH target_prefixes AS (
+                SELECT root,
+                       root || '/%' AS child_pattern
+                FROM UNNEST($2::text[]) AS root
+            )
+            SELECT DISTINCT mf.media_id AS "media_id!", mf.media_type::text AS "media_type!"
+            FROM media_files AS mf
+            JOIN target_prefixes AS p
+              ON mf.file_path = p.root OR mf.file_path LIKE p.child_pattern
+            WHERE mf.library_id = $1
+            "#,
+            library_id.as_uuid(),
+            &roots
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to list media under prefixes for library {}: {}",
+                library_id, e
+            ))
+        })?;
+
+        rows.into_iter()
+            .map(|row| Self::media_id_from_parts(row.media_id, &row.media_type))
+            .collect()
+    }
+
     async fn mark_unavailable_by_prefixes(
         &self,
         library_id: LibraryId,

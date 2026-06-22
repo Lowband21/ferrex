@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO intelligence_search_documents (\n                library_id, user_id, media_id, media_type, document_kind, status,\n                title, summary, search_excerpt, search_text, language,\n                source_system, source_revision, source_updated_at, content_hash, metadata\n            )\n            VALUES ($1, $2, $3, ($4::text)::media_type, $5, 'active', $6, $7, $8, $9, 'simple',\n                    'ferrex', $10, now(), $11, $12::jsonb)\n            ON CONFLICT (library_id, media_type, media_id, document_kind)\n                WHERE user_id IS NULL\n            DO UPDATE SET\n                status = 'active',\n                title = EXCLUDED.title,\n                summary = EXCLUDED.summary,\n                search_excerpt = EXCLUDED.search_excerpt,\n                search_text = EXCLUDED.search_text,\n                source_revision = EXCLUDED.source_revision,\n                source_updated_at = now(),\n                content_hash = EXCLUDED.content_hash,\n                metadata = EXCLUDED.metadata,\n                invalidated_at = NULL,\n                invalidation_reason = NULL,\n                updated_at = now()\n            WHERE intelligence_search_documents.status <> 'active'\n               OR intelligence_search_documents.content_hash IS DISTINCT FROM EXCLUDED.content_hash\n               OR intelligence_search_documents.invalidated_at IS NOT NULL\n               OR intelligence_search_documents.invalidation_reason IS NOT NULL\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cd289c4fa135955976f9b520e270eb7b8bee4554661da6c500947f93a2bc22ae"
+}

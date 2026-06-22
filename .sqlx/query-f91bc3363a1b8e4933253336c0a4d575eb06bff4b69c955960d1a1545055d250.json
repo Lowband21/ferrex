@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO intelligence_runs (\n                id, run_kind, status, library_id, user_id, media_id, media_type,\n                idempotency_key, provider_name, model_name, request_hash,\n                prompt_excerpt, metadata\n            )\n            VALUES ($1, $2::varchar, 'queued', $3, $4, $5, ($6::text)::media_type, $7, $8, $9, $10,\n                    $11, $12::jsonb)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Varchar",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f91bc3363a1b8e4933253336c0a4d575eb06bff4b69c955960d1a1545055d250"
+}

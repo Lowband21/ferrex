@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO intelligence_tool_calls (\n                id, run_id, sequence, tool_kind, tool_name, status,\n                idempotency_key, input_hash, arguments\n            )\n            VALUES ($1, $2, $3, $4::varchar, $5, 'queued', $6, $7, $8::jsonb)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "700ff9927c1be846dfb4218557d0e27cdde4bedd01462c21941d95969085dd3d"
+}
