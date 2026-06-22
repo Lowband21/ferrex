@@ -3,6 +3,7 @@
 //! specialized namespaces instead of the entire API layer.
 
 pub mod admin;
+pub mod collections;
 pub mod demo;
 pub mod discovery;
 pub mod filters;
@@ -19,6 +20,7 @@ pub use admin::{
     MediaRootBreadcrumb, MediaRootBrowseRequest, MediaRootBrowseResponse,
     MediaRootEntry, MediaRootEntryKind,
 };
+pub use collections::*;
 pub use demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
 pub use discovery::{
     DISCOVERY_SECTION_AUDIENCE_RATING_PICKS, DISCOVERY_SECTION_CONTINUE_SERIES,
@@ -68,6 +70,7 @@ pub mod player {
         MediaRootBreadcrumb, MediaRootBrowseRequest, MediaRootBrowseResponse,
         MediaRootEntry, MediaRootEntryKind,
     };
+    pub use super::collections::*;
     pub use super::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
     pub use super::discovery::{
         DISCOVERY_SECTION_AUDIENCE_RATING_PICKS,
