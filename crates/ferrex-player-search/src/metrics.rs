@@ -1,3 +1,8 @@
+//! Metrics used by the search decision engine.
+//!
+//! Rolling timings and strategy records help choose whether future searches run
+//! locally against the repository cache or remotely through the API.
+
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 

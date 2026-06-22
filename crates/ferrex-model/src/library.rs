@@ -1,3 +1,9 @@
+//! Library configuration and library-like traits.
+//!
+//! Libraries group media roots, scan scheduling policy, and media reference
+//! caches. The `LibraryLike` traits allow owned and archived library snapshots to
+//! be consumed through a shared read/write interface.
+
 use std::path::PathBuf;
 
 use crate::chrono::{DateTime, Utc};

@@ -1,3 +1,9 @@
+//! Media and scan-progress events shared across server and clients.
+//!
+//! Event DTOs in this module are emitted by scanning/orchestration code and
+//! consumed by websocket/SSE clients to update library, progress, and reason
+//! displays.
+
 use super::{LibraryId, Media, MediaID, MovieBatchId, MovieReference, Series};
 
 use crate::{

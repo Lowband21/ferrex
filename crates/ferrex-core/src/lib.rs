@@ -5,7 +5,9 @@
 //!
 //! ## Overview
 //!
-//! `ferrex-core` is the foundation of the Ferrex Media Server ecosystem, offering:
+//! `ferrex-core` is the foundation of the Ferrex Media Server ecosystem. It owns
+//! the reusable domain, query, database-port, and API DTO surfaces consumed by
+//! the HTTP server, player crates, FlatBuffers adapters, and tooling. It offers:
 //!
 //! - **Media Management**: Comprehensive types for movies, TV shows, episodes, and media files
 //! - **User System**: Opaque session tokens with refresh rotation and device management
@@ -67,26 +69,30 @@
 //! ```
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+// The core crate still exposes a large pre-alpha public surface inherited by the
+// server and player crates. Crate/module docs and curated re-export docs are
+// ratcheted here while field-level missing-doc cleanup continues incrementally.
 #![allow(missing_docs)]
 
-/// Versioned routes and API data transfer objects
+/// Versioned routes and API data transfer objects.
 pub mod api;
 
 /// Domain module grouping core business logic.
 pub mod domain;
 
-/// Infrastructure adapters (database, external services, runtimes).
+/// Infrastructure adapters for external services, caches, media analysis, and archive conversion.
 pub mod infra;
 
-/// Database abstraction layer and implementations
+/// Database abstraction layer and PostgreSQL implementations.
 #[cfg(feature = "database")]
 #[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod database;
 
 #[cfg(feature = "database")]
+/// Embedded SQLx migrations for the core database schema.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
-/// Error types and error handling utilities
+/// Error types and error handling utilities.
 pub mod error;
 
 /// rkyv wrapper types for external dependencies
@@ -94,19 +100,19 @@ pub mod error;
 #[cfg_attr(docsrs, doc(cfg(feature = "rkyv")))]
 pub use ferrex_model::rkyv_wrappers;
 
-/// Advanced media query system with filtering and sorting
+/// Advanced media query system with filtering and sorting.
 pub mod query;
 
-/// Synchronized playback session management
+/// Synchronized playback session management.
 pub mod sync_session;
 
-/// Common types used by both server and client
+/// Common model types used by both server and clients.
 pub use ferrex_model as types;
 
-/// Traits for core types
+/// Trait contracts for core model types.
 pub use ferrex_contracts as traits;
 
-/// Application-level composition utilities (Unit of Work, facades)
+/// Application-level composition utilities such as units of work and facades.
 pub mod application;
 
 /// Curated re-exports for player- and client-facing consumers.

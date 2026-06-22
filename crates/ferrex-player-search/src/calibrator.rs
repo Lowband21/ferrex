@@ -1,3 +1,8 @@
+//! Calibration helpers for search execution strategy thresholds.
+//!
+//! Calibration samples the configured search service so client-side/server-side
+//! strategy choices can adapt to the current repository and server behavior.
+
 use super::service::SearchService;
 use super::types::SearchStrategy;
 use ferrex_core::query::types::SearchField;

@@ -1,6 +1,6 @@
 //! Runtime configuration for user-adjustable constants
 //!
-//! This module provides a RuntimeConfig struct with Option<T> fields that override
+//! This module provides a `RuntimeConfig` struct with `Option<T>` fields that override
 //! the default constants. Accessor methods fall back to constants when None.
 
 use crate::infra::{

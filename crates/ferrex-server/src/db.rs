@@ -1,13 +1,22 @@
+//! Database URL guard rails for server startup.
+//!
+//! The server uses a dedicated demo database when demo mode is enabled. These
+//! helpers prevent operators from accidentally pointing the primary production
+//! connection at the reserved demo database name.
+
 use anyhow::{Context, Result, anyhow};
 use reqwest::Url;
 
+/// Reserved database name used for demo-mode data.
 pub const DEMO_DATABASE_NAME: &str = "ferrex_demo";
 
+/// Validate that the primary database URL is syntactically valid and is not the demo database.
 pub fn validate_primary_database_url(base: &str) -> Result<()> {
     let url = Url::parse(base).context("invalid PostgreSQL URL")?;
     ensure_not_demo_database(&url)
 }
 
+/// Derive the demo-mode database URL from the primary URL and reserved demo name.
 #[cfg(feature = "demo")]
 pub fn derive_demo_database_url(base: &str) -> Result<String> {
     let mut url = Url::parse(base).context("invalid PostgreSQL URL")?;

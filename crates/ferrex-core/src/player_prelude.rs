@@ -1,6 +1,9 @@
 //! Curated surface for UI/client crates.
-//! Keep imports focused by pulling from this module rather than directly from
-//! the entire crate.
+//!
+//! Player crates import this module instead of reaching across the full core,
+//! model, query, and contract trees. The surface intentionally includes API DTOs,
+//! media/library/watch-state models, query helpers, auth/user preferences, and
+//! trait contracts that are stable enough for client-facing code.
 
 pub use crate::api::types::player::*;
 pub use crate::api::types::{

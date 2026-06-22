@@ -1,3 +1,8 @@
+//! Rate-limit configuration and runtime policy DTOs.
+//!
+//! These types bridge configuration loading, server enforcement, and API/admin
+//! reporting for per-endpoint limits and trusted source handling.
+
 use std::time::Duration;
 
 use uuid::Uuid;

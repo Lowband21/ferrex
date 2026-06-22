@@ -1,3 +1,8 @@
+//! UI-agnostic playback reducer logic.
+//!
+//! Reducers update playback state and emit Iced tasks while keeping app-shell
+//! navigation, persistence, and window effects outside this crate.
+
 use crate::{
     constants::player_controls,
     diagnostics::redact_playback_url,

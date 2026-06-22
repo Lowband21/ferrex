@@ -8,7 +8,11 @@
 
 #![forbid(unsafe_code)]
 
+/// Authentication policy DTOs and official-client PIN helpers.
 pub mod auth;
+/// Generic domain update/effect/event containers.
 pub mod domain;
+/// Shared repository error/result primitives.
 pub mod repository;
+/// Unit-formatting helpers shared by player crates.
 pub mod units;

@@ -1,3 +1,8 @@
+//! Synchronized playback session models.
+//!
+//! Sync sessions let multiple clients coordinate playback state, participants,
+//! media selection, and session lifecycle for watch-party style experiences.
+
 use crate::types::media_id::MediaID;
 use ferrex_model::VideoMediaType;
 use serde::{Deserialize, Serialize};

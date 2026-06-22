@@ -1,27 +1,53 @@
+//! Detail-record traits shared by owned and archived model values.
+//!
+//! These traits expose the subset of TMDB-style details needed by UI and
+//! repository code without requiring callers to care whether a value came from
+//! an owned `ferrex-model` struct or an rkyv archived snapshot.
+
 use ferrex_model::details::{
     CastMember, CrewMember, EnhancedSeriesDetails, ExternalIds, SeasonDetails,
 };
 
+/// Read-only view of series details used by list, details, and search surfaces.
 pub trait SeriesDetailsLike {
+    /// Cast member reference type returned by [`SeriesDetailsLike::cast`].
     type Cast;
+    /// Crew member reference type returned by [`SeriesDetailsLike::crew`].
     type Crew;
+    /// External-id record type for provider ids and deep links.
     type ExIds;
 
+    /// TMDB series id.
     fn tmdb_id(&self) -> u64;
+    /// Display name for the series.
     fn name(&self) -> &str;
+    /// Optional overview/summary text.
     fn overview(&self) -> Option<&str>;
+    /// First-air date string when known.
     fn first_air_date(&self) -> Option<&str>;
+    /// Last-air date string when known.
     fn last_air_date(&self) -> Option<&str>;
+    /// Number of seasons reported by the metadata provider.
     fn num_seasons(&self) -> Option<u16>;
+    /// Number of episodes reported by the metadata provider.
     fn num_episodes(&self) -> Option<u16>;
+    /// Provider vote average.
     fn vote_average(&self) -> Option<f32>;
+    /// Provider vote count.
     fn vote_count(&self) -> Option<u32>;
+    /// Provider popularity score.
     fn popularity(&self) -> Option<f32>;
+    /// Genre names.
     fn genres(&self) -> Vec<&str>;
+    /// Network names.
     fn networks(&self) -> Vec<&str>;
+    /// Cast entries.
     fn cast(&self) -> Vec<&Self::Cast>;
+    /// Crew entries.
     fn crew(&self) -> Vec<&Self::Crew>;
+    /// Provider keyword names.
     fn keywords(&self) -> Vec<&str>;
+    /// External provider identifiers.
     fn external_ids(&self) -> &Self::ExIds;
 }
 
@@ -89,7 +115,9 @@ impl SeriesDetailsLike for EnhancedSeriesDetails {
     }
 }
 
+/// Read-only view of season details used by season progress and navigation UI.
 pub trait SeasonDetailsLike {
+    /// Number of episodes in the season.
     fn num_episodes(&self) -> u16;
 }
 

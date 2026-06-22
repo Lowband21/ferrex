@@ -1,3 +1,8 @@
+//! rkyv wrapper implementations for external dependency types.
+//!
+//! Archive wrappers keep persisted snapshots stable for types such as UUIDs,
+//! paths, dates, decimals, and URLs that are owned by third-party crates.
+
 #[cfg(feature = "rkyv")]
 use rkyv::{
     Archive, Archived, Deserialize, Place, Serialize,

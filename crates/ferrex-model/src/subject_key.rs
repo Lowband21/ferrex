@@ -1,3 +1,8 @@
+//! Stable subject-key value objects for cache and watch-state indexing.
+//!
+//! Subject keys normalize human/path/provider identifiers before they are used as
+//! durable cache keys, database subjects, or scan correlation labels.
+
 use std::fmt;
 
 /// Errors produced when constructing strongly-typed subject keys.

@@ -4,11 +4,17 @@
 //! desktop player monolith. It is safe for player state/domain code to depend on
 //! these types directly; UI/image-handle caches remain in `ferrex-player`.
 
+/// Typed read/write accessors for shared repository handles.
 pub mod accessor;
+/// In-memory media repository indexes and lookup helpers.
 pub mod media_repo;
+/// Disk cache integration for serialized repository snapshots.
 pub mod media_repo_disk_cache;
+/// Movie-batch cache/index structures.
 pub mod movie_batches;
+/// Series-bundle cache/index structures.
 pub mod series_bundles;
+/// LRU-style yoke cache for archived model payloads.
 pub mod yoke_cache;
 
 pub use accessor::*;
@@ -31,9 +37,12 @@ use ferrex_core::player_prelude::{
 use rkyv::util::AlignedVec;
 use yoke::Yoke;
 
+/// Borrow the underlying media reference from either owned or yoke-backed values.
 pub trait MaybeYoked {
+    /// Reference type returned by the wrapper.
     type InnerRef: MediaOps;
 
+    /// Borrow the underlying media reference.
     fn get(&self) -> &Self::InnerRef;
 }
 
@@ -53,20 +62,29 @@ impl MaybeYoked for Media {
     }
 }
 
+/// Archived library snapshot tied to its backing byte buffer.
 pub type LibraryYoke = Yoke<&'static ArchivedLibrary, Arc<AlignedVec>>;
+/// Archived media snapshot tied to its backing byte buffer.
 pub type MediaYoke = Yoke<&'static ArchivedMedia, Arc<AlignedVec>>;
 
+/// Archived movie-reference vector tied to its backing byte buffer.
 pub type MovieVecYoke =
     Yoke<&'static Vec<ArchivedMovieReference>, Arc<AlignedVec>>;
 
+/// Shared archived movie reference.
 pub type ArcMovieYoke =
     Arc<Yoke<&'static ArchivedMovieReference, Arc<AlignedVec>>>;
+/// Archived movie reference tied to its backing byte buffer.
 pub type MovieYoke = Yoke<&'static ArchivedMovieReference, Arc<AlignedVec>>;
 
+/// Shared archived series reference.
 pub type ArcSeriesYoke = Arc<Yoke<&'static ArchivedSeries, Arc<AlignedVec>>>;
+/// Archived series reference tied to its backing byte buffer.
 pub type SeriesYoke = Yoke<&'static ArchivedSeries, Arc<AlignedVec>>;
 
+/// Archived season reference tied to its backing byte buffer.
 pub type SeasonYoke = Yoke<&'static ArchivedSeasonReference, Arc<AlignedVec>>;
+/// Archived episode reference tied to its backing byte buffer.
 pub type EpisodeYoke = Yoke<&'static ArchivedEpisodeReference, Arc<AlignedVec>>;
 
 impl MaybeYoked for MovieYoke {

@@ -1,3 +1,8 @@
+//! Strongly typed URL wrappers for media API endpoints.
+//!
+//! URL newtypes prevent callers from mixing movie, series, season, and episode
+//! endpoint values while preserving access to the underlying `url::Url`.
+
 use url::Url;
 
 pub trait UrlLike {

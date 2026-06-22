@@ -1,3 +1,8 @@
+//! Settings domain messages.
+//!
+//! Messages describe navigation, profile/security/preferences updates, and
+//! section-specific actions without depending on app-shell state.
+
 use ferrex_core::player_prelude::UserScale;
 
 use crate::ScalePreset;

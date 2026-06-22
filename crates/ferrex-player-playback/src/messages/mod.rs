@@ -1,3 +1,9 @@
+//! Playback domain messages and subscription payloads.
+//!
+//! Messages describe media loading, controls, seek/track interactions, stream URL
+//! resolution, and progress updates independent of the final app state.
+
+/// Playback subscription DTOs.
 pub mod subscriptions;
 
 use ferrex_core::player_prelude::{MediaFile, MediaID};

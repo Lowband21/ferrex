@@ -1,3 +1,8 @@
+//! Image processing events emitted when server-side image assets become ready.
+//!
+//! Clients consume these DTOs to refresh image manifests or invalidate local
+//! placeholders after asynchronous image preparation completes.
+
 use uuid::Uuid;
 
 use crate::ImageSize;

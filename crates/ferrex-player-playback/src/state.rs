@@ -1,3 +1,9 @@
+//! Playback state container for media, stream, controls, and track selection.
+//!
+//! The state intentionally separates runtime video handles from serializable-ish
+//! UI/control flags so reducers and app shells can reason about playback without
+//! coupling every caller to the concrete video backend.
+
 use crate::diagnostics::redact_playback_url;
 use ferrex_core::player_prelude::{MediaFile, MediaID};
 use iced::ContentFit;
@@ -9,9 +15,12 @@ use subwave_core::video::types::{AudioTrack, SubtitleTrack};
 use subwave_unified::video::SubwaveVideo;
 
 // Seek bar interaction constants
-pub const SEEK_BAR_VISUAL_HEIGHT: f32 = 4.0; // The visible bar height
-pub const SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER: f32 = 7.0; // Allow clicks within 7x the visual bar height
+/// Visible height of the seek bar in pixels.
+pub const SEEK_BAR_VISUAL_HEIGHT: f32 = 4.0;
+/// Click tolerance multiplier around the visible seek bar height.
+pub const SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER: f32 = 7.0;
 
+/// Mutable playback state owned by the playback domain.
 pub struct PlayerDomainState {
     // Current media
     pub current_media: Option<MediaFile>,
@@ -150,9 +159,12 @@ impl fmt::Debug for PlayerDomainState {
     }
 }
 
+/// Short-lived notification shown after track selection changes.
 #[derive(Debug, Clone)]
 pub struct TrackNotification {
+    /// Human-readable notification text.
     pub message: String,
+    /// Instant the notification became visible.
     pub show_time: Instant,
 }
 

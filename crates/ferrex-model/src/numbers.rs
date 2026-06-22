@@ -1,3 +1,8 @@
+//! Bounded numeric value objects for seasons and episodes.
+//!
+//! These wrappers validate user/API-provided numbers before they are stored or
+//! used as keys in media and watch-state DTOs.
+
 /// Season number with u8 bounds
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

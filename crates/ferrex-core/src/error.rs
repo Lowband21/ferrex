@@ -1,3 +1,8 @@
+//! Core error types shared by domain, query, and infrastructure code.
+//!
+//! Errors in this module wrap model, database, validation, and runtime failures
+//! that can be converted into transport-specific responses by outer crates.
+
 use ferrex_model::error::ModelError;
 use thiserror::Error;
 

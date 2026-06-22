@@ -1,3 +1,8 @@
+//! User-administration message types.
+//!
+//! Messages describe admin user CRUD, first-run user creation, and navigation
+//! actions independently of the player UI shell.
+
 use ferrex_core::player_prelude::User;
 use ferrex_player_api::api_types::AdminUserInfo;
 use uuid::Uuid;

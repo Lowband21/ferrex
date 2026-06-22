@@ -1,3 +1,8 @@
+//! Audio and subtitle track-selection helpers.
+//!
+//! Helpers in this module format track labels and update `PlayerDomainState`
+//! when users switch audio/subtitle tracks.
+
 use super::state::PlayerDomainState;
 use subwave_core::video::types::{AudioTrack, SubtitleTrack};
 

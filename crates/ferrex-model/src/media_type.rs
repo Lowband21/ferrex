@@ -1,3 +1,8 @@
+//! Media category enums used by video playback and image ownership.
+//!
+//! `VideoMediaType` covers playable/browsable media hierarchy entries, while
+//! `ImageMediaType` includes additional image owners such as people/profiles.
+
 use std::fmt::Formatter;
 
 use std::fmt::Display;

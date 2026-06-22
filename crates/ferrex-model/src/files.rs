@@ -1,3 +1,8 @@
+//! Media file, parsed-filename, and file-metadata DTOs.
+//!
+//! File records connect scanned filesystem paths to media references and carry
+//! technical metadata needed by playback, transcoding, and API responses.
+
 use crate::{
     MediaID,
     error::{ModelError as MediaError, Result},

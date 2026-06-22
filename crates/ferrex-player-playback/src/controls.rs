@@ -1,3 +1,8 @@
+//! Playback control view helpers for the optional UI feature.
+//!
+//! Controls render playback buttons, seek bars, track menus, and related overlay
+//! affordances using the state owned by this crate.
+
 use super::theme;
 use super::track_selection::format_subtitle_track;
 use crate::{

@@ -13,7 +13,7 @@ description = "Ferrex desktop player application shell and runtime bootstrap"
 [lints.rustdoc]
 broken_intra_doc_links = "warn"
 private_intra_doc_links = "warn"
-missing_crate_level_docs = "allow"
+missing_crate_level_docs = "warn"
 private_doc_tests = "warn"
 invalid_codeblock_attributes = "warn"
 invalid_rust_codeblocks = "warn"

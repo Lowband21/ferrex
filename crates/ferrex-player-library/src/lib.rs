@@ -5,13 +5,21 @@
 //! subscriptions. The desktop app supplies app-shell context around these data
 //! primitives instead of forcing the data domain to import the final root state.
 
+/// Media-root browser state for selecting/scanning server directories.
 pub mod media_root_browser;
+/// Library messages and realtime subscription DTOs.
 pub mod messages;
+/// Repository snapshot DTOs used to hydrate cache/index state.
 pub mod repo_snapshot;
+/// Compatibility re-exports for the extracted repository crate.
 pub mod repository;
+/// Server-backed HLS and scan subscription helpers.
 pub mod server;
+/// Library form/state helper types.
 pub mod types;
+/// UI-agnostic library reducer logic.
 pub mod update;
+/// Focused update-handler helpers.
 pub mod update_handlers;
 
 use self::{
@@ -54,15 +62,19 @@ pub trait LibraryExternalEvent {
 /// Active scan identity from the user's perspective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ActiveScanRunKey {
+    /// Library being scanned.
     pub library_id: LibraryId,
+    /// Scan run mode for the active operation.
     pub mode: ScanRunMode,
 }
 
 impl ActiveScanRunKey {
+    /// Build a scan-run key from a library and scan mode.
     pub fn new(library_id: LibraryId, mode: ScanRunMode) -> Self {
         Self { library_id, mode }
     }
 
+    /// Build a scan-run key from an active scan snapshot.
     pub fn from_snapshot(snapshot: &ScanSnapshotDto) -> Self {
         Self::new(snapshot.library_id, snapshot.mode)
     }
@@ -71,46 +83,75 @@ impl ActiveScanRunKey {
 /// Library domain state owned by this crate.
 #[derive(Debug)]
 pub struct LibraryDomainState {
+    /// Whether the library management panel is visible.
     pub show_library_management: bool,
+    /// Current add/edit library form data.
     pub library_form_data: Option<LibraryFormData>,
+    /// Validation errors for the current library form.
     pub library_form_errors: Vec<String>,
+    /// Success message from the last library form action.
     pub library_form_success: Option<String>,
+    /// Cached media references keyed by library id.
     pub library_media_cache: HashMap<Uuid, LibraryMediaCache>,
+    /// Active scan snapshots keyed by scan id.
     pub active_scans: HashMap<Uuid, ScanSnapshotDto>,
+    /// Active scan ids keyed by user-visible library/mode identity.
     pub active_scan_runs: HashMap<ActiveScanRunKey, Uuid>,
+    /// Scan starts requested locally but not yet acknowledged by the server.
     pub pending_scan_starts: HashSet<ActiveScanRunKey>,
+    /// Most recent progress frame for each scan id.
     pub latest_progress: HashMap<Uuid, ScanProgressEvent>,
+    /// Load-state marker for library bootstrap.
     pub load_state: LibrariesLoadState,
 
+    /// Last loaded scan metrics summary.
     pub scan_metrics: Option<ScanMetrics>,
+    /// Last loaded scan configuration.
     pub scan_config: Option<ScanConfig>,
+    /// Media-root browser state for choosing scan roots.
     pub media_root_browser: MediaRootBrowserState,
 
+    /// Optional API service used by server-backed library actions.
     pub api_service: Option<Arc<dyn ApiService>>,
 
+    /// Loaded libraries for the current session/user.
     pub libraries: Vec<Library>,
 
+    /// Read/write repository accessor for cached media references.
     pub repo_accessor: Accessor<ReadWrite>,
+    /// Demo-mode controls and seeded library ids.
     #[cfg(feature = "demo")]
     pub demo_controls: DemoControlsState,
 }
 
+/// Demo-mode controls mirrored into the library domain.
 #[cfg(feature = "demo")]
 #[derive(Debug, Clone, Default)]
 pub struct DemoControlsState {
+    /// Whether a demo operation is loading initial state.
     pub is_loading: bool,
+    /// Whether a demo resize/reset operation is in flight.
     pub is_updating: bool,
+    /// Last demo operation error.
     pub error: Option<String>,
+    /// Libraries managed by demo mode.
     pub demo_library_ids: HashSet<LibraryId>,
+    /// Current movie count in the demo library.
     pub movies_current: Option<usize>,
+    /// Current series count in the demo library.
     pub series_current: Option<usize>,
+    /// Pending movie-count input from UI.
     pub movies_input: String,
+    /// Pending series-count input from UI.
     pub series_input: String,
+    /// Demo filesystem root, when known.
     pub demo_root: Option<PathBuf>,
+    /// Demo username, when known.
     pub demo_username: Option<String>,
 }
 
 impl LibraryDomainState {
+    /// Build library domain state from optional API and required repository access.
     pub fn new(
         api_service: Option<Arc<dyn ApiService>>,
         repo_accessor: Accessor<ReadWrite>,
@@ -142,6 +183,7 @@ impl LibraryDomainState {
         self.active_scans.get(&scan_id)
     }
 
+    /// Return the active scan id for a library/mode pair if the snapshot is still present.
     pub fn active_scan_id_by_library_mode(
         &self,
         library_id: LibraryId,
@@ -153,6 +195,7 @@ impl LibraryDomainState {
             .filter(|scan_id| self.active_scans.contains_key(scan_id))
     }
 
+    /// Borrow the active scan snapshot for a library/mode pair.
     pub fn active_scan_by_library_mode(
         &self,
         library_id: LibraryId,
@@ -162,6 +205,7 @@ impl LibraryDomainState {
             .and_then(|scan_id| self.active_scans.get(&scan_id))
     }
 
+    /// Whether a scan start has been requested but not acknowledged.
     pub fn is_scan_start_pending(
         &self,
         library_id: LibraryId,
@@ -171,6 +215,7 @@ impl LibraryDomainState {
             .contains(&ActiveScanRunKey::new(library_id, mode))
     }
 
+    /// Mark a scan start as pending if no active or pending scan already covers it.
     pub fn begin_scan_start(
         &mut self,
         library_id: LibraryId,
@@ -190,6 +235,7 @@ impl LibraryDomainState {
         self.pending_scan_starts.insert(key)
     }
 
+    /// Clear a pending scan-start marker after the request completes.
     pub fn finish_scan_start(
         &mut self,
         library_id: LibraryId,
@@ -199,6 +245,7 @@ impl LibraryDomainState {
             .remove(&ActiveScanRunKey::new(library_id, mode));
     }
 
+    /// Apply a server acknowledgement for a newly accepted scan command.
     pub fn apply_scan_start_response(
         &mut self,
         library_id: LibraryId,
@@ -235,6 +282,7 @@ impl LibraryDomainState {
         });
     }
 
+    /// Insert or update an active scan snapshot and maintain lookup indexes.
     pub fn upsert_active_scan(&mut self, snapshot: ScanSnapshotDto) {
         let key = ActiveScanRunKey::from_snapshot(&snapshot);
         self.pending_scan_starts.remove(&key);
@@ -268,6 +316,7 @@ impl LibraryDomainState {
         self.active_scans.insert(snapshot.scan_id, snapshot);
     }
 
+    /// Replace active scan state with a deduplicated server snapshot set.
     pub fn replace_active_scan_snapshots(
         &mut self,
         snapshots: Vec<ScanSnapshotDto>,
@@ -308,6 +357,7 @@ impl LibraryDomainState {
             .retain(|key| !self.active_scan_runs.contains_key(key));
     }
 
+    /// Merge a realtime progress frame into the active scan cache.
     pub fn apply_scan_progress_frame(
         &mut self,
         frame: ScanProgressEvent,
@@ -362,6 +412,7 @@ impl LibraryDomainState {
         true
     }
 
+    /// Remove a scan from all active scan indexes.
     pub fn remove_active_scan(&mut self, scan_id: Uuid) {
         if let Some(snapshot) = self.active_scans.remove(&scan_id) {
             self.active_scan_runs
@@ -373,6 +424,7 @@ impl LibraryDomainState {
         self.latest_progress.remove(&scan_id);
     }
 
+    /// Clear all active and pending scan tracking state.
     pub fn clear_scan_tracking(&mut self) {
         self.active_scans.clear();
         self.active_scan_runs.clear();
@@ -422,12 +474,15 @@ fn scan_status_from_progress(status: &str) -> Option<ScanLifecycleStatus> {
     }
 }
 
+/// Library domain wrapper used by app shells to route cross-domain events.
 #[derive(Debug)]
 pub struct LibraryDomain {
+    /// Mutable library state owned by the domain.
     pub state: LibraryDomainState,
 }
 
 impl LibraryDomain {
+    /// Build a library domain wrapper from existing state.
     pub fn new(state: LibraryDomainState) -> Self {
         Self { state }
     }
@@ -449,15 +504,23 @@ impl LibraryDomain {
     }
 }
 
+/// Bootstrap status for loading libraries into the player domain.
 #[derive(Debug, Clone)]
 pub enum LibrariesLoadState {
+    /// No library load has been attempted in this state instance.
     NotStarted,
+    /// A library load request is in flight.
     InProgress,
+    /// Libraries were loaded successfully for the optional user/server pair.
     Succeeded {
+        /// User id associated with the loaded libraries, when authenticated.
         user_id: Option<Uuid>,
+        /// Server URL used to load the library state.
         server_url: String,
     },
+    /// Library loading failed and retained an error for display/retry.
     Failed {
+        /// Last load error message.
         last_error: String,
     },
 }

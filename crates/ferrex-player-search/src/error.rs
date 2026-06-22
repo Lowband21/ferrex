@@ -1,3 +1,8 @@
+//! Search-domain error types.
+//!
+//! Errors distinguish repository/cache failures from service/API failures so app
+//! shells can present retry or fallback UI.
+
 use thiserror::Error;
 
 use ferrex_player_library::repository::RepositoryError;

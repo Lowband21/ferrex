@@ -2,20 +2,31 @@
 //!
 //! The crate is intentionally independent of the desktop app's final state facade.
 //! Callers provide app-shell adapters for watch-progress persistence, navigation,
-//! and view/window side effects while this crate owns the playback state machine.
+//! and view/window side effects while this crate owns the playback state machine,
+//! track selection, diagnostics, and optional UI overlay helpers.
 
+/// Playback constants shared by controls, shortcuts, and update logic.
 pub mod constants;
+/// UI controls for playback overlays.
 #[cfg(feature = "ui")]
 pub mod controls;
 mod diagnostics;
+/// External MPV process integration for HDR passthrough.
 pub mod external_mpv;
+/// Playback message and subscription DTOs.
 pub mod messages;
+/// Playback state container and notification DTOs.
 pub mod state;
+/// Playback UI theme helpers.
 #[cfg(feature = "ui")]
 pub mod theme;
+/// Audio/subtitle track selection helpers.
 pub mod track_selection;
+/// UI-agnostic playback reducer logic.
 pub mod update;
+/// Video backend wiring and stream URL handling.
 pub mod video;
+/// Playback overlay views.
 #[cfg(feature = "ui")]
 pub mod view;
 
@@ -24,8 +35,11 @@ use ferrex_player_api::services::api::ApiService;
 use iced::Task;
 use std::sync::Arc;
 
+/// Redact sensitive playback URLs for diagnostics.
 pub use diagnostics::redact_playback_url;
+/// Playback message type.
 pub use messages::PlayerMessage;
+/// Playback state and track-notification DTOs.
 pub use state::{PlayerDomainState, TrackNotification};
 
 /// Cross-domain event view needed by the playback data domain.
@@ -36,11 +50,14 @@ pub trait PlaybackExternalEvent {
     }
 }
 
-/// Player domain wrapper.
+/// Playback domain wrapper used by app shells to route cross-domain events.
 #[derive(Debug)]
 pub struct PlayerDomain {
+    /// Mutable playback state machine.
     pub state: PlayerDomainState,
+    /// Current library id used for stream/watch-state context.
     pub current_library_id: Option<LibraryId>,
+    /// Optional API service used for server-backed playback operations.
     pub api_service: Option<Arc<dyn ApiService>>,
 }
 
@@ -51,6 +68,7 @@ impl Default for PlayerDomain {
 }
 
 impl PlayerDomain {
+    /// Build a playback domain with optional API access.
     pub fn new(api_service: Option<Arc<dyn ApiService>>) -> Self {
         Self {
             state: PlayerDomainState::default(),
@@ -59,6 +77,7 @@ impl PlayerDomain {
         }
     }
 
+    /// Handle cross-domain events such as selected-library changes.
     pub fn handle_event<E>(&mut self, event: &E) -> Task<PlayerMessage>
     where
         E: PlaybackExternalEvent,

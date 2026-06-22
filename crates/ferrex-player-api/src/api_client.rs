@@ -1,3 +1,9 @@
+//! Concrete HTTP client for Ferrex player API calls.
+//!
+//! The client owns base URL handling, authentication token refresh callbacks,
+//! request/response decoding, and endpoint helpers used by higher-level service
+//! adapters.
+
 use ferrex_core::{
     api::routes::v1,
     player_prelude::{

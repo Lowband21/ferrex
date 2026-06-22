@@ -1,3 +1,8 @@
+//! Small configuration utility helpers shared by loader and validation code.
+//!
+//! Utilities in this module normalize paths and parse compact configuration
+//! strings into strongly typed Ferrex config values.
+
 use std::path::PathBuf;
 
 use crate::models::rate_limits::RateLimitSpec;

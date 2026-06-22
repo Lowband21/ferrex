@@ -1,3 +1,8 @@
+//! Disk cache integration for player media repository snapshots.
+//!
+//! The cache serializes repository payloads into content-addressed storage and
+//! reloads them with integrity metadata for offline/fast startup paths.
+
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},

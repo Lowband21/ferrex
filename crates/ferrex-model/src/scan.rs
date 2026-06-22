@@ -1,3 +1,8 @@
+//! Scan configuration and progress DTOs shared by server and clients.
+//!
+//! The scan surface describes how libraries are scanned, how scan progress is
+//! summarized, and how operators/clients observe scan lifecycle state.
+
 use std::path::PathBuf;
 
 use uuid::Uuid;

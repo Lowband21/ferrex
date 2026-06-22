@@ -1,3 +1,8 @@
+//! Strongly typed title value objects.
+//!
+//! Title wrappers keep movie and series names validated at construction time and
+//! prevent accidental mixing of title categories at API boundaries.
+
 use crate::error::ModelError as MediaError;
 
 /// Strongly typed movie title

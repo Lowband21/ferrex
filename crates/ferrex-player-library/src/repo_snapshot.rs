@@ -1,3 +1,8 @@
+//! Repository snapshot identifiers used by the player media cache.
+//!
+//! Snapshots describe which libraries, movie batches, and series bundles are
+//! present so cached repository state can be refreshed predictably.
+
 use ferrex_core::player_prelude::{LibraryId, MovieBatchId, SeriesID};
 use rkyv::util::AlignedVec;
 use uuid::Uuid;

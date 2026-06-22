@@ -1,3 +1,9 @@
+//! Curated player-facing API DTO surface.
+//!
+//! This module gathers the core/model types most API callers need so player
+//! crates can import server contract DTOs from one boundary crate instead of
+//! depending directly on every core module.
+
 // Curated surface from ferrex-core for player-facing code
 pub use ferrex_contracts::prelude::{EpisodeLike, SeasonLike};
 pub use ferrex_core::api::types::intelligence::*;

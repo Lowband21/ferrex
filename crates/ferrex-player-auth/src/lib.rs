@@ -1,53 +1,83 @@
 //! Authentication domain surfaces for Ferrex player clients.
 //!
-//! This crate owns the dependency-light authentication state, messages,
-//! service contract, concrete `AuthManager` adapter, encrypted local auth
-//! storage, hardware fingerprinting, PIN policy helpers, security helpers, and
-//! auth-specific testkit. UI crates are expected to provide view rendering and
-//! app-level message routing around these primitives.
+//! This crate owns dependency-light authentication state, messages, the
+//! `AuthService` contract, the concrete `AuthManager` adapter, encrypted local
+//! auth storage, hardware fingerprinting, PIN policy helpers, security helpers,
+//! and auth-specific testkit. UI crates provide view rendering and app-level
+//! message routing around these primitives.
 
+/// Adapter that exposes `AuthManager` through the `AuthService` trait.
 pub mod adapter;
+/// Authentication DTOs used inside player clients.
 pub mod dto;
+/// Authentication error hierarchy.
 pub mod errors;
+/// Hardware fingerprinting for official device identity.
 pub mod hardware_fingerprint;
+/// Concrete authentication manager and local-token orchestration.
 pub mod manager;
+/// Authentication messages and command/subscription DTOs.
 pub mod messages;
+/// Official-client PIN policy helpers.
 pub mod pin_policy;
+/// Credential, password, and sensitive-data helpers.
 pub mod security;
+/// Authentication service trait used by app/domain code.
 pub mod service;
+/// Authentication state-machine helper types.
 pub mod state_types;
+/// Encrypted local authentication storage.
 pub mod storage;
+/// Authentication test doubles.
 pub mod testkit;
+/// Authentication flow/domain types.
 pub mod types;
+/// UI-agnostic authentication update handler namespace.
 pub mod update_handlers;
 
 use ferrex_core::player_prelude::UserPermissions;
 use ferrex_player_api::services::api::ApiService;
 use std::sync::Arc;
 
+/// Adapter that wraps the concrete auth manager.
 pub use adapter::AuthManagerAdapter;
+/// Authentication DTO re-exports.
 pub use dto::*;
+/// Authentication error re-exports.
 pub use errors::*;
+/// API-bound authentication policy/result DTOs.
 pub use ferrex_player_api::auth::{
     AutoLoginScope, DeviceAuthStatus, DeviceTrustPolicyResponse,
     PinPolicyResponse, PlayerAuthResult,
 };
+/// Concrete authentication manager and device identity type.
 pub use manager::{AuthManager, DeviceIdentity};
+/// Authentication service contract.
 pub use service::AuthService;
+/// Mock authentication service for tests.
 pub use testkit::MockAuthService;
+/// Authentication flow state-machine type.
 pub use types::AuthenticationFlow;
 
 /// Runtime authentication state shared by player frontends.
 pub struct AuthDomainState {
+    /// API service used for server-backed authentication calls.
     pub api_service: Arc<dyn ApiService>,
+    /// Whether the current session has an authenticated user.
     pub is_authenticated: bool,
+    /// Active authentication/setup flow shown by UI frontends.
     pub auth_flow: AuthenticationFlow,
+    /// Authenticated user's permissions, when available.
     pub user_permissions: Option<UserPermissions>,
+    /// Whether device-bound automatic login is enabled locally.
     pub auto_login_enabled: bool,
     /// Tracks whether the active remember-device checkbox was changed by the user.
     pub remember_device_explicit_override: bool,
+    /// Server-provided PIN policy used by login/setup UI.
     pub pin_policy: PinPolicyResponse,
+    /// Server-provided device trust policy used by remember-device flows.
     pub device_trust_policy: DeviceTrustPolicyResponse,
+    /// Authentication service used for local and server-backed auth operations.
     pub auth_service: Arc<dyn AuthService>,
 }
 

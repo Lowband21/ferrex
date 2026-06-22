@@ -1,3 +1,8 @@
+//! Minimal chrono-compatible fallback used when date/time support is disabled.
+//!
+//! The stub preserves API shape for feature-minimal builds that need model DTOs
+//! without pulling in the full `chrono` dependency.
+
 use core::fmt;
 use core::marker::PhantomData;
 use core::ops::{Add, Sub};

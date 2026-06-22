@@ -1,3 +1,8 @@
+//! Configuration guard rails and warnings.
+//!
+//! Validation checks keep generated and loaded configuration safe before the
+//! server starts, including auth secrets, CORS, rate limits, and security headers.
+
 use axum::http::{Method, header::HeaderName};
 use thiserror::Error;
 

@@ -6,11 +6,17 @@
 
 #![forbid(unsafe_code)]
 
+/// Color DTOs and harmony helpers for theme settings.
 pub mod color;
+/// Settings domain messages.
 pub mod messages;
+/// Named scale presets shared with UI.
 pub mod scale;
+/// Section-specific state and message modules.
 pub mod sections;
+/// Unified settings state and section enums.
 pub mod state;
+/// UI-agnostic settings reducers and effects.
 pub mod update;
 
 use std::sync::Arc;
@@ -19,9 +25,13 @@ use ferrex_core::player_prelude::UserPermissions;
 use ferrex_player_api::services::{api::ApiService, settings::SettingsService};
 use ferrex_player_auth::AuthService;
 
+/// Color configuration types used by settings and theme UI.
 pub use color::{AccentColorConfig, ColorPoint, HarmonyMode, HsluvColor};
+/// Settings message type.
 pub use messages::SettingsMessage;
+/// Named UI scale presets.
 pub use scale::ScalePreset;
+/// Unified settings section enum.
 pub use state::SettingsSection;
 
 use sections::devices::state::DeviceManagementState;
@@ -34,9 +44,13 @@ use sections::theme::ThemeState;
 pub struct SettingsDomainState {
     /// Current section in the unified settings sidebar.
     pub current_section: state::SettingsSection,
+    /// Security settings form and credential state.
     pub security: state::SecurityState,
+    /// Profile settings form state.
     pub profile: state::ProfileState,
+    /// General user preference settings state.
     pub preferences: state::PreferencesState,
+    /// Device-management settings state.
     pub device_management_state: DeviceManagementState,
 
     /// Playback settings section state.
