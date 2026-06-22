@@ -9,10 +9,14 @@ pub mod db_url;
 use super::{
     models::{
         AuthConfig, CacheConfig, Config, ConfigMetadata, CorsConfig,
-        DatabaseConfig, FfmpegConfig, HstsSettings, MediaConfig,
-        RateLimiterSettings, RedisConfig, SecurityConfig, ServerConfig,
+        DatabaseConfig, FfmpegConfig, HstsSettings, IntelligenceProviderConfig,
+        IntelligenceRetryConfig, IntelligenceRuntimeConfig,
+        IntelligenceRuntimeLimits, MediaConfig, RateLimiterSettings,
+        RedisConfig, SecurityConfig, ServerConfig,
         scanner::ScannerConfig,
-        sources::{EnvConfig, FileConfig, FileDatabaseConfig},
+        sources::{
+            EnvConfig, FileConfig, FileDatabaseConfig, FileIntelligenceConfig,
+        },
     },
     validation::{self, ConfigWarnings},
 };
@@ -21,7 +25,10 @@ use crate::{
     loader::db_url::resolve_database_url,
 };
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tracing::error;
 
 /// Options that control where configuration is loaded from.
@@ -136,6 +143,7 @@ impl ConfigLoader {
             cors: file_cors,
             security: file_security,
             auth: file_auth,
+            intelligence: file_intelligence,
             rate_limiter: _file_rate_limiter,
             scanner: _file_scanner,
             dev_mode: file_dev_mode,
@@ -270,8 +278,10 @@ impl ConfigLoader {
                 .clone()
                 .or(file_auth.token_key.clone())
                 .unwrap_or_else(|| DEFAULT_TOKEN_KEY.to_string()),
-            setup_token: env.setup_token.or(file_auth.setup_token),
+            setup_token: env.setup_token.clone().or(file_auth.setup_token),
         };
+
+        let intelligence = compose_intelligence_config(&env, file_intelligence);
 
         let (scanner, scanner_source) = ScannerConfig::load_from_env()
             .map_err(error::ConfigLoadError::Scanner)?;
@@ -308,6 +318,7 @@ impl ConfigLoader {
             security,
             dev_mode,
             auth,
+            intelligence,
             scanner,
             rate_limiter,
             metadata,
@@ -333,6 +344,88 @@ impl ConfigLoader {
     ) -> Result<Option<String>, error::ConfigLoadError> {
         resolve_database_url(env, file_database)
     }
+}
+
+fn compose_intelligence_config(
+    env: &EnvConfig,
+    file: FileIntelligenceConfig,
+) -> IntelligenceRuntimeConfig {
+    let default = IntelligenceRuntimeConfig::default();
+    let provider_default = IntelligenceProviderConfig::default();
+    let limit_default = IntelligenceRuntimeLimits::default();
+    let retry_default = IntelligenceRetryConfig::default();
+
+    IntelligenceRuntimeConfig {
+        enabled: env
+            .intelligence_enabled
+            .or(file.enabled)
+            .unwrap_or(default.enabled),
+        provider: IntelligenceProviderConfig {
+            base_url: env
+                .intelligence_base_url
+                .clone()
+                .or(file.base_url)
+                .unwrap_or(provider_default.base_url),
+            api_key: env.intelligence_api_key.clone().or(file.api_key),
+            model: env
+                .intelligence_model
+                .clone()
+                .or(file.model)
+                .or(provider_default.model),
+        },
+        limits: IntelligenceRuntimeLimits {
+            model_timeout: duration_from_ms(
+                env.intelligence_model_timeout_ms.or(file.model_timeout_ms),
+                limit_default.model_timeout,
+            ),
+            tool_timeout: duration_from_ms(
+                env.intelligence_tool_timeout_ms.or(file.tool_timeout_ms),
+                limit_default.tool_timeout,
+            ),
+            total_timeout: duration_from_ms(
+                env.intelligence_total_timeout_ms.or(file.total_timeout_ms),
+                limit_default.total_timeout,
+            ),
+            max_steps: env
+                .intelligence_max_steps
+                .or(file.max_steps)
+                .filter(|value| *value > 0)
+                .unwrap_or(limit_default.max_steps),
+            max_tool_calls: env
+                .intelligence_max_tool_calls
+                .or(file.max_tool_calls)
+                .filter(|value| *value > 0)
+                .unwrap_or(limit_default.max_tool_calls),
+            max_output_bytes: env
+                .intelligence_max_output_bytes
+                .or(file.max_output_bytes)
+                .filter(|value| *value > 0)
+                .unwrap_or(limit_default.max_output_bytes),
+            max_tool_result_bytes: env
+                .intelligence_max_tool_result_bytes
+                .or(file.max_tool_result_bytes)
+                .filter(|value| *value > 0)
+                .unwrap_or(limit_default.max_tool_result_bytes),
+            per_user_concurrency: env
+                .intelligence_per_user_concurrency
+                .or(file.per_user_concurrency)
+                .filter(|value| *value > 0)
+                .unwrap_or(limit_default.per_user_concurrency),
+        },
+        retry: IntelligenceRetryConfig {
+            max_retries: env
+                .intelligence_max_retries
+                .or(file.max_retries)
+                .unwrap_or(retry_default.max_retries),
+        },
+    }
+}
+
+fn duration_from_ms(value: Option<u64>, default: Duration) -> Duration {
+    value
+        .filter(|millis| *millis > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(default)
 }
 
 #[cfg(test)]
@@ -388,6 +481,51 @@ mod tests {
             loaded.config.database.primary_url.as_deref().map(str::trim),
             Some("postgresql://new")
         );
+    }
+
+    #[test]
+    fn intelligence_env_config_redacts_api_key_debug() {
+        let dir = tempdir().expect("tempdir");
+        let env_file = dir.path().join(".env");
+        std::fs::write(
+            &env_file,
+            "DEV_MODE=true\n\
+             FERREX_INTELLIGENCE_ENABLED=true\n\
+             FERREX_INTELLIGENCE_BASE_URL=http://localhost:8081/v1\n\
+             FERREX_INTELLIGENCE_API_KEY=test-secret\n\
+             FERREX_INTELLIGENCE_MODEL=gemma-4-12b\n\
+             FERREX_INTELLIGENCE_MODEL_TIMEOUT_MS=70000\n\
+             FERREX_INTELLIGENCE_TOOL_TIMEOUT_MS=15000\n\
+             FERREX_INTELLIGENCE_TOTAL_TIMEOUT_MS=240000\n\
+             FERREX_INTELLIGENCE_MAX_STEPS=9\n\
+             FERREX_INTELLIGENCE_MAX_TOOL_CALLS=11\n\
+             FERREX_INTELLIGENCE_MAX_OUTPUT_BYTES=12345\n\
+             FERREX_INTELLIGENCE_MAX_TOOL_RESULT_BYTES=54321\n\
+             FERREX_INTELLIGENCE_MAX_RETRIES=2\n\
+             FERREX_INTELLIGENCE_PER_USER_CONCURRENCY=3\n",
+        )
+        .expect("write .env");
+
+        let loaded = ConfigLoader::new()
+            .with_path(&env_file)
+            .load()
+            .expect("config load");
+        let cfg = loaded.config.intelligence;
+
+        assert!(cfg.enabled);
+        assert_eq!(cfg.provider.base_url, "http://localhost:8081/v1");
+        assert_eq!(cfg.provider.api_key.as_deref(), Some("test-secret"));
+        assert_eq!(cfg.provider.model.as_deref(), Some("gemma-4-12b"));
+        assert_eq!(cfg.limits.model_timeout, Duration::from_millis(70_000));
+        assert_eq!(cfg.limits.tool_timeout, Duration::from_millis(15_000));
+        assert_eq!(cfg.limits.total_timeout, Duration::from_millis(240_000));
+        assert_eq!(cfg.limits.max_steps, 9);
+        assert_eq!(cfg.limits.max_tool_calls, 11);
+        assert_eq!(cfg.limits.max_output_bytes, 12_345);
+        assert_eq!(cfg.limits.max_tool_result_bytes, 54_321);
+        assert_eq!(cfg.retry.max_retries, 2);
+        assert_eq!(cfg.limits.per_user_concurrency, 3);
+        assert!(!format!("{:?}", cfg.provider).contains("test-secret"));
     }
 }
 

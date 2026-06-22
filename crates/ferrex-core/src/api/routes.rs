@@ -90,8 +90,19 @@ pub mod v1 {
             v1_path!("/intelligence/items/{media_id}/context");
         pub const RELATED_CONTEXT: &str =
             v1_path!("/intelligence/items/{media_id}/related");
+        pub const RUN_START: &str = v1_path!("/intelligence/runs:start");
+        pub const RUN_STATUS: &str =
+            v1_path!("/intelligence/runs/{run_id}/status");
+        pub const RUN_CANCEL: &str =
+            v1_path!("/intelligence/runs/{run_id}:cancel");
+        pub const RUN_EVENTS: &str =
+            v1_path!("/intelligence/runs/{run_id}/events");
         pub const RUN_AUDIT: &str =
             v1_path!("/intelligence/runs/{run_id}/audit");
+        pub const DRAFT_ARTIFACT_DETAIL: &str =
+            v1_path!("/intelligence/drafts/{artifact_id}");
+        pub const PROVIDER_STATUS: &str =
+            v1_path!("/intelligence/provider/status");
     }
 
     pub mod watch {

@@ -23,19 +23,23 @@ use crate::{
         DEFAULT_INTELLIGENCE_RELATED_LIMIT, DEFAULT_INTELLIGENCE_SUMMARY_CHARS,
         DEFAULT_INTELLIGENCE_TOOL_CALL_LIMIT, IntelligenceArtifactKind,
         IntelligenceArtifactSearchRequest, IntelligenceArtifactSearchResponse,
-        IntelligenceArtifactSummary, IntelligenceCandidate,
-        IntelligenceCandidateSearchRequest,
+        IntelligenceArtifactSourceEdge, IntelligenceArtifactSourceKind,
+        IntelligenceArtifactStatus, IntelligenceArtifactSummary,
+        IntelligenceCandidate, IntelligenceCandidateSearchRequest,
         IntelligenceCandidateSearchResponse, IntelligenceContextItem,
-        IntelligenceFacetGroup, IntelligenceFacetKind, IntelligenceFacetValue,
-        IntelligenceGroundingRef, IntelligenceGroundingSource,
-        IntelligenceItemContextRequest, IntelligenceItemContextResponse,
-        IntelligenceLibraryOverview, IntelligenceLibraryOverviewRequest,
+        IntelligenceDraftArtifactPayload, IntelligenceError,
+        IntelligenceErrorCode, IntelligenceFacetGroup, IntelligenceFacetKind,
+        IntelligenceFacetValue, IntelligenceGroundingRef,
+        IntelligenceGroundingSource, IntelligenceItemContextRequest,
+        IntelligenceItemContextResponse, IntelligenceLibraryOverview,
+        IntelligenceLibraryOverviewRequest,
         IntelligenceLibraryOverviewResponse, IntelligenceMediaCounts,
         IntelligenceMediaKind, IntelligenceMediaRef, IntelligenceProvenanceRef,
         IntelligenceRelatedContext, IntelligenceRelatedContextRequest,
         IntelligenceRelatedContextResponse, IntelligenceRelationshipKind,
         IntelligenceRunAudit, IntelligenceRunAuditRequest,
-        IntelligenceRunAuditResponse, IntelligenceRunPurpose,
+        IntelligenceRunAuditResponse, IntelligenceRunEvent,
+        IntelligenceRunEventKind, IntelligenceRunPurpose,
         IntelligenceRunStatus, IntelligenceSummary, IntelligenceToolCallAudit,
         IntelligenceToolCallStatus, MAX_INTELLIGENCE_ARTIFACT_LIMIT,
         MAX_INTELLIGENCE_CANDIDATE_LIMIT, MAX_INTELLIGENCE_FACET_LIMIT,
@@ -44,7 +48,9 @@ use crate::{
     },
     database::repository_ports::intelligence::{
         IntelligenceArtifactScope, IntelligenceArtifactUpsert,
-        IntelligenceRepository, IntelligenceRunCreate, IntelligenceRunKind,
+        IntelligenceDraftArtifactCreate, IntelligenceRepository,
+        IntelligenceRunCreate, IntelligenceRunEventCreate,
+        IntelligenceRunEventListFilter, IntelligenceRunKind,
         IntelligenceRunListFilter, IntelligenceRunStatus as RunStatusInternal,
         IntelligenceRunSummary, IntelligenceRunUpdate,
         IntelligenceToolCallCreate,
@@ -171,6 +177,86 @@ fn artifact_kind_from_db(value: &str) -> IntelligenceArtifactKind {
         "watch_plan" => IntelligenceArtifactKind::GeneratedAnswer,
         "collection" => IntelligenceArtifactKind::Recommendation,
         _ => IntelligenceArtifactKind::Summary,
+    }
+}
+
+fn artifact_status_from_db(value: &str) -> IntelligenceArtifactStatus {
+    match value {
+        "active" => IntelligenceArtifactStatus::Active,
+        "stale" => IntelligenceArtifactStatus::Stale,
+        "superseded" => IntelligenceArtifactStatus::Superseded,
+        "invalidated" => IntelligenceArtifactStatus::Invalidated,
+        "deleted" => IntelligenceArtifactStatus::Deleted,
+        "failed" => IntelligenceArtifactStatus::Failed,
+        _ => IntelligenceArtifactStatus::Draft,
+    }
+}
+
+fn artifact_source_kind_from_db(value: &str) -> IntelligenceArtifactSourceKind {
+    match value {
+        "media_context" => IntelligenceArtifactSourceKind::MediaContext,
+        "search_document" => IntelligenceArtifactSourceKind::SearchDocument,
+        "artifact" => IntelligenceArtifactSourceKind::Artifact,
+        "run" => IntelligenceArtifactSourceKind::Run,
+        "tool_call" => IntelligenceArtifactSourceKind::ToolCall,
+        "manual" => IntelligenceArtifactSourceKind::Manual,
+        _ => IntelligenceArtifactSourceKind::Media,
+    }
+}
+
+fn api_run_status_from_db(value: &str) -> IntelligenceRunStatus {
+    match value {
+        "running" => IntelligenceRunStatus::Running,
+        "succeeded" => IntelligenceRunStatus::Succeeded,
+        "failed" => IntelligenceRunStatus::Failed,
+        "cancelled" => IntelligenceRunStatus::Cancelled,
+        _ => IntelligenceRunStatus::Queued,
+    }
+}
+
+fn run_event_kind_from_db(value: &str) -> IntelligenceRunEventKind {
+    match value {
+        "started" => IntelligenceRunEventKind::Started,
+        "status_changed" => IntelligenceRunEventKind::StatusChanged,
+        "model_token" => IntelligenceRunEventKind::ModelToken,
+        "tool_call_started" => IntelligenceRunEventKind::ToolCallStarted,
+        "tool_call_finished" => IntelligenceRunEventKind::ToolCallFinished,
+        "draft_artifact_created" => {
+            IntelligenceRunEventKind::DraftArtifactCreated
+        }
+        "draft_artifact_updated" => {
+            IntelligenceRunEventKind::DraftArtifactUpdated
+        }
+        "cancel_requested" => IntelligenceRunEventKind::CancelRequested,
+        "cancelled" => IntelligenceRunEventKind::Cancelled,
+        "completed" => IntelligenceRunEventKind::Completed,
+        "failed" => IntelligenceRunEventKind::Failed,
+        "heartbeat" => IntelligenceRunEventKind::Heartbeat,
+        _ => IntelligenceRunEventKind::Queued,
+    }
+}
+
+fn intelligence_error_code_from_db(value: &str) -> IntelligenceErrorCode {
+    match value {
+        "feature_disabled" => IntelligenceErrorCode::FeatureDisabled,
+        "provider_not_configured" => {
+            IntelligenceErrorCode::ProviderNotConfigured
+        }
+        "provider_unavailable" => IntelligenceErrorCode::ProviderUnavailable,
+        "provider_unauthorized" => IntelligenceErrorCode::ProviderUnauthorized,
+        "provider_rate_limited" => IntelligenceErrorCode::ProviderRateLimited,
+        "provider_timeout" => IntelligenceErrorCode::ProviderTimeout,
+        "provider_error" => IntelligenceErrorCode::ProviderError,
+        "model_unavailable" => IntelligenceErrorCode::ModelUnavailable,
+        "invalid_request" => IntelligenceErrorCode::InvalidRequest,
+        "not_found" => IntelligenceErrorCode::NotFound,
+        "conflict" => IntelligenceErrorCode::Conflict,
+        "concurrency_limit" => IntelligenceErrorCode::ConcurrencyLimit,
+        "run_cancelled" => IntelligenceErrorCode::RunCancelled,
+        "run_timed_out" => IntelligenceErrorCode::RunTimedOut,
+        "tool_timed_out" => IntelligenceErrorCode::ToolTimedOut,
+        "storage_error" => IntelligenceErrorCode::StorageError,
+        _ => IntelligenceErrorCode::Internal,
     }
 }
 
@@ -2945,6 +3031,299 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         Ok(artifact_id)
     }
 
+    async fn create_draft_artifact(
+        &self,
+        create: IntelligenceDraftArtifactCreate,
+    ) -> Result<Uuid> {
+        let pool = self.pool();
+        let kind_db = artifact_kind_to_db(create.kind)?;
+        let scope_db = match create.scope {
+            IntelligenceArtifactScope::Global => "global",
+            IntelligenceArtifactScope::User(_) => "user",
+        };
+        let user_id = create.scope.user_id();
+        if matches!(create.scope, IntelligenceArtifactScope::User(_))
+            && user_id.is_none()
+        {
+            return Err(MediaError::InvalidMedia(
+                "user-scoped draft artifact requires a user id".to_string(),
+            ));
+        }
+        let (media_id, media_type) = match create.media_id {
+            Some(id) => (Some(*id.as_uuid()), Some(media_type_str(&id))),
+            None => (None, None),
+        };
+        let title = truncate_chars(&create.title, 512);
+        let summary =
+            create.summary.as_deref().map(|s| truncate_chars(s, 4000));
+        let excerpt =
+            create.excerpt.as_deref().map(|s| truncate_chars(s, 2048));
+        let content_json = canonical_json(&create.content);
+        let metadata_json = canonical_json(&create.metadata);
+        let hash = content_hash(&[
+            &title,
+            summary.as_deref().unwrap_or(""),
+            excerpt.as_deref().unwrap_or(""),
+            &content_json,
+            &metadata_json,
+            &create.source_revision.to_string(),
+        ]);
+        let artifact_id = create.artifact_id.unwrap_or_else(Uuid::now_v7);
+
+        sqlx::query!(
+            r#"
+            INSERT INTO intelligence_artifacts (
+                id, artifact_kind, scope, status, library_id, user_id,
+                media_id, media_type, run_id, title, summary, excerpt,
+                content, metadata, source_system, source_revision,
+                source_updated_at, content_hash
+            )
+            VALUES ($1, $2::varchar, $3::varchar, 'draft', $4, $5, $6,
+                    ($7::text)::media_type, $8, $9, $10, $11, $12::jsonb,
+                    $13::jsonb, 'ferrex', $14, now(), $15)
+            "#,
+            artifact_id,
+            kind_db,
+            scope_db,
+            create.library_id.map(|l| l.0),
+            user_id,
+            media_id,
+            media_type,
+            create.run_id,
+            &title,
+            summary.as_deref(),
+            excerpt.as_deref(),
+            &create.content,
+            &create.metadata,
+            create.source_revision,
+            &hash
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            internal_err(format!("insert draft artifact failed: {e}"))
+        })?;
+
+        Ok(artifact_id)
+    }
+
+    async fn get_draft_artifact(
+        &self,
+        artifact_id: Uuid,
+        user_id: Option<Uuid>,
+    ) -> Result<Option<IntelligenceDraftArtifactPayload>> {
+        let pool = self.pool();
+        let row = sqlx::query!(
+            r#"
+            SELECT id AS "id!", artifact_kind::text AS "artifact_kind!",
+                   status::text AS "status!", library_id, user_id,
+                   media_id, media_type::text AS media_type, run_id,
+                   title AS "title!", summary, excerpt,
+                   content AS "content!", metadata AS "metadata!",
+                   created_at AS "created_at!", updated_at AS "updated_at!"
+            FROM intelligence_artifacts
+            WHERE id = $1
+              AND status = 'draft'
+              AND (user_id IS NULL OR user_id = $2)
+            "#,
+            artifact_id,
+            user_id
+        )
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| internal_err(format!("get draft artifact failed: {e}")))?;
+
+        let Some(row) = row else { return Ok(None) };
+        let media = row
+            .media_id
+            .zip(row.media_type)
+            .map(|(id, media_type)| media_id_from_parts(&media_type, id));
+        let sources = load_artifact_source_edges(pool, artifact_id).await?;
+
+        Ok(Some(IntelligenceDraftArtifactPayload {
+            artifact_id: row.id,
+            kind: artifact_kind_from_db(&row.artifact_kind),
+            status: artifact_status_from_db(&row.status),
+            library_id: row.library_id.map(LibraryId),
+            owner_user_id: row.user_id,
+            media_id: media,
+            run_id: row.run_id,
+            title: row.title,
+            summary: row.summary.as_deref().map(|s| {
+                bounded_summary(s, DEFAULT_INTELLIGENCE_SUMMARY_CHARS)
+            }),
+            excerpt: row.excerpt.as_deref().map(|s| {
+                bounded_summary(s, DEFAULT_INTELLIGENCE_SUMMARY_CHARS)
+            }),
+            content: row.content,
+            metadata: row.metadata,
+            sources,
+            created_at_epoch_seconds: Some(row.created_at.timestamp()),
+            updated_at_epoch_seconds: Some(row.updated_at.timestamp()),
+        }))
+    }
+
+    async fn set_artifact_status(
+        &self,
+        artifact_id: Uuid,
+        user_id: Option<Uuid>,
+        status: IntelligenceArtifactStatus,
+        reason: Option<&str>,
+    ) -> Result<()> {
+        let pool = self.pool();
+        let invalidates = matches!(
+            status,
+            IntelligenceArtifactStatus::Invalidated
+                | IntelligenceArtifactStatus::Deleted
+        );
+        let clears_invalidation = matches!(
+            status,
+            IntelligenceArtifactStatus::Draft
+                | IntelligenceArtifactStatus::Active
+                | IntelligenceArtifactStatus::Stale
+                | IntelligenceArtifactStatus::Failed
+        );
+        let reason = reason.map(|value| truncate_chars(value, 512));
+        let result = sqlx::query!(
+            r#"
+            UPDATE intelligence_artifacts
+            SET status = $2::varchar,
+                invalidated_at = CASE
+                    WHEN $3 THEN COALESCE(invalidated_at, now())
+                    WHEN $4 THEN NULL
+                    ELSE invalidated_at
+                END,
+                invalidation_reason = CASE
+                    WHEN $3 THEN $5::varchar
+                    WHEN $4 THEN NULL
+                    ELSE invalidation_reason
+                END,
+                updated_at = now()
+            WHERE id = $1
+              AND (($6::uuid IS NULL AND user_id IS NULL) OR user_id = $6)
+            "#,
+            artifact_id,
+            status.as_db_str(),
+            invalidates,
+            clears_invalidation,
+            reason.as_deref(),
+            user_id
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            internal_err(format!("set artifact status failed: {e}"))
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(MediaError::NotFound(
+                "artifact not found for requested scope".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn replace_artifact_sources(
+        &self,
+        artifact_id: Uuid,
+        user_id: Option<Uuid>,
+        sources: Vec<IntelligenceArtifactSourceEdge>,
+    ) -> Result<()> {
+        let pool = self.pool();
+        let mut tx = pool.begin().await.map_err(|e| {
+            internal_err(format!("begin source transaction failed: {e}"))
+        })?;
+
+        let visible: Option<Uuid> = sqlx::query_scalar!(
+            r#"
+            SELECT id AS "id!" FROM intelligence_artifacts
+            WHERE id = $1
+              AND (($2::uuid IS NULL AND user_id IS NULL) OR user_id = $2)
+            "#,
+            artifact_id,
+            user_id
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            internal_err(format!("artifact source scope check failed: {e}"))
+        })?;
+        if visible.is_none() {
+            return Err(MediaError::NotFound(
+                "artifact not found for requested scope".to_string(),
+            ));
+        }
+
+        sqlx::query!(
+            "DELETE FROM intelligence_artifact_sources WHERE artifact_id = $1",
+            artifact_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            internal_err(format!("delete artifact sources failed: {e}"))
+        })?;
+
+        for source in sources {
+            let (source_media_id, source_media_type) = source
+                .source_media_id
+                .as_ref()
+                .map(|media| {
+                    (Some(*media.as_uuid()), Some(media_type_str(media)))
+                })
+                .unwrap_or((None, None));
+            let source_locator = if source.source_locator.is_null() {
+                json!({})
+            } else {
+                source.source_locator.clone()
+            };
+            let source_excerpt = source.source_excerpt.as_ref().map(|s| {
+                truncate_chars(&s.text, usize::from(s.max_chars).min(2048))
+            });
+
+            sqlx::query!(
+                r#"
+                INSERT INTO intelligence_artifact_sources (
+                    artifact_id, source_ordinal, source_kind,
+                    source_media_context_id, source_search_document_id,
+                    source_artifact_id, source_run_id, source_tool_call_id,
+                    source_library_id, source_user_id, source_media_id,
+                    source_media_type, source_revision, source_content_hash,
+                    source_excerpt, source_locator
+                )
+                VALUES ($1, $2, $3::varchar, $4, $5, $6, $7, $8, $9, $10,
+                        $11, ($12::text)::media_type, $13, $14, $15, $16::jsonb)
+                "#,
+                artifact_id,
+                source.source_ordinal,
+                source.source_kind.as_db_str(),
+                source.source_media_context_id,
+                source.source_search_document_id,
+                source.source_artifact_id,
+                source.source_run_id,
+                source.source_tool_call_id,
+                source.source_library_id.as_ref().map(|l| l.0),
+                source.source_user_id,
+                source_media_id,
+                source_media_type,
+                source.source_revision,
+                source.source_content_hash.as_deref(),
+                source_excerpt.as_deref(),
+                &source_locator
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                internal_err(format!("insert artifact source failed: {e}"))
+            })?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            internal_err(format!("commit source transaction failed: {e}"))
+        })?;
+        Ok(())
+    }
+
     async fn invalidate_artifact(
         &self,
         artifact_id: Uuid,
@@ -3332,6 +3711,151 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         })
     }
 
+    async fn append_run_event(
+        &self,
+        create: IntelligenceRunEventCreate,
+    ) -> Result<IntelligenceRunEvent> {
+        if matches!(create.sequence, Some(sequence) if sequence < 0) {
+            return Err(MediaError::InvalidMedia(
+                "run event sequence must be non-negative".to_string(),
+            ));
+        }
+        let pool = self.pool();
+        let event_id = create.event_id.unwrap_or_else(Uuid::now_v7);
+        let event_kind = create.event_kind;
+        let status = create.status;
+        let message = create.message.map(|m| truncate_chars(&m, 2048));
+        let payload = if create.payload.is_null() {
+            json!({})
+        } else {
+            create.payload
+        };
+        let error_code =
+            create.error.as_ref().map(|e| e.code.as_str().to_string());
+        let error_payload = create
+            .error
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()?;
+
+        let row = sqlx::query!(
+            r#"
+            WITH next_sequence AS (
+                SELECT COALESCE(
+                    $2::integer,
+                    COALESCE(MAX(sequence) + 1, 0)
+                ) AS sequence
+                FROM intelligence_run_events
+                WHERE run_id = $1
+            )
+            INSERT INTO intelligence_run_events (
+                id, run_id, sequence, event_kind, status, tool_call_id,
+                artifact_id, message, payload, error_code, error
+            )
+            SELECT $3, $1, next_sequence.sequence, $4::varchar, $5::varchar,
+                   $6, $7, $8, $9::jsonb, $10, $11::jsonb
+            FROM next_sequence
+            RETURNING id AS "id!", sequence AS "sequence!",
+                      created_at AS "created_at!"
+            "#,
+            create.run_id,
+            create.sequence,
+            event_id,
+            event_kind.as_db_str(),
+            status.map(|s| s.as_db_str()),
+            create.tool_call_id,
+            create.artifact_id,
+            message.as_deref(),
+            &payload,
+            error_code.as_deref(),
+            error_payload.as_ref()
+        )
+        .fetch_one(pool)
+        .await
+        .map_err(|e| internal_err(format!("append run event failed: {e}")))?;
+
+        Ok(IntelligenceRunEvent {
+            event_id: row.id,
+            run_id: create.run_id,
+            sequence: row.sequence,
+            event_kind,
+            status,
+            tool_call_id: create.tool_call_id,
+            artifact_id: create.artifact_id,
+            message,
+            payload,
+            error: create.error,
+            created_at_epoch_seconds: Some(row.created_at.timestamp()),
+        })
+    }
+
+    async fn list_run_events(
+        &self,
+        filter: IntelligenceRunEventListFilter,
+    ) -> Result<Vec<IntelligenceRunEvent>> {
+        let pool = self.pool();
+        let limit = clamp_limit(
+            filter.limit,
+            DEFAULT_INTELLIGENCE_PAGE_LIMIT,
+            MAX_INTELLIGENCE_PAGE_LIMIT,
+        ) as i64;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT e.id AS "id!", e.run_id AS "run_id!",
+                   e.sequence AS "sequence!",
+                   e.event_kind::text AS "event_kind!",
+                   e.status::text AS status, e.tool_call_id, e.artifact_id,
+                   e.message, e.payload AS "payload!", e.error_code,
+                   e.error, e.created_at AS "created_at!"
+            FROM intelligence_run_events e
+            JOIN intelligence_runs r ON r.id = e.run_id
+            WHERE e.run_id = $1
+              AND ($2::integer IS NULL OR e.sequence > $2)
+              AND (r.user_id IS NULL OR r.user_id = $3)
+            ORDER BY e.sequence, e.id
+            LIMIT $4
+            "#,
+            filter.run_id,
+            filter.after_sequence,
+            filter.user_id,
+            limit
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| internal_err(format!("list run events failed: {e}")))?;
+
+        let mut events = Vec::with_capacity(rows.len());
+        for row in rows {
+            let error = match row.error {
+                Some(value) => Some(serde_json::from_value(value)?),
+                None => row.error_code.map(|code| IntelligenceError {
+                    code: intelligence_error_code_from_db(&code),
+                    message: "runtime error".to_string(),
+                    retryable: false,
+                    details: Value::Null,
+                }),
+            };
+            let status = row.status.as_deref().map(api_run_status_from_db);
+
+            events.push(IntelligenceRunEvent {
+                event_id: row.id,
+                run_id: row.run_id,
+                sequence: row.sequence,
+                event_kind: run_event_kind_from_db(&row.event_kind),
+                status,
+                tool_call_id: row.tool_call_id,
+                artifact_id: row.artifact_id,
+                message: row.message,
+                payload: row.payload,
+                error,
+                created_at_epoch_seconds: Some(row.created_at.timestamp()),
+            });
+        }
+
+        Ok(events)
+    }
+
     async fn create_tool_call(
         &self,
         create: IntelligenceToolCallCreate,
@@ -3460,6 +3984,63 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
 // ---------------------------------------------------------------------------
 // Free helper functions for facets, counts, related items, and artifacts
 // ---------------------------------------------------------------------------
+
+async fn load_artifact_source_edges(
+    pool: &PgPool,
+    artifact_id: Uuid,
+) -> Result<Vec<IntelligenceArtifactSourceEdge>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT source_ordinal AS "source_ordinal!",
+               source_kind::text AS "source_kind!",
+               source_media_context_id, source_search_document_id,
+               source_artifact_id, source_run_id, source_tool_call_id,
+               source_library_id, source_user_id, source_media_id,
+               source_media_type::text AS source_media_type,
+               source_revision AS "source_revision!",
+               source_content_hash, source_excerpt,
+               source_locator AS "source_locator!"
+        FROM intelligence_artifact_sources
+        WHERE artifact_id = $1
+          AND status = 'active'
+          AND invalidated_at IS NULL
+        ORDER BY source_ordinal, created_at
+        "#,
+        artifact_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| internal_err(format!("load artifact sources failed: {e}")))?;
+
+    let mut sources = Vec::with_capacity(rows.len());
+    for row in rows {
+        let source_media_id = row
+            .source_media_id
+            .zip(row.source_media_type)
+            .map(|(id, media_type)| media_id_from_parts(&media_type, id));
+
+        sources.push(IntelligenceArtifactSourceEdge {
+            source_ordinal: row.source_ordinal,
+            source_kind: artifact_source_kind_from_db(&row.source_kind),
+            source_media_context_id: row.source_media_context_id,
+            source_search_document_id: row.source_search_document_id,
+            source_artifact_id: row.source_artifact_id,
+            source_run_id: row.source_run_id,
+            source_tool_call_id: row.source_tool_call_id,
+            source_library_id: row.source_library_id.map(LibraryId),
+            source_user_id: row.source_user_id,
+            source_media_id,
+            source_revision: row.source_revision,
+            source_content_hash: row.source_content_hash,
+            source_excerpt: row.source_excerpt.as_deref().map(|s| {
+                bounded_summary(s, DEFAULT_INTELLIGENCE_SUMMARY_CHARS)
+            }),
+            source_locator: row.source_locator,
+        });
+    }
+
+    Ok(sources)
+}
 
 async fn current_source_revision(pool: &PgPool) -> Result<i64> {
     let max_revision = sqlx::query_scalar!(

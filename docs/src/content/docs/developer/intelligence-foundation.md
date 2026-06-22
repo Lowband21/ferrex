@@ -48,13 +48,22 @@ The schema lives in `crates/ferrex-core/migrations/007_intelligence_foundation.s
 
 Repository access is behind `crates/ferrex-core/src/database/repository_ports/intelligence.rs`; Postgres behavior is implemented in `crates/ferrex-core/src/database/repositories/intelligence.rs`. Important internal operations include read-model refresh (`refresh_library_read_models`, `refresh_media_read_model`), catalog invalidation (`invalidate_media_catalog_change`), artifact upsert/invalidation, candidate search, item/related context, and run/tool-call audit reads.
 
+## Phase 2 runtime contracts and ports
+
+Phase 2 extends the non-model foundation with runtime-ready contracts and storage ports while still avoiding provider calls:
+
+- `IntelligenceRunStart*`, `IntelligenceRunStatusResponse`, `IntelligenceRunCancel*`, `IntelligenceRunEvent*`, `IntelligenceDraftArtifactPayload`, `IntelligenceProviderStatus`, `IntelligenceModelStatus`, and `IntelligenceErrorCode` define stable request/status/event/error DTOs for later runtime handlers.
+- `IntelligenceRuntimeConfig` is loaded from `FERREX_INTELLIGENCE_*` environment variables via the shared config loader. Development defaults are `FERREX_INTELLIGENCE_BASE_URL=http://localhost:8081/v1` and `FERREX_INTELLIGENCE_MODEL=gemma-4-12b`, with the runtime disabled unless `FERREX_INTELLIGENCE_ENABLED=true`.
+- `008_intelligence_runtime_ports.sql` adds `intelligence_run_events` for durable, ordered event replay.
+- Repository ports can create draft artifacts without marking them active, read draft payloads with source edges, promote or fail drafts through explicit status updates, replace artifact source edges, and append/list ordered run events.
+
 ## Deferred work
 
 The following are explicitly deferred beyond Phase 1:
 
 - `pgvector`/embedding storage and vector ranking.
 - Transcript segment persistence and transcript-derived artifacts.
-- Model-provider configuration, prompt execution, streaming responses, and tool-loop orchestration.
+- Prompt execution, streaming handlers, provider health checks, and tool-loop orchestration.
 - Client/UI presentation for intelligence features.
 
 Until those land, Phase 1 remains a bounded backend contract and storage foundation that can be validated through core SQLx fixtures and server route wiring.

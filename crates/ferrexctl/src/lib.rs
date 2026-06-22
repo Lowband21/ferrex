@@ -36,7 +36,9 @@ pub use models::scanner::{ScannerConfig, ScannerConfigSource};
 /// Top-level server configuration model re-exports.
 pub use models::{
     AuthConfig, CacheConfig, Config, ConfigMetadata, CorsConfig,
-    DatabaseConfig, FfmpegConfig, HstsLayerConfig, HstsSettings, MediaConfig,
+    DatabaseConfig, FfmpegConfig, HstsLayerConfig, HstsSettings,
+    IntelligenceProviderConfig, IntelligenceRetryConfig,
+    IntelligenceRuntimeConfig, IntelligenceRuntimeLimits, MediaConfig,
     RateLimiterSettings, RedisConfig, SecurityConfig, ServerConfig,
 };
 /// Packaging configuration model re-exports.

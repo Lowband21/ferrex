@@ -9,16 +9,21 @@
 
 use ferrex_core::api::types::intelligence::{
     IntelligenceArtifactKind, IntelligenceArtifactSearchRequest,
-    IntelligenceCandidateSearchRequest, IntelligenceCaps,
+    IntelligenceArtifactSourceEdge, IntelligenceArtifactSourceKind,
+    IntelligenceArtifactStatus, IntelligenceCandidateSearchRequest,
+    IntelligenceCaps, IntelligenceError, IntelligenceErrorCode,
     IntelligenceItemContextRequest, IntelligenceLibraryOverviewRequest,
     IntelligenceMediaKind, IntelligencePagination,
     IntelligenceRelatedContextRequest, IntelligenceRelationshipKind,
-    IntelligenceRunAuditRequest, MAX_INTELLIGENCE_ARTIFACT_LIMIT,
+    IntelligenceRunAuditRequest, IntelligenceRunEventKind,
+    IntelligenceRunStatus, MAX_INTELLIGENCE_ARTIFACT_LIMIT,
 };
 use ferrex_core::database::repositories::intelligence::PostgresIntelligenceRepository;
 use ferrex_core::database::repository_ports::intelligence::{
     IntelligenceArtifactScope, IntelligenceArtifactUpsert,
-    IntelligenceRepository, IntelligenceRunCreate, IntelligenceRunKind,
+    IntelligenceDraftArtifactCreate, IntelligenceRepository,
+    IntelligenceRunCreate, IntelligenceRunEventCreate,
+    IntelligenceRunEventListFilter, IntelligenceRunKind,
     IntelligenceRunListFilter, IntelligenceRunStatus as RunStatus,
     IntelligenceRunUpdate, IntelligenceToolCallCreate,
     IntelligenceToolCallStatus as ToolStatus, IntelligenceToolCallUpdate,
@@ -974,6 +979,198 @@ async fn run_and_tool_call_audit_lifecycle(pool: PgPool) {
         )
         .await;
     assert!(bob_audit.is_err(), "Bob must not audit Alice's run");
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(
+        path = "../fixtures",
+        scripts("test_libraries", "intelligence_base")
+    )
+)]
+async fn draft_artifacts_and_run_events_are_durable_runtime_ports(
+    pool: PgPool,
+) {
+    let repo = repo(&pool);
+    let alice = Uuid::parse_str(ALICE).unwrap();
+
+    let run_id = repo
+        .create_run(IntelligenceRunCreate {
+            run_id: None,
+            run_kind: IntelligenceRunKind::Answer,
+            library_id: Some(lib_a()),
+            user_id: Some(alice),
+            media_id: Some(movie_from_str(MOVIE_ARRIVAL)),
+            idempotency_key: None,
+            provider_name: Some("openai-compatible".to_string()),
+            model_name: Some("gemma-4-12b".to_string()),
+            request_hash: None,
+            prompt_excerpt: Some("Draft an answer".to_string()),
+            metadata: json!({}),
+        })
+        .await
+        .unwrap();
+
+    let draft_id = repo
+        .create_draft_artifact(IntelligenceDraftArtifactCreate {
+            artifact_id: None,
+            kind: IntelligenceArtifactKind::GeneratedAnswer,
+            scope: IntelligenceArtifactScope::User(alice),
+            library_id: Some(lib_a()),
+            media_id: Some(movie_from_str(MOVIE_ARRIVAL)),
+            run_id: Some(run_id),
+            title: "Arrival draft answer".to_string(),
+            summary: Some("Draft summary".to_string()),
+            excerpt: Some("Draft excerpt".to_string()),
+            content: json!({"body": "draft answer"}),
+            metadata: json!({"phase": 2}),
+            source_revision: 1,
+        })
+        .await
+        .unwrap();
+
+    let hidden = repo
+        .artifact_search(
+            &IntelligenceArtifactSearchRequest {
+                artifact_ids: vec![draft_id],
+                media_ids: Vec::new(),
+                library_ids: Vec::new(),
+                kinds: Vec::new(),
+                pagination: IntelligencePagination::default(),
+                caps: IntelligenceCaps::default(),
+            },
+            Some(alice),
+        )
+        .await
+        .unwrap();
+    assert!(hidden.artifacts.is_empty(), "draft must not be active");
+
+    repo.replace_artifact_sources(
+        draft_id,
+        Some(alice),
+        vec![IntelligenceArtifactSourceEdge {
+            source_ordinal: 0,
+            source_kind: IntelligenceArtifactSourceKind::Run,
+            source_media_context_id: None,
+            source_search_document_id: None,
+            source_artifact_id: None,
+            source_run_id: Some(run_id),
+            source_tool_call_id: None,
+            source_library_id: None,
+            source_user_id: Some(alice),
+            source_media_id: None,
+            source_revision: 1,
+            source_content_hash: None,
+            source_excerpt: Some(
+                ferrex_core::api::types::intelligence::IntelligenceSummary::new(
+                    "run source",
+                ),
+            ),
+            source_locator: json!({"kind": "run"}),
+        }],
+    )
+    .await
+    .unwrap();
+
+    let draft = repo
+        .get_draft_artifact(draft_id, Some(alice))
+        .await
+        .unwrap()
+        .expect("draft should be readable by owner");
+    assert_eq!(draft.artifact_id, draft_id);
+    assert_eq!(draft.status, IntelligenceArtifactStatus::Draft);
+    assert_eq!(draft.content["body"], "draft answer");
+    assert_eq!(draft.sources.len(), 1);
+    assert_eq!(draft.sources[0].source_run_id, Some(run_id));
+
+    repo.set_artifact_status(
+        draft_id,
+        Some(alice),
+        IntelligenceArtifactStatus::Active,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(
+        repo.get_draft_artifact(draft_id, Some(alice))
+            .await
+            .unwrap()
+            .is_none(),
+        "active artifacts should leave the draft read surface"
+    );
+    let active = repo
+        .artifact_search(
+            &IntelligenceArtifactSearchRequest {
+                artifact_ids: vec![draft_id],
+                media_ids: Vec::new(),
+                library_ids: Vec::new(),
+                kinds: Vec::new(),
+                pagination: IntelligencePagination::default(),
+                caps: IntelligenceCaps::default(),
+            },
+            Some(alice),
+        )
+        .await
+        .unwrap();
+    assert_eq!(active.artifacts.len(), 1);
+
+    let first = repo
+        .append_run_event(IntelligenceRunEventCreate {
+            event_id: None,
+            run_id,
+            sequence: None,
+            event_kind: IntelligenceRunEventKind::Started,
+            status: Some(IntelligenceRunStatus::Running),
+            tool_call_id: None,
+            artifact_id: None,
+            message: Some("started".to_string()),
+            payload: json!({}),
+            error: None,
+        })
+        .await
+        .unwrap();
+    let second = repo
+        .append_run_event(IntelligenceRunEventCreate {
+            event_id: None,
+            run_id,
+            sequence: None,
+            event_kind: IntelligenceRunEventKind::DraftArtifactCreated,
+            status: Some(IntelligenceRunStatus::Running),
+            tool_call_id: None,
+            artifact_id: Some(draft_id),
+            message: Some("draft created".to_string()),
+            payload: json!({"artifact_id": draft_id}),
+            error: Some(IntelligenceError {
+                code: IntelligenceErrorCode::ProviderTimeout,
+                message: "transient provider timeout".to_string(),
+                retryable: true,
+                details: json!({"attempt": 1}),
+            }),
+        })
+        .await
+        .unwrap();
+    assert_eq!(first.sequence, 0);
+    assert_eq!(second.sequence, 1);
+
+    let replay = repo
+        .list_run_events(IntelligenceRunEventListFilter {
+            run_id,
+            after_sequence: Some(0),
+            limit: 20,
+            user_id: Some(alice),
+        })
+        .await
+        .unwrap();
+    assert_eq!(replay.len(), 1);
+    assert_eq!(replay[0].sequence, 1);
+    assert_eq!(
+        replay[0].event_kind,
+        IntelligenceRunEventKind::DraftArtifactCreated
+    );
+    assert_eq!(
+        replay[0].error.as_ref().map(|e| e.code),
+        Some(IntelligenceErrorCode::ProviderTimeout)
+    );
 }
 
 #[sqlx::test(
