@@ -1,28 +1,26 @@
 ---
-title: Developer guide
-description: Where Ferrex development setup, architecture, testing, generated contracts, and client workflows belong.
+title: "Developer guide"
+description: "Architecture, player boundaries, UI testing, SQLx workflows, and contribution references for changing Ferrex."
 sidebar:
   order: 1
-  label: Overview
+  label: "Overview"
 ---
 
-The developer guide explains how to change Ferrex with confidence. It should connect architecture decisions to the commands and files that keep the Rust server, desktop player, Android clients, and generated contracts consistent.
+The developer guide explains how to change Ferrex with confidence. It connects architecture decisions to the commands and files that keep the Rust server, desktop player, Android clients, and generated contracts consistent.
 
-## Development lanes
+## Core developer pages
 
-| Lane | What the guide should cover | Current source material |
-| --- | --- | --- |
-| Repository setup | Nix shells, Rust toolchain, local services, and contribution workflow. | `.github/CONTRIBUTING.md`, `flake.nix`, `justfile` |
-| Backend and core | Crate responsibilities, database expectations, scanner/watch-state behavior, and compile-checked SQLx policy. | `docs/architecture.md`, `docs/sqlx-postgres-workflow.md`, `docs/sqlx-dynamic-query-allowlist.md` |
-| Desktop player | UI architecture, visual QA, playback backends, and player crate boundaries. | `docs/ui-testing-workflow.md`, `docs/player-dependency-boundaries.md` |
-| Android and TV | Shared contracts, recovery-sensitive client state, emulator QA, and lint/test commands. | `mobile/`, `docs/mobile-device-auth-flatbuffers.md`, QA notes |
-| Generated contracts | FlatBuffers schemas, generated Kotlin, and compatibility expectations. | `mobile/shared/`, generation scripts |
-| Validation | Focused commands for the part of the tree touched by a change. | `justfile`, CI workflows, issue-specific QA notes |
+| Page | Use it for |
+| --- | --- |
+| [Architecture](/developer/architecture/) | Workspace layout, server/player/core responsibilities, data flow, and security/deployment notes. |
+| [Phase 1 intelligence foundation](/developer/intelligence-foundation/) | Backend-only intelligence read models, bounded DTO contracts, and audit storage for future LLM features. |
+| [Player dependency boundaries](/developer/player-dependency-boundaries/) | Crate layering rules, compatibility shims, and the player boundary guard. |
+| [UI testing workflow](/developer/ui-testing-workflow/) | Deterministic screenshots, `.ice` replay, visual QA matrices, and renderer troubleshooting. |
+| [SQLx dynamic query policy and allowlist](/developer/sqlx-dynamic-query-allowlist/) | Compile-checked SQLx policy, reviewed dynamic-query exceptions, and guard commands. |
+| [Disposable SQLx PostgreSQL workflow](/developer/sqlx-postgres-workflow/) | Per-worktree PostgreSQL setup for migrations and SQLx offline metadata updates. |
 
-## Command documentation standard
+## Related canonical references
 
-Commands should be copied exactly as maintainers run them. When a command depends on Nix, Android SDK paths, a database, or a generated metadata cache, document that dependency next to the command rather than burying it in prose.
-
-## Architecture documentation standard
-
-Architecture pages should name the owning crate or module, the data it reads or writes, and the boundary it enforces. If a page introduces a new abstraction, it should also name the validation that prevents that boundary from drifting.
+- [Contributing guide](https://github.com/Lowband21/ferrex/blob/dev/.github/CONTRIBUTING.md) remains the canonical GitHub-facing contribution document.
+- [Crate README inventory](/reference/crate-readmes/) links package-facing READMEs without duplicating them in the docs site.
+- [Mobile device-auth FlatBuffers contract](/reference/mobile/device-auth-flatbuffers/) captures the current generated-contract boundary for mobile clients.

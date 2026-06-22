@@ -1,33 +1,23 @@
 ---
-title: Operator guide
-description: Where Ferrex operator documentation for setup, configuration, security, media libraries, playback, and recovery belongs.
+title: "Operator guide"
+description: "Setup, configuration, security, recovery, demo, Unraid, and FAQ documentation for running Ferrex."
 sidebar:
   order: 1
-  label: Overview
+  label: "Overview"
 ---
 
-The operator guide is the home for running Ferrex safely. It prioritizes user data, recovery, and observable service behavior over implementation internals.
+The operator guide is the home for running Ferrex safely. It prioritizes configuration, user data, recovery paths, and observable service behavior over implementation internals.
 
-## Operator topics
+## Core operator pages
 
-| Topic | Content that belongs here | Current source material |
-| --- | --- | --- |
-| Installation | Docker or Podman startup, host prerequisites, service layout, and first-run checks. | `README.md`, `docker-compose.yml`, `docs/unraid.md` |
-| Configuration | Environment variables, media paths, logging, reverse proxy assumptions, and safe defaults. | `docs/configuration.md`, `.env.example` |
-| Security | Network exposure, authentication, device sessions, and operational threat model. | `docs/auth-security.md`, `.github/SECURITY.md` |
-| Library operations | Scan lifecycle, metadata expectations, artwork behavior, and retry guidance. | Server and scanner docs as they are promoted. |
-| Client recovery | Phone, TV, and desktop state reset/retry guidance before feature expansion. | Mobile and player QA notes as they are promoted. |
-| Demo mode | Local demo data, reset behavior, and what is safe to show publicly. | `docs/demo-mode.md` |
+| Page | Use it for |
+| --- | --- |
+| [Configuration](/operator/configuration/) | `.env`, Compose overlays, Nix shells, scanner policy, logging, TLS, and safe defaults. |
+| [Authentication security model](/operator/auth-security/) | Password sessions, device PIN sessions, remember-device trust, lockout, revoke, and no-wipe recovery. |
+| [Unraid deployment notes](/operator/unraid/) | Compose-first Unraid setup, appdata paths, `PUID`/`PGID`, and the performance overlay. |
+| [Demo mode](/operator/demo-mode/) | Disposable synthetic media libraries, demo credentials, reset endpoints, and demo caveats. |
+| [FAQ](/operator/faq/) | Short answers for platform support, HDR, MPV hand-off, SQLx errors, logging, demo mode, and UI tests. |
 
-## Recovery-first writing
+## Recovery-first rule
 
-Any page that asks an operator to change state should include a recovery path. For example:
-
-- restarting a failed service without deleting media or metadata;
-- refreshing stale client cache without requiring an app-data wipe unless that is the documented last resort;
-- regenerating code or metadata with the exact command and expected output;
-- preserving logs that help diagnose server, scanner, auth, or playback failures.
-
-## First pages to promote
-
-The strongest candidates for full Starlight operator guides are configuration, Unraid deployment notes, auth/security, and demo mode. They already answer real user questions and can be converted without waiting for deployment automation.
+Any operator-facing change should document how to retry, reset, or recover without deleting more data than intended. Android and Android TV recovery guidance in the QA reference is especially strict: data-wipe-class problems should be treated as release blockers until a no-wipe exit exists.

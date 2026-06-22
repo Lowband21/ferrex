@@ -1,0 +1,32 @@
+---
+title: "Android image pipeline preflight"
+description: "LOW-345 Android and Android TV image-manifest recovery matrix for large libraries, stale-ready artwork, selected-cache clear, and reset recovery."
+sidebar:
+  order: 5
+---
+
+> **Evidence status:** This page preserves a dated QA packet. Treat rows marked blocked, pending hardware QA, or release-readiness follow-up as stale evidence until they are rerun on current devices and builds.
+
+LOW-345 is layered on the LOW-344 library cache and LOW-342 recovery substrate:
+
+- `ServerCacheScope` scopes image manifest metadata and Coil disk blobs by canonical server URL and authenticated user id, matching the library cache scope.
+- Image metadata/blobs live under `library_cache/v1/scopes/<scope>/images`, so Reset connection and Clear all server cache can remove corrupt image state without requiring an OS app-data wipe.
+- Clear selected cache computes image keys from the selected cached library accessor and asks the image cache clearer to remove those manifest records; because Coil disk keys are internal, selected clear conservatively drops server-scoped Coil blob files as a recovery action.
+- Mobile and TV recovery screens still expose Retry, Sign out, Change server, and Reset connection before protected screens are shown.
+
+Current server limitation: `/api/v1/images/iid/{iid}` resolves `ImageSize::poster()` only. Android browse/home artwork loading therefore resolves visible poster, backdrop, profile, and episode still keys through `/api/v1/images/manifest` first and loads immutable `/api/v1/images/blob/{token}` URLs when manifest entries are Ready. Runtime fallback decisions stay explicit: IID fallback is guarded as poster-only for non-ready poster resolutions, and public TMDB CDN fallback remains disabled unless product copy opts in.
+
+## Large-library no-wipe image recovery QA
+
+Run this matrix on both the phone (`mobileDebug`) and Android TV (`tvDebug`) clients before promoting Android/TV image recovery beyond the integration lane. Use a server/user with a large movie or series library whose grid extends well beyond the historical first-window artwork cap; record device model, API level, app flavor, server build, and whether the run used Wi-Fi/ethernet/offline mode. Do not clear Android OS app data during any row.
+
+| Scenario | Phone pass criteria | Android TV pass criteria | Diagnostics/export evidence |
+| --- | --- | --- | --- |
+| Initial posters/backdrops | Fresh sign-in or cache clear opens Home with visible poster/backdrop placeholders that resolve to real artwork without blank permanent stalls. | D-pad focus starts on usable Home content/actions; visible focused and adjacent posters/backdrops resolve without trapping focus. | Diagnostics image cache row shows non-zero `ready` manifest count once visible artwork resolves; export `diagnostics.txt` includes `imageManifestReady`. |
+| Scroll beyond old cap | Scroll a large grid/rail past the old first-N request window and confirm newly visible posters are requested and become ready. | D-pad through shelves/grid rows past the old cap; focused offscreen-window cards request artwork as they enter the visible window. | `imageLastManifestRequestedKeys` / `imageLastManifestResponseRecords` update after scrolling; pending/failed counts do not grow monotonically while online. |
+| Pending-to-ready healing | With server-side image generation slow enough to return Pending, leave the visible card mounted and verify the retry loop promotes it to Ready without app restart or OS data wipe. | Keep focus on/near pending artwork; the card remains reachable and eventually paints ready artwork after retry. | Diagnostics shows pending count during the stall and a later ready count increase; `imageLastManifestKind=retry` and `imageLastManifestRetryEpochMs` are present after healing. |
+| Offline stale-ready | Load artwork online, take the server/network offline, return to the same library, and confirm cached ready artwork remains visible with stale/offline copy rather than empty grid failure. | TV Home/grid remains navigable while offline; focused stale-ready cards keep artwork or labeled placeholders and recovery actions stay D-pad reachable. | Diagnostics/export show `imageManifestStale` greater than zero and preserve ready counts without raw server URLs or tokens. |
+| Clear selected recovery | From the affected selected library, use Clear selected cache, then Retry sync/scroll the same range; posters/backdrops are refetched and active Coil state does not reuse corrupt bytes. | Use the TV recovery/action panel's Clear selected cache action, then retry/scroll; focus returns to reachable actions/content and artwork refetches. | Before clear, export may show failed/corrupt/quarantine counts; after clear/retry, selected manifest entries and Coil blobs are invalidated for the scope and ready counts recover without OS app-data wipe. |
+| Reset connection recovery | Use Reset connection for a deliberately corrupt or mismatched server/user image scope, reconnect to the same server/user, and verify artwork can be fetched again. | TV reset returns to server entry/login with deterministic focus; reconnecting restores Home/grid artwork. | Export before reset shows scope-specific image diagnostics; after reconnect the old scoped image metadata/Coil cache is gone and the new scope records fresh batch/retry data. |
+
+If no device/emulator is available in the workspace, keep the automated Gradle build/unit/lint evidence with this matrix and record the exact ADB/emulator blocker in the handoff so a human/device QA run can execute the rows above.

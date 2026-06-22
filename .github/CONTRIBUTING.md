@@ -84,9 +84,9 @@ cargo test -p ferrex-player-app --test ui_end_to_end
 
 ## Database and SQLx
 
-Parts of the codebase use SQLx with offline metadata under `./.sqlx/`. Non-test repository/business queries must use compile-checked SQLx macros; dynamic SQLx APIs are allowed only for reviewed non-preparable admin/DDL exceptions in [`scripts/sqlx-dynamic-allowlist.toml`](../scripts/sqlx-dynamic-allowlist.toml). See [`docs/sqlx-dynamic-query-allowlist.md`](../docs/sqlx-dynamic-query-allowlist.md) for the policy and exception process.
+Parts of the codebase use SQLx with offline metadata under `./.sqlx/`. Non-test repository/business queries must use compile-checked SQLx macros; dynamic SQLx APIs are allowed only for reviewed non-preparable admin/DDL exceptions in [`scripts/sqlx-dynamic-allowlist.toml`](../scripts/sqlx-dynamic-allowlist.toml). See the [SQLx dynamic query policy](https://ferrexmedia.org/developer/sqlx-dynamic-query-allowlist/) for the policy and exception process.
 
-Prefer the disposable per-worktree PostgreSQL workflow in [`docs/sqlx-postgres-workflow.md`](../docs/sqlx-postgres-workflow.md) when preparing or checking SQLx metadata; it uses Nix-provided PostgreSQL with `pg_uuidv7`, Unix sockets, no passwords, and no `.env`/production URL dependency.
+Prefer the [disposable per-worktree PostgreSQL workflow](https://ferrexmedia.org/developer/sqlx-postgres-workflow/) when preparing or checking SQLx metadata; it uses Nix-provided PostgreSQL with `pg_uuidv7`, Unix sockets, no passwords, and no `.env`/production URL dependency.
 
 ```bash
 nix develop .#server

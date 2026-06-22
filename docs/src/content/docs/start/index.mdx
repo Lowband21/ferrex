@@ -6,36 +6,49 @@ sidebar:
   label: Map
 ---
 
-Ferrex documentation is organized by the job a reader is trying to complete. The first site pass keeps that structure visible even while detailed guides continue to be promoted from the repository's existing markdown notes.
+Ferrex documentation is organized by the job a reader is trying to complete. Use the role lanes below instead of browsing the old flat Markdown directory.
 
 ## Reader lanes
 
 ### Operators
 
-Operators need safe setup, configuration, security, library management, playback behavior, and recovery guidance. Pages in [Operate Ferrex](/operator/) should answer:
+Operators need safe setup, configuration, security, playback behavior, and recovery guidance. Start with:
 
-- What do I run?
-- Which environment variables or files matter?
-- What user data is written?
-- How do I retry, reset, or recover without losing more data than necessary?
+- [Configuration](/operator/configuration/)
+- [Authentication security model](/operator/auth-security/)
+- [Unraid deployment notes](/operator/unraid/)
+- [Demo mode](/operator/demo-mode/)
+- [FAQ](/operator/faq/)
 
 ### Developers
 
-Developers need repository setup, architecture boundaries, validation commands, generated contracts, and client-specific workflow. Pages in [Build and extend](/developer/) should connect decisions to the crates, mobile modules, scripts, and Nix shells that enforce them.
+Developers need repository setup, architecture boundaries, validation commands, generated contracts, and client-specific workflows. Start with:
+
+- [Architecture](/developer/architecture/)
+- [Player dependency boundaries](/developer/player-dependency-boundaries/)
+- [UI testing workflow](/developer/ui-testing-workflow/)
+- [SQLx dynamic query policy and allowlist](/developer/sqlx-dynamic-query-allowlist/)
+- [Disposable SQLx PostgreSQL workflow](/developer/sqlx-postgres-workflow/)
 
 ### Reference readers
 
-Reference material is stable, searchable, and specific: contracts, policies, workflows, glossary entries, and inventories. The [Reference](/reference/) section keeps the existing in-repo notes discoverable until they are rewritten as full Starlight pages.
+Reference material is stable, searchable, and specific: contracts, policies, workflow inventories, path maps, compatibility notes, and dated QA evidence. Start with:
+
+- [Mobile contracts](/reference/mobile/)
+- [QA and evidence](/reference/qa/)
+- [Project policies](/reference/project-policies/)
+- [Crate README inventory](/reference/crate-readmes/)
+- [Legacy Markdown pointers](/reference/existing-docs/)
 
 ### Release maintainers
 
-Release documentation covers packaging targets, preflight checks, changelog expectations, and promotion from development integration to stable release channels. The [Release](/release/) section defines where that material belongs without adding deployment automation to this scaffold.
+Release documentation covers packaging targets, preflight checks, changelog expectations, and promotion from development integration to stable release channels. Start with [Release and packaging](/release/) and [Flathub submission guide](/release/flathub-submission/).
 
 ## Adding a page
 
 1. Choose the reader lane before choosing a filename.
 2. Add the page under `src/content/docs/<lane>/` with a concise `title`, `description`, and `sidebar.order`.
-3. Link to existing repository files by path when they remain the source of truth.
+3. Link to Starlight pages for migrated docs; link to canonical repository files only when GitHub or package tooling expects those files to remain authoritative.
 4. Include verification commands or recovery steps on pages that change how a user operates Ferrex.
 5. Run the documented local checks from the repository root:
 

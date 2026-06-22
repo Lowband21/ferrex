@@ -1,27 +1,25 @@
 ---
-title: Release and packaging guide
-description: Where Ferrex release, packaging, preflight, and promotion documentation belongs.
+title: "Release and packaging guide"
+description: "Packaging, release-preflight, Flathub, and promotion references for Ferrex maintainers."
 sidebar:
   order: 1
-  label: Overview
+  label: "Overview"
 ---
 
-The release section is reserved for the steps that move Ferrex from reviewed development work to packaged artifacts and stable channels. This scaffold defines the documentation home without adding deployment, hosting, or domain-provider automation.
+The release section covers steps that move Ferrex from reviewed development work to packaged artifacts and stable channels. It does not add deployment, hosting, DNS, or secret-dependent automation.
 
-## Release documentation scope
+## Current release references
 
-| Topic | What belongs here |
+| Page | Use it for |
 | --- | --- |
-| Preflight checks | Exact commands maintainers run before a release or packaging cut. |
-| Packaging targets | Docker images, Flatpak bundles, Windows packaging, and related `ferrexctl` workflows. |
-| Changelog and versioning | How release notes are assembled and which branch or tag is considered authoritative. |
-| Promotion policy | The human-reviewed movement from development integration to stable release decisions. |
-| Website publishing | Hosting steps only after a deployment plan is approved; not in this scaffold. |
+| [Flathub submission guide](/release/flathub-submission/) | Preparing the Flatpak manifest submission, creating the Flathub app branch, and post-merge maintenance expectations. |
+| [Crate README inventory](/reference/crate-readmes/) | Package-facing crate README files that remain canonical for package consumers. |
+| [Project policies](/reference/project-policies/) | Security, contribution, trademark, and conduct policies used during release review. |
 
-## Current source material
+## Source material still owned by the repository
 
-The repository README already lists several packaging commands, and `packaging.toml`, `dist-workspace.toml`, `flatpak/`, and `docker/` contain target-specific configuration. Future release pages should explain how those files work together instead of duplicating command snippets without context.
+- `README.md` lists core packaging commands and platform support.
+- `packaging.toml`, `dist-workspace.toml`, `flatpak/`, and `docker/` contain target-specific packaging configuration.
+- `CHANGELOG.md` tracks release highlights and roadmap notes.
 
-## Boundary for this docs app
-
-This Starlight app is configured for the canonical site URL, but it does not include a deployment workflow, CNAME file, GitHub Pages settings, Cloudflare Pages project, DNS record, or secret-dependent configuration. Those decisions stay outside the documentation scaffold until a separate deployment issue approves them.
+Promotion from `dev` to `main` remains a separate human-reviewed release decision.

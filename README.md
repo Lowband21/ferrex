@@ -11,7 +11,7 @@
   <img alt="MSRV" src="https://img.shields.io/badge/MSRV-1.90%2B-orange?logo=rust&logoColor=white&style=flat" />
   <img alt="Rust edition" src="https://img.shields.io/badge/edition-2024-orange?logo=rust&logoColor=white&style=flat" />
   <a href="#license"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-informational?style=flat" /></a>
-  <a href="https://lowband21.github.io/ferrex/"><img alt="Docs" src="https://img.shields.io/badge/docs-github%20pages-0078D4?style=flat" /></a>
+  <a href="https://ferrexmedia.org/"><img alt="Docs" src="https://img.shields.io/badge/docs-ferrexmedia.org-0078D4?style=flat" /></a>
   <a href="https://github.com/Lowband21/ferrex/actions/workflows/ci.yml">
     <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Lowband21/ferrex/ci.yml?branch=main&label=CI&logo=githubactions&style=flat" />
   </a>
@@ -71,7 +71,7 @@ Optional performance preset (huge pages + io_uring + larger Postgres buffers):
 docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d
 ```
 
-Unraid note: see `docs/unraid.md` for recommended paths and `PUID`/`PGID` support.
+Unraid note: see the [Unraid deployment notes](https://ferrexmedia.org/operator/unraid/) for recommended paths and `PUID`/`PGID` support.
 
 ### Development (build from source)
 
@@ -104,7 +104,7 @@ just start
 just run-player-release
 ```
 
-More options (profiles, logging, tailscale, host vs docker server): see [Configuration](docs/configuration.md) and the [Contributing Guide](.github/CONTRIBUTING.md).
+More options (profiles, logging, tailscale, host vs docker server): see [Configuration](https://ferrexmedia.org/operator/configuration/) and the [Contributing Guide](.github/CONTRIBUTING.md).
 
 ## Packaging and Release
 
@@ -154,15 +154,15 @@ See [Security Policy](.github/SECURITY.md) for details.
 
 ## Architecture
 
-See [Architecture](docs/architecture.md) for the diagram and component responsibilities (server, player, core, video backend, and UI stack).
+See [Architecture](https://ferrexmedia.org/developer/architecture/) for the diagram and component responsibilities (server, player, core, video backend, and UI stack).
 
 ## Configuration
 
-See [Configuration](docs/configuration.md) for options and workflows, and [`.env.example`](.env.example) for the authoritative reference of environment variables.
+See [Configuration](https://ferrexmedia.org/operator/configuration/) for options and workflows, and [`.env.example`](.env.example) for the authoritative reference of environment variables.
 
 ## FAQ
 
-See the [FAQ](docs/faq.md).
+See the [FAQ](https://ferrexmedia.org/operator/faq/). Public documentation is built from the Starlight source under [`docs/src/content/docs/`](docs/src/content/docs/).
 
 ## Development
 

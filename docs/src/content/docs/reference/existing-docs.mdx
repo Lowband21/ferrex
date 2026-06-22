@@ -1,43 +1,38 @@
 ---
-title: Existing documentation inventory
-description: Inventory of repository markdown notes that remain source material for the Starlight documentation site.
+title: "Legacy Markdown pointers"
+description: "Map from old repository Markdown paths to their canonical Starlight pages after the documentation migration."
 sidebar:
-  order: 2
+  order: 6
 ---
 
-Ferrex already has useful markdown notes under `docs/`. This inventory keeps them discoverable while the Starlight site grows around reader-focused sections.
+The old flat Markdown notes now act as lightweight pointers. This lets existing inbound repository, issue, and review links continue to land somewhere useful while preventing duplicate long-form content from drifting away from the Starlight site.
 
-## Operator-facing notes
+## Migrated `docs/*.md` paths
 
-| File | Use when promoting content |
+| Legacy path | Canonical Starlight page |
 | --- | --- |
-| `docs/configuration.md` | Convert into setup and configuration pages with environment-variable context and safe defaults. |
-| `docs/unraid.md` | Promote into an operator deployment guide with storage paths, ownership, and update notes. |
-| `docs/auth-security.md` | Split into operator security guidance and developer authentication invariants. |
-| `docs/demo-mode.md` | Convert into a demo setup and reset guide. |
-| `docs/faq.md` | Use as a source for short troubleshooting entries and landing-page links. |
+| `docs/architecture.md` | [Architecture](/developer/architecture/) |
+| `docs/auth-security.md` | [Authentication security model](/operator/auth-security/) |
+| `docs/configuration.md` | [Configuration](/operator/configuration/) |
+| `docs/demo-mode.md` | [Demo mode](/operator/demo-mode/) |
+| `docs/faq.md` | [FAQ](/operator/faq/) |
+| `docs/intelligence-foundation.md` | [Phase 1 intelligence foundation](/developer/intelligence-foundation/) |
+| `docs/mobile-device-auth-flatbuffers.md` | [Mobile device-auth FlatBuffers contract](/reference/mobile/device-auth-flatbuffers/) |
+| `docs/playback-auth-regression-qa.md` | [Playback auth regression QA](/reference/qa/playback-auth-regression/) |
+| `docs/player-dependency-boundaries.md` | [Player dependency boundaries](/developer/player-dependency-boundaries/) |
+| `docs/sqlx-dynamic-query-allowlist.md` | [SQLx dynamic query policy and allowlist](/developer/sqlx-dynamic-query-allowlist/) |
+| `docs/sqlx-postgres-workflow.md` | [Disposable SQLx PostgreSQL workflow](/developer/sqlx-postgres-workflow/) |
+| `docs/ui-testing-workflow.md` | [UI testing workflow](/developer/ui-testing-workflow/) |
+| `docs/unraid.md` | [Unraid deployment notes](/operator/unraid/) |
 
-## Developer and QA notes
+## Migrated package docs
 
-| File | Use when promoting content |
+| Legacy path | Canonical Starlight page |
 | --- | --- |
-| `docs/architecture.md` | Expand into architecture overview pages that link to owning crates and runtime boundaries. |
-| `docs/player-dependency-boundaries.md` | Keep as the source for desktop player crate-boundary documentation. |
-| `docs/ui-testing-workflow.md` | Promote into visual QA and player UI validation guidance. |
-| `docs/playback-auth-regression-qa.md` | Use for playback/auth regression coverage and evidence expectations. |
-| `docs/mobile-device-auth-flatbuffers.md` | Promote into generated-contract and mobile-auth reference material. |
+| `packaging/flathub/README.md` | [Flathub submission guide](/release/flathub-submission/) |
 
-## SQLx and database workflow notes
+## Canonical files intentionally not migrated
 
-| File | Use when promoting content |
-| --- | --- |
-| `docs/sqlx-postgres-workflow.md` | Convert into the developer workflow for preparing and checking SQLx metadata. |
-| `docs/sqlx-dynamic-query-allowlist.md` | Keep as policy reference for reviewed dynamic SQL exceptions. |
-
-## Bench artifacts
-
-`docs/bench_results/` contains benchmark result JSON files. They should remain data artifacts unless a performance reference page needs to summarize a stable benchmark methodology.
-
-## Promotion rule
-
-When a note becomes a full Starlight page, keep the original path referenced until inbound links are updated or a redirect/deployment strategy exists. This avoids breaking existing README and issue links during the docs-site scaffold phase.
+- `.github/CONTRIBUTING.md`, `.github/SECURITY.md`, `.github/TRADEMARKS.md`, and `.github/CODE_OF_CONDUCT.md` remain canonical GitHub policy files. See [Project policies](/reference/project-policies/).
+- Crate/package READMEs remain canonical at package paths. See [Crate README inventory](/reference/crate-readmes/).
+- `docs/bench_results/*.json` remain benchmark data artifacts and are not rendered as guide pages.

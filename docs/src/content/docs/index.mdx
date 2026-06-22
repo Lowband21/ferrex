@@ -1,39 +1,44 @@
 ---
-title: Ferrex documentation
-description: Entry point for Ferrex operator, developer, reference, and release documentation.
-template: splash
-hero:
-  title: Ferrex documentation
-  tagline: Native media-server and player docs for operators, client builders, and release maintainers.
-  actions:
-    - text: Start with the docs map
-      link: /start/
-    - text: Review existing notes
-      link: /reference/existing-docs/
-      variant: secondary
+title: "Ferrex documentation"
+description: "Entry point for Ferrex operator, developer, reference, and release documentation."
 sidebar:
-  hidden: true
+  order: 1
 ---
 
-Ferrex combines a Rust media server, native desktop playback, Android and Android TV clients, packaging, and generated mobile contracts. This Starlight site gives those areas a single home while preserving the existing technical notes that already live in the repository.
+import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## What belongs here
+Ferrex combines a Rust media server, native desktop playback, Android and Android TV clients, packaging, and generated mobile contracts. This site is the canonical public documentation target at `https://ferrexmedia.org/`.
 
-| Area | Reader goal | Section |
-| --- | --- | --- |
-| Start here | Understand the documentation model before choosing a guide. | [Documentation map](/start/) |
-| Operate Ferrex | Install, configure, secure, and recover a Ferrex deployment. | [Operate Ferrex](/operator/) |
-| Build and extend | Set up the repository, run checks, understand architecture, and change clients or backend code. | [Build and extend](/developer/) |
-| Reference | Find durable specs, current in-repo notes, data contracts, and process references. | [Reference](/reference/) |
-| Release | Follow packaging and release validation once release guides are promoted into the site. | [Release](/release/) |
+<CardGrid>
+  <Card title="Operate Ferrex" icon="setting" href="/operator/configuration/">
+    Configure self-hosted deployments, understand auth/security behavior, run demo mode, and find recovery-oriented answers.
+  </Card>
+  <Card title="Build and extend" icon="rocket" href="/developer/architecture/">
+    Navigate the Rust workspace, player crate boundaries, UI testing, and SQLx workflows used by contributors.
+  </Card>
+  <Card title="Mobile and QA reference" icon="document" href="/reference/qa/">
+    Find Android/TV QA packets, playback/auth evidence, visual accessibility runbooks, and mobile FlatBuffers contracts.
+  </Card>
+  <Card title="Release and packaging" icon="star" href="/release/flathub-submission/">
+    Follow packaging references such as the Flathub submission guide and release-preflight source material.
+  </Card>
+</CardGrid>
+
+## Start with your role
+
+| Reader goal | Go to |
+| --- | --- |
+| Run Ferrex locally or self-host it | [Configuration](/operator/configuration/) |
+| Check deployment/security assumptions | [Authentication security model](/operator/auth-security/) and [project policies](/reference/project-policies/) |
+| Understand the codebase | [Architecture](/developer/architecture/) |
+| Change desktop player crates or UI | [Player dependency boundaries](/developer/player-dependency-boundaries/) and [UI testing workflow](/developer/ui-testing-workflow/) |
+| Work on database/query metadata | [SQLx dynamic query policy](/developer/sqlx-dynamic-query-allowlist/) and [SQLx PostgreSQL workflow](/developer/sqlx-postgres-workflow/) |
+| Review Android/TV readiness | [QA and evidence reference](/reference/qa/) |
+| Work with mobile generated contracts | [Mobile device-auth FlatBuffers contract](/reference/mobile/device-auth-flatbuffers/) |
 
 ## Site conventions
 
-- Operator-facing pages explain observable behavior, configuration, recovery paths, and validation commands before implementation details.
-- Developer-facing pages link to the crates, mobile modules, scripts, and existing markdown notes that own the underlying details.
-- Reference pages keep long-lived contracts discoverable without forcing every historical note to move in the first docs-site pass.
-- Search is powered by Starlight's Pagefind integration during static builds, so page titles and descriptions are written to match how readers look for help.
-
-## Canonical URL
-
-The generated site is configured for `https://ferrexmedia.org/` and a root base path. Deployment wiring, DNS, CNAME files, and hosting-provider configuration are intentionally outside this app scaffold.
+- Operator pages explain observable behavior, configuration, recovery paths, and validation commands before implementation details.
+- Developer pages link architecture decisions to the crates, scripts, tests, and Nix shells that enforce them.
+- Reference pages preserve dated QA evidence and canonical repository documents with explicit status labels so reviewers can tell current guidance from historical packets.
+- Release pages summarize packaging workflows while leaving deployment, DNS, and secret-dependent hosting automation to separate approved work.

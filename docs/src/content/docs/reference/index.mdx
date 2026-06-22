@@ -1,23 +1,21 @@
 ---
-title: Reference
-description: Stable Ferrex references for contracts, policies, workflows, and existing in-repo documentation.
+title: "Reference"
+description: "Stable Ferrex references for contracts, policies, QA evidence, package READMEs, and legacy path mappings."
 sidebar:
   order: 1
-  label: Overview
+  label: "Overview"
 ---
 
-Reference pages collect durable facts that readers need to find quickly: data contracts, policies, workflow inventories, path maps, and compatibility notes. They are intentionally less narrative than operator or developer guides.
+Reference pages collect durable facts that readers need to find quickly: data contracts, policies, workflow inventories, path maps, compatibility notes, and dated QA evidence.
 
-## Reference categories
+## Reference sections
 
-| Category | Examples |
+| Section | Contents |
 | --- | --- |
-| Contracts | FlatBuffers schemas, API shapes, authentication/session invariants, watch-state semantics. |
-| Workflow policies | SQLx offline metadata rules, dynamic query exceptions, visual QA evidence, codegen steps. |
-| Path maps | Where server, player, mobile, packaging, and generated files live in the repository. |
-| Compatibility notes | Platform support, playback backend tradeoffs, Android/TV recovery expectations. |
-| Existing docs inventory | Markdown files already in `docs/` that remain useful while they are converted into Starlight pages. |
-
-## When to use a reference page
+| [Mobile contracts](/reference/mobile/) | Mobile FlatBuffers contract notes and generated-code boundaries. |
+| [QA and evidence](/reference/qa/) | Android/TV QA packets, playback/auth regression evidence, visual accessibility runbooks, and stale/manual-hardware status. |
+| [Project policies](/reference/project-policies/) | Links to canonical GitHub policy files with the drift-prevention decision for each. |
+| [Crate README inventory](/reference/crate-readmes/) | Package-facing README files that remain canonical outside the docs site. |
+| [Legacy Markdown pointers](/reference/existing-docs/) | Old markdown paths and their new Starlight locations. |
 
 Use a reference page when the reader needs a stable answer more than a tutorial. If the page mainly tells a reader how to complete a task, it belongs in an operator, developer, or release section and can link back here for definitions.

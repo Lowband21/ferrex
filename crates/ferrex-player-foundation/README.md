@@ -11,4 +11,5 @@ This crate intentionally contains only non-UI contracts and helpers:
 - generic domain update/event helper containers.
 
 It must not depend on `ferrex-player`, Iced, subwave, or Ferrex domain crates. See
-`../../docs/player-dependency-boundaries.md` for the dependency direction policy.
+the [Player dependency boundaries](https://ferrexmedia.org/developer/player-dependency-boundaries/)
+for the dependency direction policy.

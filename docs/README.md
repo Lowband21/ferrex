@@ -27,8 +27,12 @@ This app intentionally contains no deployment workflow, CNAME file, GitHub Pages
 
 Starlight content lives in `src/content/docs/` and is grouped by reader intent:
 
-- `start/` explains how the documentation is organized and where new readers should begin.
-- `operator/` covers installation, configuration, security, media-library operations, and recovery.
-- `developer/` covers repository setup, architecture, testing, client work, and contribution workflow.
-- `reference/` indexes durable specs, workflows, and legacy in-repo notes until they are migrated.
-- `release/` covers packaging, publishing, and release validation once those guides are promoted into the site.
+- `start/` explains how the documentation is organized and how to add pages.
+- `operator/` covers configuration, authentication/security, Unraid, demo mode, and common operator questions.
+- `developer/` covers architecture, the backend intelligence foundation, player crate boundaries, UI testing, and SQLx/database workflows.
+- `reference/mobile/` covers generated mobile contract references.
+- `reference/qa/` preserves Android/TV QA packets, playback/auth evidence, visual/a11y runbooks, and stale/manual-hardware status labels.
+- `reference/` also links canonical GitHub policies, crate READMEs, and legacy Markdown pointer paths.
+- `release/` covers packaging references such as Flathub submission.
+
+Legacy flat Markdown notes under `docs/*.md` are lightweight pointers to these pages; update Starlight content rather than restoring duplicate long-form docs at those paths.
