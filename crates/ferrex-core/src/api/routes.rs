@@ -194,6 +194,12 @@ pub mod v1 {
         pub const MEDIA: &str = v1_path!("/events/media");
     }
 
+    pub mod transcripts {
+        /// Enqueue transcript extraction refresh for a playable media item.
+        pub const REFRESH: &str =
+            v1_path!("/media/{type}/{id}/refresh-transcripts");
+    }
+
     pub mod images {
         /// Refresh (invalidate) all cached images for a media item
         pub const REFRESH: &str = v1_path!("/media/{type}/{id}/refresh-images");

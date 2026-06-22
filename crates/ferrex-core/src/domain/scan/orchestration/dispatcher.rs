@@ -1,8 +1,12 @@
 use std::{any::type_name, fmt, path::PathBuf, sync::Arc};
 
 use crate::database::repository_ports::{
-    intelligence::IntelligenceRepository, library::LibraryRepository,
-    transcripts::TranscriptRepository,
+    intelligence::IntelligenceRepository,
+    library::LibraryRepository,
+    transcripts::{
+        TranscriptProcessingState, TranscriptProcessingStatusUpdate,
+        TranscriptRepository,
+    },
 };
 use crate::domain::scan::actors::image_fetch::ImageFetchActor;
 use crate::domain::scan::actors::index::{
@@ -30,7 +34,7 @@ use crate::domain::scan::orchestration::{
         AnalyzeScanHierarchy, DependencyKey, EnqueueRequest, EpisodeMatchJob,
         FolderScanJob, ImageFetchJob, IndexUpsertJob, JobPayload, JobPriority,
         MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob, ScanReason,
-        SeriesResolveJob,
+        SeriesResolveJob, TranscriptExtractJob, TranscriptExtractTrigger,
     },
     lease::JobLease,
     queue::QueueService,
@@ -43,13 +47,15 @@ use crate::domain::scan::orchestration::{
 };
 use crate::error::{MediaError, Result};
 use crate::infra::media::timed_text::{
-    TimedTextExtractionConfig, TimedTextExtractionOutcome,
-    TimedTextExtractionRequest, TimedTextExtractor,
+    TimedTextExtractionConfig, TimedTextExtractionFailure,
+    TimedTextExtractionOutcome, TimedTextExtractionRequest, TimedTextExtractor,
+    TimedTextFailureKind,
 };
 use async_trait::async_trait;
 use chrono::Utc;
 use ferrex_model::{Media, MediaFile, MediaID, VideoMediaType};
 use tracing::{Instrument, debug, debug_span, warn};
+use uuid::Uuid;
 
 async fn path_exists(path: &str) -> bool {
     tokio::fs::try_exists(path).await.unwrap_or(false)
@@ -529,6 +535,34 @@ impl FollowUpPlanner {
 
         // Bias index upserts to complete the item flow promptly.
         EnqueueRequest::new(JobPriority::P0, JobPayload::IndexUpsert(index_job))
+    }
+
+    fn transcript_after_index(
+        &self,
+        job: &IndexUpsertJob,
+        media_file: &MediaFile,
+        trigger: TranscriptExtractTrigger,
+        correlation_id: Option<Uuid>,
+    ) -> EnqueueRequest {
+        let transcript_job = TranscriptExtractJob {
+            library_id: job.library_id,
+            media_id: job.media_id,
+            variant: job.variant,
+            media_file_id: media_file.id,
+            path_norm: media_file.path.to_string_lossy().to_string(),
+            trigger,
+        };
+
+        let priority = match trigger {
+            TranscriptExtractTrigger::ExplicitRefresh => JobPriority::P1,
+            TranscriptExtractTrigger::IndexUpsert => JobPriority::P2,
+        };
+        let mut request = EnqueueRequest::new(
+            priority,
+            JobPayload::TranscriptExtract(transcript_job),
+        );
+        request.correlation_id = correlation_id;
+        request
     }
 
     fn image_fetches_for_ready(
@@ -1292,8 +1326,8 @@ where
         Ok(())
     }
 
-    async fn dispatch(&self, payload: &JobPayload) -> DispatchStatus {
-        match payload {
+    async fn dispatch(&self, lease: &JobLease) -> DispatchStatus {
+        match &lease.job.payload {
             JobPayload::FolderScan(_) => DispatchStatus::DeadLetter {
                 error: "folder scan payload routed to media pipeline".into(),
             },
@@ -1306,10 +1340,15 @@ where
             JobPayload::MetadataEnrich(job) => {
                 self.handle_metadata_enrich(job).await
             }
-            JobPayload::IndexUpsert(job) => self.handle_index_upsert(job).await,
+            JobPayload::IndexUpsert(job) => {
+                self.handle_index_upsert(lease, job).await
+            }
             JobPayload::ImageFetch(job) => self.handle_image_fetch(job).await,
             JobPayload::EpisodeMatch(job) => {
                 self.handle_episode_match(job).await
+            }
+            JobPayload::TranscriptExtract(job) => {
+                self.handle_transcript_extract(lease, job).await
             }
         }
     }
@@ -1505,6 +1544,7 @@ where
 
     async fn handle_index_upsert(
         &self,
+        lease: &JobLease,
         job: &IndexUpsertJob,
     ) -> DispatchStatus {
         let ready = MediaReadyForIndex {
@@ -1553,10 +1593,12 @@ where
             Err(err) => return classify_media_error(err),
         };
 
-        if let Err(err) =
-            self.extract_and_upsert_timed_text(job, &outcome).await
+        match self
+            .enqueue_timed_text_extraction(lease, job, &outcome)
+            .await
         {
-            return classify_media_error(err);
+            DispatchStatus::Success => {}
+            status => return status,
         }
 
         if let Err(err) = self
@@ -1577,16 +1619,17 @@ where
         DispatchStatus::Success
     }
 
-    async fn extract_and_upsert_timed_text(
+    async fn enqueue_timed_text_extraction(
         &self,
+        lease: &JobLease,
         job: &IndexUpsertJob,
         outcome: &IndexingOutcome,
-    ) -> Result<()> {
-        let Some(runtime) = &self.timed_text else {
-            return Ok(());
-        };
+    ) -> DispatchStatus {
+        if self.timed_text.is_none() {
+            return DispatchStatus::Success;
+        }
         if !matches!(job.media_id, MediaID::Movie(_) | MediaID::Episode(_)) {
-            return Ok(());
+            return DispatchStatus::Success;
         }
 
         let Some(media_file) =
@@ -1595,52 +1638,271 @@ where
             debug!(
                 target: "scan::timed_text",
                 media_id = %job.media_id,
-                "indexed media has no playable media file; skipping timed-text extraction"
+                "indexed media has no playable media file; skipping transcript enqueue"
             );
-            return Ok(());
+            return DispatchStatus::Success;
         };
 
-        let Some(library) =
-            runtime.libraries.get_library(job.library_id).await?
-        else {
-            warn!(
+        let media_path = media_file.path.to_string_lossy().to_string();
+        if !path_exists(&media_path).await {
+            debug!(
                 target: "scan::timed_text",
-                library_id = %job.library_id,
                 media_id = %job.media_id,
-                "library roots unavailable; skipping timed-text extraction"
+                "indexed media file is unavailable; skipping transcript enqueue"
             );
-            return Ok(());
-        };
-        if library.paths.is_empty() {
-            warn!(
-                target: "scan::timed_text",
-                library_id = %job.library_id,
-                media_id = %job.media_id,
-                "library has no configured roots; skipping timed-text extraction"
-            );
-            return Ok(());
+            return DispatchStatus::Success;
         }
 
-        let extraction: TimedTextExtractionOutcome = runtime
+        let request = self.planner.transcript_after_index(
+            job,
+            media_file,
+            TranscriptExtractTrigger::IndexUpsert,
+            lease.job.correlation_id,
+        );
+        self.follow_ups.enqueue(request).await
+    }
+
+    fn transcript_attempt(lease: &JobLease) -> i32 {
+        i32::from(lease.job.attempts.saturating_add(1))
+    }
+
+    async fn update_transcript_status(
+        runtime: &TimedTextRuntime,
+        job: &TranscriptExtractJob,
+        lease: &JobLease,
+        status: TranscriptProcessingState,
+        source_count: usize,
+        segment_count: usize,
+        error: Option<String>,
+        next_retry_at: Option<chrono::DateTime<Utc>>,
+    ) -> Result<()> {
+        runtime
+            .transcripts
+            .update_processing_status(TranscriptProcessingStatusUpdate {
+                library_id: job.library_id,
+                media_id: job.media_id,
+                media_file_id: job.media_file_id,
+                status,
+                source_count: i32::try_from(source_count).unwrap_or(i32::MAX),
+                segment_count: i32::try_from(segment_count).unwrap_or(i32::MAX),
+                attempt_count: Self::transcript_attempt(lease),
+                max_attempts: None,
+                last_error_excerpt: error,
+                next_retry_at,
+                last_run_correlation_id: lease.job.correlation_id,
+            })
+            .await
+    }
+
+    fn transcript_error_summary(
+        outcome: &TimedTextExtractionOutcome,
+    ) -> Option<String> {
+        if let Some(failure) = outcome.failures.first() {
+            return Some(format!(
+                "{:?}: {} ({} failure(s), {} skipped source(s))",
+                failure.kind,
+                failure.detail,
+                outcome.failures.len(),
+                outcome.skipped.len()
+            ));
+        }
+
+        outcome.skipped.first().map(|skipped| {
+            format!(
+                "{:?}: {} ({} skipped source(s))",
+                skipped.kind,
+                skipped.detail,
+                outcome.skipped.len()
+            )
+        })
+    }
+
+    fn transcript_failure_retryable(
+        failure: &TimedTextExtractionFailure,
+    ) -> bool {
+        matches!(
+            failure.kind,
+            TimedTextFailureKind::Io
+                | TimedTextFailureKind::ProbeTimedOut
+                | TimedTextFailureKind::FfmpegTimedOut
+        )
+    }
+
+    fn transcript_failures_retryable(
+        failures: &[TimedTextExtractionFailure],
+    ) -> bool {
+        failures.iter().any(Self::transcript_failure_retryable)
+    }
+
+    async fn handle_transcript_extract(
+        &self,
+        lease: &JobLease,
+        job: &TranscriptExtractJob,
+    ) -> DispatchStatus {
+        let Some(runtime) = &self.timed_text else {
+            return DispatchStatus::DeadLetter {
+                error: "transcript indexing is disabled".into(),
+            };
+        };
+
+        if let Err(err) = Self::update_transcript_status(
+            runtime,
+            job,
+            lease,
+            TranscriptProcessingState::Running,
+            0,
+            0,
+            None,
+            None,
+        )
+        .await
+        {
+            return classify_media_error(err);
+        }
+
+        if !matches!(job.media_id, MediaID::Movie(_) | MediaID::Episode(_)) {
+            let message =
+                "transcript extraction supports only movie or episode media";
+            let _ = Self::update_transcript_status(
+                runtime,
+                job,
+                lease,
+                TranscriptProcessingState::Skipped,
+                0,
+                0,
+                Some(message.to_string()),
+                None,
+            )
+            .await;
+            return DispatchStatus::Success;
+        }
+
+        if !path_exists(&job.path_norm).await {
+            let message = "media file unavailable for transcript extraction";
+            let _ = Self::update_transcript_status(
+                runtime,
+                job,
+                lease,
+                TranscriptProcessingState::Skipped,
+                0,
+                0,
+                Some(message.to_string()),
+                None,
+            )
+            .await;
+            return DispatchStatus::Success;
+        }
+
+        let library = match runtime.libraries.get_library(job.library_id).await
+        {
+            Ok(Some(library)) => library,
+            Ok(None) => {
+                let message =
+                    "library roots unavailable for transcript extraction";
+                let _ = Self::update_transcript_status(
+                    runtime,
+                    job,
+                    lease,
+                    TranscriptProcessingState::Skipped,
+                    0,
+                    0,
+                    Some(message.to_string()),
+                    None,
+                )
+                .await;
+                return DispatchStatus::Success;
+            }
+            Err(err) => {
+                let message = err.to_string();
+                let _ = Self::update_transcript_status(
+                    runtime,
+                    job,
+                    lease,
+                    TranscriptProcessingState::Failed,
+                    0,
+                    0,
+                    Some(message.clone()),
+                    None,
+                )
+                .await;
+                return classify_media_error(err);
+            }
+        };
+        if library.paths.is_empty() {
+            let message =
+                "library has no configured roots for transcript extraction";
+            let _ = Self::update_transcript_status(
+                runtime,
+                job,
+                lease,
+                TranscriptProcessingState::Skipped,
+                0,
+                0,
+                Some(message.to_string()),
+                None,
+            )
+            .await;
+            return DispatchStatus::Success;
+        }
+
+        let extraction = match runtime
             .extractor
             .extract(TimedTextExtractionRequest {
                 library_id: job.library_id,
                 media_id: job.media_id,
-                media_file_id: media_file.id,
-                media_path: media_file.path.clone(),
+                media_file_id: job.media_file_id,
+                media_path: PathBuf::from(&job.path_norm),
                 library_roots: library.paths,
             })
-            .await?;
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                let message = err.to_string();
+                let _ = Self::update_transcript_status(
+                    runtime,
+                    job,
+                    lease,
+                    TranscriptProcessingState::Failed,
+                    0,
+                    0,
+                    Some(message.clone()),
+                    None,
+                )
+                .await;
+                return classify_media_error(err);
+            }
+        };
+
         let source_count = extraction.sources.len();
         let segment_count = extraction.segment_count();
         let skipped_count = extraction.skipped.len();
         let failure_count = extraction.failures.len();
+        let failure_retryable =
+            Self::transcript_failures_retryable(&extraction.failures);
+        let outcome_message = Self::transcript_error_summary(&extraction);
+        let sources = extraction.sources;
 
-        for batch in extraction.sources {
-            runtime
+        for batch in sources {
+            if let Err(err) = runtime
                 .transcripts
                 .upsert_source_with_segments(batch.source, batch.segments)
-                .await?;
+                .await
+            {
+                let message = err.to_string();
+                let _ = Self::update_transcript_status(
+                    runtime,
+                    job,
+                    lease,
+                    TranscriptProcessingState::Failed,
+                    source_count,
+                    segment_count,
+                    Some(message.clone()),
+                    None,
+                )
+                .await;
+                return classify_media_error(err);
+            }
         }
 
         debug!(
@@ -1650,10 +1912,71 @@ where
             segment_count,
             skipped_count,
             failure_count,
-            "timed-text extraction completed for indexed media"
+            "transcript extraction completed"
         );
 
-        Ok(())
+        if failure_count > 0 {
+            let message = outcome_message
+                .clone()
+                .unwrap_or_else(|| "transcript extraction failed".to_string());
+            let _ = Self::update_transcript_status(
+                runtime,
+                job,
+                lease,
+                TranscriptProcessingState::Failed,
+                source_count,
+                segment_count,
+                Some(message.clone()),
+                None,
+            )
+            .await;
+            if failure_retryable {
+                return DispatchStatus::Retry { error: message };
+            }
+            return DispatchStatus::DeadLetter { error: message };
+        }
+
+        if source_count == 0 {
+            let message = outcome_message.unwrap_or_else(|| {
+                "no supported transcript sources found".to_string()
+            });
+            let _ = Self::update_transcript_status(
+                runtime,
+                job,
+                lease,
+                TranscriptProcessingState::Skipped,
+                0,
+                0,
+                Some(message),
+                None,
+            )
+            .await;
+            return DispatchStatus::Success;
+        }
+
+        if let Err(err) = Self::update_transcript_status(
+            runtime,
+            job,
+            lease,
+            TranscriptProcessingState::Succeeded,
+            source_count,
+            segment_count,
+            None,
+            None,
+        )
+        .await
+        {
+            return classify_media_error(err);
+        }
+
+        if let Err(err) = self
+            .refresh_intelligence_read_model(job.library_id, job.media_id)
+            .await
+        {
+            return classify_media_error(err);
+        }
+
+        DispatchStatus::Success
     }
 
     async fn handle_image_fetch(&self, job: &ImageFetchJob) -> DispatchStatus {
@@ -1693,7 +2016,15 @@ where
             JobPayload::FolderScan(job) => {
                 self.folder_flow.dispatch(lease, job).await
             }
-            payload => self.media_pipeline_flow.dispatch(payload).await,
+            JobPayload::TranscriptExtract(_)
+            | JobPayload::SeriesResolve(_)
+            | JobPayload::MediaAnalyze(_)
+            | JobPayload::MetadataEnrich(_)
+            | JobPayload::IndexUpsert(_)
+            | JobPayload::ImageFetch(_)
+            | JobPayload::EpisodeMatch(_) => {
+                self.media_pipeline_flow.dispatch(lease).await
+            }
         }
     }
 }
@@ -1702,10 +2033,10 @@ where
 mod tests {
     use super::*;
     use crate::database::repository_ports::transcripts::{
-        TranscriptProcessingStatusSummary, TranscriptSegmentUpsert,
-        TranscriptSourceStatusFilter, TranscriptSourceStatusSummary,
-        TranscriptSourceUpsert, TranscriptSourceUpsertResult,
-        TranscriptStatusFilter,
+        TranscriptProcessingStatusSummary, TranscriptProcessingStatusUpdate,
+        TranscriptSegmentUpsert, TranscriptSourceStatusFilter,
+        TranscriptSourceStatusSummary, TranscriptSourceUpsert,
+        TranscriptSourceUpsertResult, TranscriptStatusFilter,
     };
     use crate::domain::scan::actors::folder::FolderListingPlan;
     use crate::domain::scan::actors::index::{IndexingChange, IndexingOutcome};
@@ -2085,14 +2416,16 @@ mod tests {
         async fn list_library_references(
             &self,
         ) -> Result<Vec<crate::types::details::LibraryReference>> {
-            unimplemented!("not needed by dispatcher timed-text tests")
+            Ok(Vec::new())
         }
 
         async fn get_library_reference(
             &self,
             _id: Uuid,
         ) -> Result<crate::types::details::LibraryReference> {
-            unimplemented!("not needed by dispatcher timed-text tests")
+            Err(crate::error::MediaError::NotFound(
+                "library reference not seeded in dispatcher tests".into(),
+            ))
         }
     }
 
@@ -2100,6 +2433,7 @@ mod tests {
     struct RecordingTranscriptRepository {
         upserts:
             Mutex<Vec<(TranscriptSourceUpsert, Vec<TranscriptSegmentUpsert>)>>,
+        statuses: Mutex<Vec<TranscriptProcessingStatusUpdate>>,
     }
 
     impl RecordingTranscriptRepository {
@@ -2108,6 +2442,12 @@ mod tests {
         ) -> Vec<(TranscriptSourceUpsert, Vec<TranscriptSegmentUpsert>)>
         {
             self.upserts.lock().await.clone()
+        }
+
+        async fn status_updates(
+            &self,
+        ) -> Vec<TranscriptProcessingStatusUpdate> {
+            self.statuses.lock().await.clone()
         }
     }
 
@@ -2141,6 +2481,14 @@ mod tests {
             _filter: TranscriptStatusFilter,
         ) -> Result<Vec<TranscriptProcessingStatusSummary>> {
             Ok(Vec::new())
+        }
+
+        async fn update_processing_status(
+            &self,
+            update: TranscriptProcessingStatusUpdate,
+        ) -> Result<()> {
+            self.statuses.lock().await.push(update);
+            Ok(())
         }
 
         async fn invalidate_media(
@@ -2183,7 +2531,13 @@ mod tests {
         ) -> Result<
             crate::api::types::intelligence::TimedTextSnippetSearchResponse,
         > {
-            unimplemented!("not needed by dispatcher timed-text tests")
+            Ok(
+                crate::api::types::intelligence::TimedTextSnippetSearchResponse {
+                    snippets: Vec::new(),
+                    page: Default::default(),
+                    caps: Default::default(),
+                },
+            )
         }
     }
 
@@ -2866,8 +3220,20 @@ mod tests {
             Arc::new(StaticLibraryRepository {
                 library: movie_library(library_id, vec![library_root.clone()]),
             });
+        let ffprobe_path = library_root.join("ffprobe-empty-streams");
+        std::fs::write(&ffprobe_path, "#!/bin/sh\nprintf '{\"streams\":[]}'\n")
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms =
+                std::fs::metadata(&ffprobe_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&ffprobe_path, perms).unwrap();
+        }
+
         let mut timed_text_config = TimedTextExtractionConfig::default();
-        timed_text_config.ffprobe_path = library_root.join("missing-ffprobe");
+        timed_text_config.ffprobe_path = ffprobe_path;
         timed_text_config.ffmpeg_path = library_root.join("missing-ffmpeg");
 
         let dispatcher = DefaultJobDispatcher::new(
@@ -2912,6 +3278,33 @@ mod tests {
         let status = dispatcher.dispatch(&lease).await;
 
         assert_eq!(status, DispatchStatus::Success);
+        assert!(transcripts.recorded().await.is_empty());
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 1);
+        let JobPayload::TranscriptExtract(transcript_job) =
+            enqueued[0].payload.clone()
+        else {
+            panic!("expected transcript extraction follow-up");
+        };
+        assert_eq!(transcript_job.library_id, library_id);
+        assert_eq!(transcript_job.media_id, media_id);
+        assert_eq!(transcript_job.media_file_id, media_file_id);
+        assert_eq!(
+            transcript_job.trigger,
+            TranscriptExtractTrigger::IndexUpsert
+        );
+
+        let transcript_lease = JobLease::new(
+            JobRecord::new(
+                JobPayload::TranscriptExtract(transcript_job),
+                JobPriority::P2,
+            ),
+            "timed-text-test".to_string(),
+            chrono::Duration::seconds(30),
+        );
+        let status = dispatcher.dispatch(&transcript_lease).await;
+
+        assert_eq!(status, DispatchStatus::Success);
         let upserts = transcripts.recorded().await;
         assert_eq!(upserts.len(), 1);
         let (source, segments) = &upserts[0];
@@ -2927,6 +3320,13 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, "Runtime transcript");
         assert!(!source.source_locator.to_string().contains("Arrival"));
+
+        let statuses = transcripts.status_updates().await;
+        assert_eq!(statuses.len(), 2);
+        assert_eq!(statuses[0].status, TranscriptProcessingState::Running);
+        assert_eq!(statuses[1].status, TranscriptProcessingState::Succeeded);
+        assert_eq!(statuses[1].source_count, 1);
+        assert_eq!(statuses[1].segment_count, 1);
     }
 
     #[tokio::test]

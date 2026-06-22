@@ -266,6 +266,7 @@ async fn orchestrator_start_primes_persisted_ready_jobs_once() -> Result<()> {
     config.queue.max_parallel_metadata = 0;
     config.queue.max_parallel_index = 0;
     config.queue.max_parallel_image_fetch = 0;
+    config.queue.max_parallel_transcript_extract = 0;
     config.maintenance.enabled = false;
 
     let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));

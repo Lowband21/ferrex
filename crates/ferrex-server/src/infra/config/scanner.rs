@@ -57,6 +57,12 @@ impl Default for ScannerConfig {
             orchestrator.budget.image_fetch_limit =
                 orchestrator.queue.max_parallel_image_fetch;
         }
+        if orchestrator.budget.transcript_extraction_limit
+            < orchestrator.queue.max_parallel_transcript_extract
+        {
+            orchestrator.budget.transcript_extraction_limit =
+                orchestrator.queue.max_parallel_transcript_extract;
+        }
 
         Self {
             orchestrator,

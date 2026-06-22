@@ -193,9 +193,27 @@ pub struct TranscriptProcessingStatusSummary {
     pub attempt_count: i32,
     pub last_error_excerpt: Option<String>,
     pub next_retry_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_run_correlation_id: Option<Uuid>,
     pub invalidated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub purged_at: Option<chrono::DateTime<chrono::Utc>>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Status mutation used by orchestrator jobs. All text fields must be bounded
+/// and safe for operator-visible status surfaces.
+#[derive(Debug, Clone)]
+pub struct TranscriptProcessingStatusUpdate {
+    pub library_id: LibraryId,
+    pub media_id: MediaID,
+    pub media_file_id: Uuid,
+    pub status: TranscriptProcessingState,
+    pub source_count: i32,
+    pub segment_count: i32,
+    pub attempt_count: i32,
+    pub max_attempts: Option<i32>,
+    pub last_error_excerpt: Option<String>,
+    pub next_retry_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_run_correlation_id: Option<Uuid>,
 }
 
 /// Repository port for timed-text corpus persistence and bounded snippet search.
@@ -222,6 +240,13 @@ pub trait TranscriptRepository: Send + Sync {
         &self,
         filter: TranscriptStatusFilter,
     ) -> Result<Vec<TranscriptProcessingStatusSummary>>;
+
+    /// Update queued/running/terminal transcript extraction status without
+    /// exposing local paths or transcript text.
+    async fn update_processing_status(
+        &self,
+        update: TranscriptProcessingStatusUpdate,
+    ) -> Result<()>;
 
     /// Mark active transcript sources/segments and their linked source-level
     /// artifacts invalidated for a media item.

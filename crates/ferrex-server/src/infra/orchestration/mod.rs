@@ -12,10 +12,16 @@ use std::{
     },
 };
 
-use ferrex_core::api::{IncrementalScanStatusView, ScanQueueDepths};
+use ferrex_core::api::{
+    IncrementalScanStatusView, ScanQueueDepths, TranscriptRecentFailureView,
+    TranscriptScanStatusView,
+};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
 use ferrex_core::database::repositories::media::PostgresMediaRepository;
+use ferrex_core::database::repository_ports::transcripts::{
+    TranscriptProcessingState, TranscriptStatusFilter,
+};
 use ferrex_core::domain::scan::actors::provider::TmdbMetadataActor;
 use ferrex_core::domain::scan::actors::{
     DefaultFolderScanActor, DefaultLibraryActor, LibraryActorCommand,
@@ -36,7 +42,10 @@ use ferrex_core::domain::scan::orchestration::{
         JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
         stable_path_key,
     },
-    job::{EnqueueRequest, JobHandle, JobKind},
+    job::{
+        EnqueueRequest, JobHandle, JobKind, JobPayload, JobPriority,
+        TranscriptExtractJob, TranscriptExtractTrigger,
+    },
     lease::{DequeueRequest, JobLease},
     queue::QueueService,
     runtime::{
@@ -58,9 +67,10 @@ use ferrex_core::infra::media::{
     image_service::ImageService, providers::TmdbApiProvider,
     timed_text::TimedTextExtractionConfig,
 };
-use ferrex_core::types::LibraryId;
+use ferrex_core::types::{LibraryId, MediaID, VideoMediaType};
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
+use uuid::Uuid;
 
 mod maintenance;
 
@@ -170,24 +180,25 @@ impl ScanOrchestrator {
 
         let delta_repo =
             Arc::new(PostgresMediaRepository::new(queue.pool().clone()));
-        let dispatcher: Arc<dyn JobDispatcher> = Arc::new(
-            DefaultJobDispatcher::new(
-                Arc::clone(&queue),
-                Arc::clone(&events),
-                Arc::clone(&cursors),
-                Arc::clone(&series_states),
-                Arc::clone(&series_resolver),
-                dispatcher_actors,
-                correlations.clone(),
-            )
-            .with_delta_repository(delta_repo)
-            .with_intelligence_repository(unit_of_work.intelligence.clone())
-            .with_timed_text_extraction(
+        let mut dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            Arc::clone(&cursors),
+            Arc::clone(&series_states),
+            Arc::clone(&series_resolver),
+            dispatcher_actors,
+            correlations.clone(),
+        )
+        .with_delta_repository(delta_repo)
+        .with_intelligence_repository(unit_of_work.intelligence.clone());
+        if config.transcript_indexing.enabled {
+            dispatcher = dispatcher.with_timed_text_extraction(
                 unit_of_work.libraries.clone(),
                 unit_of_work.transcripts.clone(),
                 TimedTextExtractionConfig::default(),
-            ),
-        );
+            );
+        }
+        let dispatcher: Arc<dyn JobDispatcher> = Arc::new(dispatcher);
 
         let watch_cfg = config.watch.clone();
 
@@ -457,6 +468,53 @@ impl ScanOrchestrator {
         enqueuer.enqueue(request).await
     }
 
+    /// Enqueue an operator-requested transcript refresh when transcript indexing
+    /// is enabled and the media file is still locally available.
+    pub async fn enqueue_transcript_refresh(
+        &self,
+        library_id: LibraryId,
+        media_id: MediaID,
+        variant: VideoMediaType,
+        media_file_id: Uuid,
+        path_norm: impl Into<String>,
+        correlation_id: Option<Uuid>,
+    ) -> Result<Option<JobHandle>> {
+        if !self.runtime.config().transcript_indexing.enabled {
+            return Ok(None);
+        }
+        if !matches!(media_id, MediaID::Movie(_) | MediaID::Episode(_))
+            || !matches!(
+                variant,
+                VideoMediaType::Movie | VideoMediaType::Episode
+            )
+        {
+            return Ok(None);
+        }
+
+        let path_norm = path_norm.into();
+        if path_norm.trim().is_empty()
+            || !tokio::fs::try_exists(&path_norm).await.unwrap_or(false)
+        {
+            return Ok(None);
+        }
+
+        let mut request = EnqueueRequest::new(
+            JobPriority::P1,
+            JobPayload::TranscriptExtract(TranscriptExtractJob {
+                library_id,
+                media_id,
+                variant,
+                media_file_id,
+                path_norm,
+                trigger: TranscriptExtractTrigger::ExplicitRefresh,
+            }),
+        );
+        request.correlation_id =
+            Some(correlation_id.unwrap_or_else(Uuid::now_v7));
+
+        self.enqueue(request).await.map(Some)
+    }
+
     pub async fn dequeue(
         &self,
         request: DequeueRequest,
@@ -506,6 +564,44 @@ impl ScanOrchestrator {
             metadata: queue.queue_depth(JobKind::MetadataEnrich).await?,
             index: queue.queue_depth(JobKind::IndexUpsert).await?,
             image_fetch: queue.queue_depth(JobKind::ImageFetch).await?,
+            transcript_extract: queue
+                .queue_depth(JobKind::TranscriptExtract)
+                .await?,
+        })
+    }
+
+    pub async fn transcript_scan_status(
+        &self,
+    ) -> Result<TranscriptScanStatusView> {
+        let queue = self.runtime.queue();
+        let recent = self
+            .unit_of_work
+            .transcripts
+            .list_processing_status(TranscriptStatusFilter {
+                status: Some(TranscriptProcessingState::Failed),
+                limit: 10,
+                ..TranscriptStatusFilter::default()
+            })
+            .await?;
+
+        Ok(TranscriptScanStatusView {
+            queue_depth: queue.queue_depth(JobKind::TranscriptExtract).await?,
+            recent_failures: recent
+                .into_iter()
+                .map(|failure| TranscriptRecentFailureView {
+                    library_id: failure.library_id,
+                    media_id: failure.media_id,
+                    media_file_id: failure.media_file_id,
+                    status: failure.status.as_db_str().to_string(),
+                    source_count: failure.source_count,
+                    segment_count: failure.segment_count,
+                    attempt_count: failure.attempt_count,
+                    last_error_excerpt: failure.last_error_excerpt,
+                    next_retry_at: failure.next_retry_at,
+                    last_run_correlation_id: failure.last_run_correlation_id,
+                    updated_at: failure.updated_at,
+                })
+                .collect(),
         })
     }
 }

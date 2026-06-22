@@ -250,5 +250,8 @@ pub fn stable_path_key(payload: &JobPayload) -> Option<SubjectKey> {
         JobPayload::EpisodeMatch(job) => {
             SubjectKey::path(job.path_norm.clone()).ok()
         }
+        JobPayload::TranscriptExtract(job) => {
+            SubjectKey::path(job.path_norm.clone()).ok()
+        }
     }
 }

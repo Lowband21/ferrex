@@ -1,10 +1,11 @@
 //! Postgres-backed persistence for the scan orchestrator queue and cursors.
 
+use crate::database::repository_ports::transcripts::TranscriptProcessingState;
 use crate::error::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::from_value;
-use sqlx::PgPool;
+use sqlx::{Executor, PgPool, Row};
 use std::fmt;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use tracing::{debug, info, trace, warn};
@@ -13,7 +14,7 @@ use crate::domain::scan::orchestration::{
     config::RetryConfig,
     job::{
         DependencyKey, EnqueueRequest, JobHandle, JobId, JobKind, JobPayload,
-        JobPriority, ScanReason,
+        JobPriority, ScanReason, TranscriptExtractJob,
     },
     lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
     queue::{
@@ -29,6 +30,157 @@ use crate::{error::MediaError, types::LibraryId};
 pub struct PostgresQueueService {
     pool: PgPool,
     retry_config: RetryConfig,
+}
+
+fn transcript_media_type(job: &TranscriptExtractJob) -> Option<&'static str> {
+    match &job.media_id {
+        ferrex_model::MediaID::Movie(_) => Some("movie"),
+        ferrex_model::MediaID::Episode(_) => Some("episode"),
+        ferrex_model::MediaID::Series(_) | ferrex_model::MediaID::Season(_) => {
+            None
+        }
+    }
+}
+
+fn bounded_queue_error(error: Option<String>) -> Option<String> {
+    error.map(|message| message.chars().take(2048).collect())
+}
+
+async fn mark_transcript_queue_status(
+    pool: &PgPool,
+    job: &TranscriptExtractJob,
+    status: TranscriptProcessingState,
+    attempt_count: i32,
+    max_attempts: u16,
+    error: Option<String>,
+    next_retry_at: Option<chrono::DateTime<chrono::Utc>>,
+    correlation_id: Option<uuid::Uuid>,
+) -> Result<()> {
+    let Some(media_type) = transcript_media_type(job) else {
+        return Ok(());
+    };
+    let status_str = status.as_db_str();
+    let terminal = matches!(
+        status,
+        TranscriptProcessingState::Succeeded
+            | TranscriptProcessingState::Failed
+            | TranscriptProcessingState::Skipped
+            | TranscriptProcessingState::Cancelled
+            | TranscriptProcessingState::Invalidated
+            | TranscriptProcessingState::Purged
+    );
+    let running = status == TranscriptProcessingState::Running;
+    let error = bounded_queue_error(error);
+
+    sqlx::query(
+        r#"
+        INSERT INTO transcript_processing_status (
+            library_id,
+            media_id,
+            media_type,
+            media_file_id,
+            status,
+            source_count,
+            segment_count,
+            attempt_count,
+            max_attempts,
+            last_error_excerpt,
+            last_run_correlation_id,
+            next_retry_at,
+            started_at,
+            finished_at
+        ) VALUES (
+            $1,
+            $2,
+            ($3::text)::media_type,
+            $4,
+            $5,
+            0,
+            0,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            CASE WHEN $11 THEN now() ELSE NULL END,
+            CASE WHEN $12 THEN now() ELSE NULL END
+        )
+        ON CONFLICT (library_id, media_file_id) DO UPDATE SET
+            media_id = EXCLUDED.media_id,
+            media_type = EXCLUDED.media_type,
+            status = EXCLUDED.status,
+            source_count = CASE
+                WHEN $5 IN ('queued', 'running', 'cancelled') THEN EXCLUDED.source_count
+                ELSE transcript_processing_status.source_count
+            END,
+            segment_count = CASE
+                WHEN $5 IN ('queued', 'running', 'cancelled') THEN EXCLUDED.segment_count
+                ELSE transcript_processing_status.segment_count
+            END,
+            attempt_count = EXCLUDED.attempt_count,
+            max_attempts = EXCLUDED.max_attempts,
+            last_error_excerpt = EXCLUDED.last_error_excerpt,
+            last_run_correlation_id = COALESCE(
+                EXCLUDED.last_run_correlation_id,
+                transcript_processing_status.last_run_correlation_id
+            ),
+            next_retry_at = EXCLUDED.next_retry_at,
+            started_at = CASE
+                WHEN $11 THEN COALESCE(transcript_processing_status.started_at, now())
+                ELSE NULL
+            END,
+            finished_at = CASE WHEN $12 THEN now() ELSE NULL END,
+            updated_at = now()
+        "#,
+    )
+    .bind(job.library_id.0)
+    .bind(*job.media_id.as_uuid())
+    .bind(media_type)
+    .bind(job.media_file_id)
+    .bind(status_str)
+    .bind(attempt_count.max(0))
+    .bind(i32::from(max_attempts))
+    .bind(error)
+    .bind(correlation_id)
+    .bind(next_retry_at)
+    .bind(running)
+    .bind(terminal)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+fn transcript_payload(payload: &JobPayload) -> Option<TranscriptExtractJob> {
+    match payload {
+        JobPayload::TranscriptExtract(job) => Some(job.clone()),
+        _ => None,
+    }
+}
+
+async fn replace_pending_transcript_payload<'e, E>(
+    executor: E,
+    job_id: uuid::Uuid,
+    payload_json: &serde_json::Value,
+) -> Result<()>
+where
+    E: Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query(
+        r#"
+        UPDATE orchestrator_jobs
+        SET payload = $1,
+            updated_at = NOW()
+        WHERE id = $2
+          AND state IN ('ready','deferred')
+        "#,
+    )
+    .bind(payload_json)
+    .bind(job_id)
+    .execute(executor)
+    .await?;
+
+    Ok(())
 }
 
 impl fmt::Debug for PostgresQueueService {
@@ -455,25 +607,28 @@ impl QueueService for PostgresQueueService {
 
         // Fast path: if an active job with the same dedupe_key exists, merge without
         // causing a unique violation. This avoids noisy ERROR logs in Postgres.
-        if let Some(existing) = sqlx::query!(
+        if let Some(existing) = sqlx::query(
             r#"
-            SELECT id, priority
+            SELECT id, priority, state, attempts
             FROM orchestrator_jobs
             WHERE dedupe_key = $1
               AND state IN ('ready','deferred','leased')
             ORDER BY created_at ASC
             LIMIT 1
             "#,
-            dedupe_key
         )
+        .bind(&dedupe_key)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
             MediaError::Internal(format!("enqueue precheck failed: {e}"))
         })? {
+            let existing_uuid: uuid::Uuid = existing.try_get("id")?;
             let existing_id =
-                crate::domain::scan::orchestration::job::JobId(existing.id);
-            let existing_priority: i16 = existing.priority;
+                crate::domain::scan::orchestration::job::JobId(existing_uuid);
+            let existing_priority: i16 = existing.try_get("priority")?;
+            let existing_state: String = existing.try_get("state")?;
+            let existing_attempts: i32 = existing.try_get("attempts")?;
             // Try to elevate priority if incoming is higher and the job is not leased
             if priority_val < existing_priority {
                 let _ = sqlx::query!(
@@ -485,7 +640,7 @@ impl QueueService for PostgresQueueService {
                     WHERE id = $2 AND state IN ('ready','deferred')
                     "#,
                     priority_val,
-                    existing.id
+                    existing_uuid
                 )
                 .execute(&self.pool)
                 .await;
@@ -500,10 +655,41 @@ impl QueueService for PostgresQueueService {
                       AND correlation_id IS NULL
                     "#,
                     correlation_id,
-                    existing.id
+                    existing_uuid
                 )
                 .execute(&self.pool)
                 .await;
+            }
+            if existing_state.as_str() != "leased"
+                && transcript_payload(&request.payload).is_some()
+            {
+                replace_pending_transcript_payload(
+                    &self.pool,
+                    existing_uuid,
+                    &payload_json,
+                )
+                .await
+                .map_err(|err| {
+                    MediaError::Internal(format!(
+                        "transcript merge payload update failed: {err}"
+                    ))
+                })?;
+            }
+            if existing_state.as_str() != "leased"
+                && let Some(job) = transcript_payload(&request.payload)
+                && let Err(err) = mark_transcript_queue_status(
+                    &self.pool,
+                    &job,
+                    TranscriptProcessingState::Queued,
+                    existing_attempts,
+                    self.retry_config.max_attempts,
+                    None,
+                    None,
+                    correlation_id,
+                )
+                .await
+            {
+                warn!(error = %err, job = %existing_uuid, "failed to mark transcript job queued");
             }
             return Ok(JobHandle::merged(
                 existing_id,
@@ -541,6 +727,21 @@ impl QueueService for PostgresQueueService {
         match insert_res {
             Ok(_) => {
                 trace!("enqueue accepted new job {}", job_id.0);
+                if let Some(job) = transcript_payload(&request.payload)
+                    && let Err(err) = mark_transcript_queue_status(
+                        &self.pool,
+                        &job,
+                        TranscriptProcessingState::Queued,
+                        0,
+                        self.retry_config.max_attempts,
+                        None,
+                        None,
+                        correlation_id,
+                    )
+                    .await
+                {
+                    warn!(error = %err, job = %job_id.0, "failed to mark transcript job queued");
+                }
                 return Ok(JobHandle::accepted(
                     job_id,
                     &request.payload,
@@ -551,17 +752,17 @@ impl QueueService for PostgresQueueService {
                 // Unique violation => merge
                 let code = db_err.code().map(|c| c.to_string());
                 if code.as_deref() == Some("23505") {
-                    let existing = sqlx::query!(
+                    let existing = sqlx::query(
                         r#"
-                        SELECT id, priority, available_at, state
+                        SELECT id, priority, available_at, state, attempts
                         FROM orchestrator_jobs
                         WHERE dedupe_key = $1
                           AND state IN ('ready','deferred','leased')
                         ORDER BY created_at ASC
                         LIMIT 1
                         "#,
-                        dedupe_key
                     )
+                    .bind(&dedupe_key)
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(|e| {
@@ -571,8 +772,11 @@ impl QueueService for PostgresQueueService {
                     })?;
 
                     if let Some(row) = existing {
+                        let row_id: uuid::Uuid = row.try_get("id")?;
+                        let row_state: String = row.try_get("state")?;
+                        let row_attempts: i32 = row.try_get("attempts")?;
                         // Elevate priority if incoming is higher (lower numeric value)
-                        let existing_pri: i16 = row.priority;
+                        let existing_pri: i16 = row.try_get("priority")?;
                         if priority_val < existing_pri {
                             let update = sqlx::query!(
                                 r#"
@@ -584,7 +788,7 @@ impl QueueService for PostgresQueueService {
                                   AND state IN ('ready','deferred')
                                 "#,
                                 priority_val,
-                                row.id
+                                row_id
                             )
                             .execute(&self.pool)
                             .await
@@ -597,19 +801,19 @@ impl QueueService for PostgresQueueService {
                             if update.rows_affected() > 0 {
                                 info!(
                                     "enqueue merged and elevated priority for job {} to {}",
-                                    row.id, priority_val
+                                    row_id, priority_val
                                 );
                             } else {
                                 // Likely leased or moved terminal concurrently; best-effort merge only
                                 info!(
                                     "enqueue merge: elevation skipped due to state transition for job {}",
-                                    row.id
+                                    row_id
                                 );
                             }
                         } else {
                             info!(
                                 "enqueue merged into existing job {} without priority change",
-                                row.id
+                                row_id
                             );
                         }
                         if correlation_id.is_some() {
@@ -622,14 +826,46 @@ impl QueueService for PostgresQueueService {
                                   AND correlation_id IS NULL
                                 "#,
                                 correlation_id,
-                                row.id
+                                row_id
                             )
                             .execute(&self.pool)
                             .await;
                         }
+                        if row_state.as_str() != "leased"
+                            && transcript_payload(&request.payload).is_some()
+                        {
+                            replace_pending_transcript_payload(
+                                &self.pool,
+                                row_id,
+                                &payload_json,
+                            )
+                            .await
+                            .map_err(|err| {
+                                MediaError::Internal(format!(
+                                    "transcript merge payload update failed: {err}"
+                                ))
+                            })?;
+                        }
+                        if row_state.as_str() != "leased"
+                            && let Some(job) =
+                                transcript_payload(&request.payload)
+                            && let Err(err) = mark_transcript_queue_status(
+                                &self.pool,
+                                &job,
+                                TranscriptProcessingState::Queued,
+                                row_attempts,
+                                self.retry_config.max_attempts,
+                                None,
+                                None,
+                                correlation_id,
+                            )
+                            .await
+                        {
+                            warn!(error = %err, job = %row_id, "failed to mark transcript job queued");
+                        }
                         return Ok(JobHandle::merged(
                             crate::domain::scan::orchestration::job::JobId(
-                                row.id,
+                                row_id,
                             ),
                             &request.payload,
                             request.priority,
@@ -668,6 +904,23 @@ impl QueueService for PostgresQueueService {
                                     "enqueue accepted new job {} on retry",
                                     job_id2.0
                                 );
+                                if let Some(job) =
+                                    transcript_payload(&request.payload)
+                                    && let Err(err) =
+                                        mark_transcript_queue_status(
+                                            &self.pool,
+                                            &job,
+                                            TranscriptProcessingState::Queued,
+                                            0,
+                                            self.retry_config.max_attempts,
+                                            None,
+                                            None,
+                                            correlation_id,
+                                        )
+                                        .await
+                                {
+                                    warn!(error = %err, job = %job_id2.0, "failed to mark transcript job queued");
+                                }
                                 return Ok(JobHandle::accepted(
                                     job_id2,
                                     &request.payload,
@@ -682,33 +935,75 @@ impl QueueService for PostgresQueueService {
                                     == Some("23505") =>
                             {
                                 // Another concurrent inserter won; fetch and return the winner
-                                let winner = sqlx::query!(
+                                let winner = sqlx::query(
                                     r#"
-                                    SELECT id
+                                    SELECT id, state, attempts, correlation_id
                                     FROM orchestrator_jobs
                                     WHERE dedupe_key = $1
                                       AND state IN ('ready','deferred','leased')
                                     ORDER BY created_at ASC
                                     LIMIT 1
                                     "#,
-                                    dedupe_key
                                 )
-                                        .fetch_optional(&self.pool)
-                                        .await
-                                        .map_err(|e| {
-                                            MediaError::Internal(format!(
-                                                "enqueue conflict lookup (retry) failed: {e}"
-                                            ))
-                                        })?;
+                                .bind(&dedupe_key)
+                                .fetch_optional(&self.pool)
+                                .await
+                                .map_err(|e| {
+                                    MediaError::Internal(format!(
+                                        "enqueue conflict lookup (retry) failed: {e}"
+                                    ))
+                                })?;
 
                                 if let Some(w) = winner {
+                                    let winner_id: uuid::Uuid =
+                                        w.try_get("id")?;
+                                    let winner_state: String =
+                                        w.try_get("state")?;
+                                    let winner_attempts: i32 =
+                                        w.try_get("attempts")?;
+                                    let winner_correlation_id: Option<
+                                        uuid::Uuid,
+                                    > = w.try_get("correlation_id")?;
+                                    if winner_state.as_str() != "leased"
+                                        && transcript_payload(&request.payload)
+                                            .is_some()
+                                    {
+                                        replace_pending_transcript_payload(
+                                            &self.pool,
+                                            winner_id,
+                                            &payload_json,
+                                        )
+                                        .await
+                                        .map_err(|err| {
+                                            MediaError::Internal(format!(
+                                                "transcript merge payload update failed: {err}"
+                                            ))
+                                        })?;
+                                    }
+                                    if winner_state.as_str() != "leased"
+                                        && let Some(job) =
+                                            transcript_payload(&request.payload)
+                                        && let Err(err) = mark_transcript_queue_status(
+                                            &self.pool,
+                                            &job,
+                                            TranscriptProcessingState::Queued,
+                                            winner_attempts,
+                                            self.retry_config.max_attempts,
+                                            None,
+                                            None,
+                                            correlation_id.or(winner_correlation_id),
+                                        )
+                                        .await
+                                    {
+                                        warn!(error = %err, job = %winner_id, "failed to mark transcript job queued");
+                                    }
                                     return Ok(JobHandle::merged(
-                                            crate::domain::scan::orchestration::job::JobId(
-                                                w.id,
-                                            ),
-                                            &request.payload,
-                                            request.priority,
-                                        ));
+                                        crate::domain::scan::orchestration::job::JobId(
+                                            winner_id,
+                                        ),
+                                        &request.payload,
+                                        request.priority,
+                                    ));
                                 }
 
                                 return Err(MediaError::Internal(
@@ -750,6 +1045,11 @@ impl QueueService for PostgresQueueService {
         })?;
 
         let mut out: Vec<JobHandle> = Vec::with_capacity(requests.len());
+        let mut transcript_status_updates: Vec<(
+            TranscriptExtractJob,
+            i32,
+            Option<uuid::Uuid>,
+        )> = Vec::new();
 
         for request in requests {
             request.validate()?;
@@ -776,17 +1076,17 @@ impl QueueService for PostgresQueueService {
             };
 
             // Fast-path merge check inside transaction
-            if let Some(existing) = sqlx::query!(
+            if let Some(existing) = sqlx::query(
                 r#"
-                SELECT id, priority
+                SELECT id, priority, state, attempts, correlation_id
                 FROM orchestrator_jobs
                 WHERE dedupe_key = $1
                   AND state IN ('ready','deferred','leased')
                 ORDER BY created_at ASC
                 LIMIT 1
                 "#,
-                dedupe_key
             )
+            .bind(&dedupe_key)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
@@ -794,9 +1094,16 @@ impl QueueService for PostgresQueueService {
                     "enqueue_many precheck failed: {e}"
                 ))
             })? {
+                let existing_uuid: uuid::Uuid = existing.try_get("id")?;
                 let existing_id =
-                    crate::domain::scan::orchestration::job::JobId(existing.id);
-                let existing_priority: i16 = existing.priority;
+                    crate::domain::scan::orchestration::job::JobId(
+                        existing_uuid,
+                    );
+                let existing_priority: i16 = existing.try_get("priority")?;
+                let existing_state: String = existing.try_get("state")?;
+                let existing_attempts: i32 = existing.try_get("attempts")?;
+                let existing_correlation_id: Option<uuid::Uuid> =
+                    existing.try_get("correlation_id")?;
                 if priority_val < existing_priority {
                     let _ = sqlx::query!(
                         r#"
@@ -807,7 +1114,7 @@ impl QueueService for PostgresQueueService {
                         WHERE id = $2 AND state IN ('ready','deferred')
                         "#,
                         priority_val,
-                        existing.id
+                        existing_uuid
                     )
                     .execute(&mut *tx)
                     .await;
@@ -822,10 +1129,34 @@ impl QueueService for PostgresQueueService {
                           AND correlation_id IS NULL
                         "#,
                         correlation_id,
-                        existing.id
+                        existing_uuid
                     )
                     .execute(&mut *tx)
                     .await;
+                }
+                if existing_state.as_str() != "leased"
+                    && transcript_payload(&request.payload).is_some()
+                {
+                    replace_pending_transcript_payload(
+                        &mut *tx,
+                        existing_uuid,
+                        &payload_json,
+                    )
+                    .await
+                    .map_err(|err| {
+                        MediaError::Internal(format!(
+                            "enqueue_many transcript merge payload update failed: {err}"
+                        ))
+                    })?;
+                }
+                if existing_state.as_str() != "leased"
+                    && let Some(job) = transcript_payload(&request.payload)
+                {
+                    transcript_status_updates.push((
+                        job,
+                        existing_attempts,
+                        correlation_id.or(existing_correlation_id),
+                    ));
                 }
                 out.push(JobHandle::merged(
                     existing_id,
@@ -862,6 +1193,13 @@ impl QueueService for PostgresQueueService {
             match insert_res {
                 Ok(_) => {
                     info!("enqueue_many accepted new job {}", job_id.0);
+                    if let Some(job) = transcript_payload(&request.payload) {
+                        transcript_status_updates.push((
+                            job,
+                            0,
+                            correlation_id,
+                        ));
+                    }
                     out.push(JobHandle::accepted(
                         job_id,
                         &request.payload,
@@ -871,17 +1209,17 @@ impl QueueService for PostgresQueueService {
                 Err(sqlx::Error::Database(db_err)) => {
                     let code = db_err.code().map(|c| c.to_string());
                     if code.as_deref() == Some("23505") {
-                        let existing = sqlx::query!(
+                        let existing = sqlx::query(
                             r#"
-                            SELECT id, priority, available_at, state
+                            SELECT id, priority, available_at, state, attempts, correlation_id
                             FROM orchestrator_jobs
                             WHERE dedupe_key = $1
                               AND state IN ('ready','deferred','leased')
                             ORDER BY created_at ASC
                             LIMIT 1
                             "#,
-                            request.dedupe_key().to_string()
                         )
+                        .bind(request.dedupe_key().to_string())
                         .fetch_optional(&mut *tx)
                         .await
                         .map_err(|e| {
@@ -891,7 +1229,12 @@ impl QueueService for PostgresQueueService {
                         })?;
 
                         if let Some(row) = existing {
-                            let existing_pri: i16 = row.priority;
+                            let row_id: uuid::Uuid = row.try_get("id")?;
+                            let existing_pri: i16 = row.try_get("priority")?;
+                            let row_state: String = row.try_get("state")?;
+                            let row_attempts: i32 = row.try_get("attempts")?;
+                            let row_correlation_id: Option<uuid::Uuid> =
+                                row.try_get("correlation_id")?;
                             if priority_val < existing_pri {
                                 let _ = sqlx::query!(
                                     r#"
@@ -902,7 +1245,7 @@ impl QueueService for PostgresQueueService {
                                     WHERE id = $2 AND state IN ('ready','deferred')
                                     "#,
                                     priority_val,
-                                    row.id
+                                    row_id
                                 )
                                     .execute(&mut *tx)
                                     .await
@@ -922,14 +1265,40 @@ impl QueueService for PostgresQueueService {
                                       AND correlation_id IS NULL
                                     "#,
                                     correlation_id,
-                                    row.id
+                                    row_id
                                 )
                                 .execute(&mut *tx)
                                 .await;
                             }
+                            if row_state.as_str() != "leased"
+                                && transcript_payload(&request.payload)
+                                    .is_some()
+                            {
+                                replace_pending_transcript_payload(
+                                    &mut *tx,
+                                    row_id,
+                                    &payload_json,
+                                )
+                                .await
+                                .map_err(|err| {
+                                    MediaError::Internal(format!(
+                                        "enqueue_many transcript merge payload update failed: {err}"
+                                    ))
+                                })?;
+                            }
+                            if row_state.as_str() != "leased"
+                                && let Some(job) =
+                                    transcript_payload(&request.payload)
+                            {
+                                transcript_status_updates.push((
+                                    job,
+                                    row_attempts,
+                                    correlation_id.or(row_correlation_id),
+                                ));
+                            }
                             out.push(JobHandle::merged(
                                 crate::domain::scan::orchestration::job::JobId(
-                                    row.id,
+                                    row_id,
                                 ),
                                 &request.payload,
                                 request.priority,
@@ -959,6 +1328,23 @@ impl QueueService for PostgresQueueService {
         tx.commit().await.map_err(|e| {
             MediaError::Internal(format!("enqueue_many tx commit failed: {e}"))
         })?;
+
+        for (job, attempts, correlation_id) in transcript_status_updates {
+            if let Err(err) = mark_transcript_queue_status(
+                &self.pool,
+                &job,
+                TranscriptProcessingState::Queued,
+                attempts,
+                self.retry_config.max_attempts,
+                None,
+                None,
+                correlation_id,
+            )
+            .await
+            {
+                warn!(error = %err, media_file_id = %job.media_file_id, "failed to mark transcript batch job queued");
+            }
+        }
 
         Ok(out)
     }
@@ -1303,15 +1689,15 @@ impl QueueService for PostgresQueueService {
         })?;
 
         // Lock the row and get current attempts
-        let row = sqlx::query!(
+        let row = sqlx::query(
             r#"
-            SELECT id, attempts, library_id, payload
+            SELECT id, attempts, library_id, payload, correlation_id
             FROM orchestrator_jobs
             WHERE lease_id = $1::uuid AND state = 'leased'
             FOR UPDATE
             "#,
-            lease_id.0
         )
+        .bind(lease_id.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -1323,17 +1709,22 @@ impl QueueService for PostgresQueueService {
             return Ok(());
         };
 
-        let attempts_before: i32 = row.attempts;
+        let row_id: uuid::Uuid = row.try_get("id")?;
+        let attempts_before: i32 = row.try_get("attempts")?;
+        let row_correlation_id: Option<uuid::Uuid> =
+            row.try_get("correlation_id")?;
         let max_attempts = i32::from(self.retry_config.max_attempts);
         let attempt_next = attempts_before.saturating_add(1) as u16;
-        let job_id = JobId(row.id);
-        let library_id = LibraryId(row.library_id);
-        let payload: JobPayload = from_value(row.payload).map_err(|e| {
+        let job_id = JobId(row_id);
+        let library_id = LibraryId(row.try_get("library_id")?);
+        let row_payload: serde_json::Value = row.try_get("payload")?;
+        let payload: JobPayload = from_value(row_payload).map_err(|e| {
             MediaError::Internal(format!(
                 "fail payload decode failed for job {}: {e}",
-                row.id
+                row_id
             ))
         })?;
+        let transcript_job = transcript_payload(&payload);
 
         let mut library_under_pressure =
             if self.retry_config.heavy_library_attempt_threshold == 0 {
@@ -1392,7 +1783,7 @@ impl QueueService for PostgresQueueService {
                     updated_at = NOW()
                 WHERE id = $1
                 "#,
-                row.id,
+                row_id,
                 error,
                 delay_ms as i64
             )
@@ -1404,9 +1795,28 @@ impl QueueService for PostgresQueueService {
                 MediaError::Internal(format!("fail tx commit failed: {e}"))
             })?;
 
+            if let Some(job) = transcript_job {
+                let next_retry_at = chrono::Utc::now()
+                    + chrono::Duration::milliseconds(delay_ms as i64);
+                if let Err(err) = mark_transcript_queue_status(
+                    &self.pool,
+                    &job,
+                    TranscriptProcessingState::Failed,
+                    i32::from(attempt_next),
+                    self.retry_config.max_attempts,
+                    error.clone(),
+                    Some(next_retry_at),
+                    row_correlation_id,
+                )
+                .await
+                {
+                    warn!(error = %err, job = %row_id, "failed to mark transcript retry status");
+                }
+            }
+
             warn!(
                 "job {} failed retryable; attempts now {}; scheduled retry in {}ms (pressure={})",
-                row.id,
+                row_id,
                 attempts_before + 1,
                 delay_ms,
                 library_under_pressure
@@ -1426,7 +1836,7 @@ impl QueueService for PostgresQueueService {
                     updated_at = NOW()
                 WHERE id = $1
                 "#,
-                row.id,
+                row_id,
                 new_state,
                 error
             )
@@ -1442,9 +1852,26 @@ impl QueueService for PostgresQueueService {
                 MediaError::Internal(format!("fail tx commit failed: {e}"))
             })?;
 
+            if let Some(job) = transcript_job {
+                if let Err(err) = mark_transcript_queue_status(
+                    &self.pool,
+                    &job,
+                    TranscriptProcessingState::Failed,
+                    i32::from(attempt_next),
+                    self.retry_config.max_attempts,
+                    error.clone(),
+                    None,
+                    row_correlation_id,
+                )
+                .await
+                {
+                    warn!(error = %err, job = %row_id, "failed to mark transcript terminal failure status");
+                }
+            }
+
             warn!(
                 "job {} moved to {} after attempts {}",
-                row.id, new_state, attempts_before
+                row_id, new_state, attempts_before
             );
             Ok(())
         }
@@ -1455,6 +1882,20 @@ impl QueueService for PostgresQueueService {
         lease_id: LeaseId,
         error: Option<String>,
     ) -> Result<()> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, attempts, payload, correlation_id
+            FROM orchestrator_jobs
+            WHERE lease_id = $1::uuid AND state = 'leased'
+            "#,
+        )
+        .bind(lease_id.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("dead_letter select failed: {e}"))
+        })?;
+
         let res = sqlx::query!(
             r#"
             UPDATE orchestrator_jobs
@@ -1476,6 +1917,30 @@ impl QueueService for PostgresQueueService {
         })?;
 
         if res.rows_affected() > 0 {
+            if let Some(row) = row {
+                let row_id: uuid::Uuid = row.try_get("id")?;
+                let attempts: i32 = row.try_get("attempts")?;
+                let row_correlation_id: Option<uuid::Uuid> =
+                    row.try_get("correlation_id")?;
+                let row_payload: serde_json::Value = row.try_get("payload")?;
+                if let Ok(payload) =
+                    serde_json::from_value::<JobPayload>(row_payload)
+                    && let Some(job) = transcript_payload(&payload)
+                    && let Err(err) = mark_transcript_queue_status(
+                        &self.pool,
+                        &job,
+                        TranscriptProcessingState::Failed,
+                        attempts.saturating_add(1),
+                        self.retry_config.max_attempts,
+                        error.clone(),
+                        None,
+                        row_correlation_id,
+                    )
+                    .await
+                {
+                    warn!(error = %err, job = %row_id, "failed to mark transcript dead-letter status");
+                }
+            }
             warn!("job with lease {:?} moved to dead_letter", lease_id.0);
         }
         Ok(())
@@ -1483,7 +1948,21 @@ impl QueueService for PostgresQueueService {
 
     async fn cancel_job(&self, job_id: JobId) -> Result<()> {
         // Delete only non-leased jobs; leased jobs require different handling.
-        let _ = sqlx::query!(
+        let row = sqlx::query(
+            r#"
+            SELECT attempts, payload, correlation_id
+            FROM orchestrator_jobs
+            WHERE id = $1 AND state IN ('ready','deferred')
+            "#,
+        )
+        .bind(job_id.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("cancel_job select failed: {e}"))
+        })?;
+
+        let res = sqlx::query!(
             r#"
             DELETE FROM orchestrator_jobs
             WHERE id = $1 AND state IN ('ready','deferred')
@@ -1495,6 +1974,32 @@ impl QueueService for PostgresQueueService {
         .map_err(|e| {
             MediaError::Internal(format!("cancel_job delete failed: {e}"))
         })?;
+
+        if res.rows_affected() > 0
+            && let Some(row) = row
+        {
+            let attempts: i32 = row.try_get("attempts")?;
+            let row_correlation_id: Option<uuid::Uuid> =
+                row.try_get("correlation_id")?;
+            let row_payload: serde_json::Value = row.try_get("payload")?;
+            if let Ok(payload) =
+                serde_json::from_value::<JobPayload>(row_payload)
+                && let Some(job) = transcript_payload(&payload)
+                && let Err(err) = mark_transcript_queue_status(
+                    &self.pool,
+                    &job,
+                    TranscriptProcessingState::Cancelled,
+                    attempts,
+                    self.retry_config.max_attempts,
+                    Some("transcript extraction job cancelled".to_string()),
+                    None,
+                    row_correlation_id,
+                )
+                .await
+            {
+                warn!(error = %err, job = %job_id.0, "failed to mark transcript cancellation status");
+            }
+        }
         Ok(())
     }
 

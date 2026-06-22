@@ -89,6 +89,7 @@ pub enum JobKind {
     IndexUpsert = 4,
     ImageFetch = 5,
     EpisodeMatch = 6,
+    TranscriptExtract = 7,
 }
 
 impl JobKind {
@@ -101,6 +102,7 @@ impl JobKind {
             4 => Ok(JobKind::IndexUpsert),
             5 => Ok(JobKind::ImageFetch),
             6 => Ok(JobKind::EpisodeMatch),
+            7 => Ok(JobKind::TranscriptExtract),
             _ => Err(MediaError::NotFound(
                 "Invalid JobKind provided".to_string(),
             )),
@@ -116,6 +118,7 @@ impl JobKind {
             JobKind::IndexUpsert,
             JobKind::ImageFetch,
             JobKind::EpisodeMatch,
+            JobKind::TranscriptExtract,
         ]
     }
 }
@@ -130,6 +133,7 @@ impl fmt::Display for JobKind {
             JobKind::IndexUpsert => write!(f, "index upsert"),
             JobKind::ImageFetch => write!(f, "fetch image"),
             JobKind::EpisodeMatch => write!(f, "match episode"),
+            JobKind::TranscriptExtract => write!(f, "extract transcripts"),
         }
     }
 }
@@ -145,6 +149,7 @@ pub enum JobPayload {
     IndexUpsert(IndexUpsertJob),
     ImageFetch(ImageFetchJob),
     EpisodeMatch(EpisodeMatchJob),
+    TranscriptExtract(TranscriptExtractJob),
 }
 
 impl JobPayload {
@@ -157,6 +162,7 @@ impl JobPayload {
             JobPayload::IndexUpsert(_) => JobKind::IndexUpsert,
             JobPayload::ImageFetch(_) => JobKind::ImageFetch,
             JobPayload::EpisodeMatch(_) => JobKind::EpisodeMatch,
+            JobPayload::TranscriptExtract(_) => JobKind::TranscriptExtract,
         }
     }
 
@@ -169,6 +175,7 @@ impl JobPayload {
             JobPayload::IndexUpsert(job) => job.library_id,
             JobPayload::ImageFetch(job) => job.library_id,
             JobPayload::EpisodeMatch(job) => job.library_id,
+            JobPayload::TranscriptExtract(job) => job.library_id,
         }
     }
 
@@ -216,6 +223,12 @@ impl JobPayload {
                     job.path_norm.clone(),
                 ),
             },
+            JobPayload::TranscriptExtract(job) => {
+                DedupeKey::TranscriptExtract {
+                    library_id: job.library_id.to_uuid(),
+                    media_file_id: job.media_file_id,
+                }
+            }
         }
     }
 }
@@ -341,6 +354,10 @@ pub enum DedupeKey {
         image_id: Uuid,
         image_size: ImageSize,
     },
+    TranscriptExtract {
+        library_id: Uuid,
+        media_file_id: Uuid,
+    },
 }
 
 impl fmt::Display for DedupeKey {
@@ -382,6 +399,10 @@ impl fmt::Display for DedupeKey {
                 image_size.image_variant(),
                 image_size.width_name(),
             ),
+            DedupeKey::TranscriptExtract {
+                library_id,
+                media_file_id,
+            } => write!(f, "transcript:{}:{}", library_id, media_file_id),
         }
     }
 }
@@ -517,6 +538,26 @@ pub struct IndexUpsertJob {
     pub node: ScanNodeKind,
     pub path_norm: String,
     pub idempotency_key: String,
+}
+
+/// Source that requested transcript extraction for a playable media file.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TranscriptExtractTrigger {
+    IndexUpsert,
+    ExplicitRefresh,
+}
+
+/// Transcript extraction payload. The path is used only by the worker for local
+/// extraction and stable path-key telemetry; public status surfaces expose IDs,
+/// counts, and safe error excerpts instead of local paths or transcript text.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TranscriptExtractJob {
+    pub library_id: LibraryId,
+    pub media_id: MediaID,
+    pub variant: VideoMediaType,
+    pub media_file_id: Uuid,
+    pub path_norm: String,
+    pub trigger: TranscriptExtractTrigger,
 }
 
 /// Stable media fingerprint.
@@ -661,6 +702,29 @@ impl EnqueueRequest {
                     ));
                 }
             }
+            JobPayload::TranscriptExtract(job) => {
+                if !matches!(
+                    job.media_id,
+                    MediaID::Movie(_) | MediaID::Episode(_)
+                ) {
+                    return Err(MediaError::InvalidMedia(
+                        "transcript extraction requires a movie or episode media file".into(),
+                    ));
+                }
+                if !matches!(
+                    job.variant,
+                    VideoMediaType::Movie | VideoMediaType::Episode
+                ) {
+                    return Err(MediaError::InvalidMedia(
+                        "transcript extraction requires a playable movie or episode variant".into(),
+                    ));
+                }
+                if job.path_norm.trim().is_empty() {
+                    return Err(MediaError::InvalidMedia(
+                        "transcript extraction requires a media path".into(),
+                    ));
+                }
+            }
             _ => {}
         }
 
@@ -672,6 +736,42 @@ impl EnqueueRequest {
 mod tests {
     use super::*;
     use crate::domain::scan::orchestration::context::MovieRootPath;
+
+    #[test]
+    fn transcript_extract_dedupe_key_is_media_file_scoped() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb));
+        let media_file_id = Uuid::from_u128(0xcccccccccccccccccccccccccccccccc);
+        let movie_id = ferrex_model::MovieID(Uuid::from_u128(
+            0xdddddddddddddddddddddddddddddddd,
+        ));
+
+        let key_a = JobPayload::TranscriptExtract(TranscriptExtractJob {
+            library_id,
+            media_id: MediaID::Movie(movie_id),
+            variant: VideoMediaType::Movie,
+            media_file_id,
+            path_norm: "/library/A.mkv".into(),
+            trigger: TranscriptExtractTrigger::IndexUpsert,
+        })
+        .dedupe_key();
+
+        let key_b = JobPayload::TranscriptExtract(TranscriptExtractJob {
+            library_id,
+            media_id: MediaID::Movie(movie_id),
+            variant: VideoMediaType::Movie,
+            media_file_id,
+            path_norm: "/library/renamed/A.mkv".into(),
+            trigger: TranscriptExtractTrigger::ExplicitRefresh,
+        })
+        .dedupe_key();
+
+        assert_eq!(key_a, key_b);
+        assert_eq!(
+            key_a.to_string(),
+            format!("transcript:{}:{}", library_id, media_file_id)
+        );
+    }
 
     #[test]
     fn media_analyze_dedupe_key_is_path_scoped() {

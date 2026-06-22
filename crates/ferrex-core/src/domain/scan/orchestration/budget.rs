@@ -16,6 +16,7 @@ pub enum WorkloadType {
     MetadataEnrichment,
     Indexing,
     ImageFetch,
+    TranscriptExtraction,
 }
 
 /// A token representing acquired budget for a specific workload
@@ -74,7 +75,8 @@ impl fmt::Debug for InMemoryBudget {
                     .field("media_analyses", &state.media_analyses)
                     .field("metadata_jobs", &state.metadata_jobs)
                     .field("indexing_jobs", &state.indexing_jobs)
-                    .field("image_jobs", &state.image_jobs);
+                    .field("image_jobs", &state.image_jobs)
+                    .field("transcript_jobs", &state.transcript_jobs);
             }
             Err(_) => {
                 debug.field("state", &"<locked>");
@@ -92,6 +94,7 @@ struct BudgetState {
     metadata_jobs: usize,
     indexing_jobs: usize,
     image_jobs: usize,
+    transcript_jobs: usize,
 }
 
 impl InMemoryBudget {
@@ -128,6 +131,10 @@ impl WorkloadBudget for InMemoryBudget {
             WorkloadType::ImageFetch => {
                 (&mut state.image_jobs, self.config.image_fetch_limit)
             }
+            WorkloadType::TranscriptExtraction => (
+                &mut state.transcript_jobs,
+                self.config.transcript_extraction_limit,
+            ),
         };
 
         if *current < limit {
@@ -175,6 +182,9 @@ impl WorkloadBudget for InMemoryBudget {
             WorkloadType::ImageFetch => {
                 state.image_jobs = state.image_jobs.saturating_sub(1)
             }
+            WorkloadType::TranscriptExtraction => {
+                state.transcript_jobs = state.transcript_jobs.saturating_sub(1)
+            }
         }
 
         Ok(())
@@ -202,6 +212,10 @@ impl WorkloadBudget for InMemoryBudget {
             WorkloadType::ImageFetch => {
                 (state.image_jobs, self.config.image_fetch_limit)
             }
+            WorkloadType::TranscriptExtraction => (
+                state.transcript_jobs,
+                self.config.transcript_extraction_limit,
+            ),
         };
 
         Ok((current, limit))

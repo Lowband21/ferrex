@@ -134,6 +134,8 @@ pub mod orchestration {
             pub indexing_limit: usize,
             /// Poster/backdrop workers.
             pub image_fetch_limit: usize,
+            /// Transcript extraction workers.
+            pub transcript_extraction_limit: usize,
         }
 
         impl Default for BudgetConfig {
@@ -146,6 +148,7 @@ pub mod orchestration {
                     metadata_limit: cpu_count * 2,
                     indexing_limit: cpu_count,
                     image_fetch_limit: 4,
+                    transcript_extraction_limit: 1,
                 }
             }
         }
@@ -186,6 +189,23 @@ pub mod orchestration {
             pub budget: super::budget::BudgetConfig,
             /// Filesystem watch debounce and batching configuration.
             pub watch: WatchConfig,
+            /// Optional transcript indexing orchestration.
+            #[cfg_attr(feature = "serde", serde(default))]
+            pub transcript_indexing: TranscriptIndexingConfig,
+        }
+
+        /// Controls whether scan/index flows enqueue transcript extraction jobs.
+        #[derive(Clone, Copy, Debug)]
+        #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
+        pub struct TranscriptIndexingConfig {
+            pub enabled: bool,
+        }
+
+        impl Default for TranscriptIndexingConfig {
+            fn default() -> Self {
+                Self { enabled: false }
+            }
         }
 
         #[derive(Clone, Debug)]
@@ -199,6 +219,7 @@ pub mod orchestration {
             pub max_parallel_metadata: usize,
             pub max_parallel_index: usize,
             pub max_parallel_image_fetch: usize,
+            pub max_parallel_transcript_extract: usize,
             /// Per-device cap for scan workers touching the same mount.
             pub max_parallel_scans_per_device: usize,
             /// High watermark for queued jobs. Beyond this we start coalescing low priority work.
@@ -225,6 +246,7 @@ pub mod orchestration {
                     max_parallel_metadata: 4,
                     max_parallel_index: 1,
                     max_parallel_image_fetch: 4,
+                    max_parallel_transcript_extract: 1,
                     max_parallel_scans_per_device: 16,
                     high_watermark: 10_000,
                     critical_watermark: 20_000,

@@ -855,6 +855,9 @@ async fn ready_job_paths(
             JobPayload::IndexUpsert(job) => {
                 paths.insert(job.path_norm);
             }
+            JobPayload::TranscriptExtract(job) => {
+                paths.insert(job.path_norm);
+            }
             JobPayload::ImageFetch(_)
             | JobPayload::SeriesResolve(_)
             | JobPayload::EpisodeMatch(_) => {}

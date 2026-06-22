@@ -380,6 +380,22 @@ impl WeightedFairScheduler {
         }
     }
 
+    /// Drop a reservation when persistence proves the ready count was stale.
+    ///
+    /// Unlike [`cancel`](Self::cancel), this does not restore the in-memory
+    /// ready count. It lets the runtime self-heal after jobs are cancelled or
+    /// purged directly in the durable queue without leaving phantom work that
+    /// workers reserve forever.
+    pub async fn discard_stale(&self, reservation_id: Uuid) {
+        let mut state = self.state.lock().await;
+        if let Some(reservation) = state.reservations.remove(&reservation_id)
+            && let Some(library) =
+                state.libraries.get_mut(&reservation.library_id)
+        {
+            library.pending = library.pending.saturating_sub(1);
+        }
+    }
+
     pub async fn release(&self, library_id: LibraryId) {
         let mut state = self.state.lock().await;
         if let Some(library) = state.libraries.get_mut(&library_id) {
@@ -449,5 +465,14 @@ mod tests {
 
         scheduler.record_completed(library_id).await;
         assert_eq!(scheduler.snapshot().await[&library_id], (0, 0));
+
+        scheduler.record_enqueued(library_id, JobPriority::P1).await;
+        let stale = scheduler
+            .reserve()
+            .await
+            .expect("stale ready count reserves capacity");
+        scheduler.discard_stale(stale.id).await;
+        assert_eq!(scheduler.snapshot().await[&library_id], (0, 0));
+        assert!(scheduler.reserve().await.is_none());
     }
 }

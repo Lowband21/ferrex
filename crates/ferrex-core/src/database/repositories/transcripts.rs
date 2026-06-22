@@ -21,7 +21,8 @@ use crate::{
     },
     database::repository_ports::transcripts::{
         TranscriptProcessingState, TranscriptProcessingStatusSummary,
-        TranscriptRepository, TranscriptSegmentUpsert, TranscriptSourceStatus,
+        TranscriptProcessingStatusUpdate, TranscriptRepository,
+        TranscriptSegmentUpsert, TranscriptSourceStatus,
         TranscriptSourceStatusFilter, TranscriptSourceStatusSummary,
         TranscriptSourceUpsert, TranscriptSourceUpsertResult,
         TranscriptStatusFilter,
@@ -99,6 +100,10 @@ fn content_hash(parts: &[&str]) -> String {
         hasher.update(b"\x1f");
     }
     hex::encode(hasher.finalize())
+}
+
+fn bounded_excerpt(value: Option<String>) -> Option<String> {
+    value.map(|message| message.chars().take(2048).collect())
 }
 
 fn validate_hash(name: &str, value: &str) -> Result<()> {
@@ -180,6 +185,72 @@ fn validate_segment(segment: &TranscriptSegmentUpsert) -> Result<()> {
     }
     ensure_json_object("segment metadata", &segment.metadata)?;
     Ok(())
+}
+
+fn transcript_job_dedupe_key(
+    library_id: LibraryId,
+    media_file_id: Uuid,
+) -> String {
+    format!("transcript:{}:{}", library_id, media_file_id)
+}
+
+async fn media_file_ids_for_media(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    library_id: LibraryId,
+    media_uuid: Uuid,
+    media_type: &str,
+) -> Result<Vec<Uuid>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id
+        FROM media_files
+        WHERE library_id = $1
+          AND media_id = $2
+          AND media_type = ($3::text)::media_type
+        "#,
+    )
+    .bind(library_id.0)
+    .bind(media_uuid)
+    .bind(media_type)
+    .fetch_all(&mut **executor)
+    .await?;
+
+    let mut ids = Vec::with_capacity(rows.len());
+    for row in rows {
+        ids.push(row.try_get("id")?);
+    }
+    Ok(ids)
+}
+
+async fn delete_pending_transcript_jobs(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    library_id: LibraryId,
+    media_file_ids: &[Uuid],
+) -> Result<u64> {
+    if media_file_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let dedupe_keys: Vec<String> = media_file_ids
+        .iter()
+        .map(|media_file_id| {
+            transcript_job_dedupe_key(library_id, *media_file_id)
+        })
+        .collect();
+
+    let result = sqlx::query(
+        r#"
+        DELETE FROM orchestrator_jobs
+        WHERE kind = 7
+          AND state IN ('ready', 'deferred')
+          AND dedupe_key = ANY($1::text[])
+        "#,
+    )
+    .bind(&dedupe_keys)
+    .execute(&mut **executor)
+    .await?;
+
+    Ok(result.rows_affected())
 }
 
 async fn fetch_counts(
@@ -651,6 +722,7 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                    attempt_count,
                    last_error_excerpt,
                    next_retry_at,
+                   last_run_correlation_id,
                    invalidated_at,
                    purged_at,
                    updated_at
@@ -689,12 +761,119 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 attempt_count: row.try_get("attempt_count")?,
                 last_error_excerpt: row.try_get("last_error_excerpt")?,
                 next_retry_at: row.try_get("next_retry_at")?,
+                last_run_correlation_id: row
+                    .try_get("last_run_correlation_id")?,
                 invalidated_at: row.try_get("invalidated_at")?,
                 purged_at: row.try_get("purged_at")?,
                 updated_at: row.try_get("updated_at")?,
             });
         }
         Ok(out)
+    }
+
+    async fn update_processing_status(
+        &self,
+        update: TranscriptProcessingStatusUpdate,
+    ) -> Result<()> {
+        let media_type = playable_media_type_str(&update.media_id)?;
+        let status = update.status.as_db_str();
+        let terminal = matches!(
+            update.status,
+            TranscriptProcessingState::Succeeded
+                | TranscriptProcessingState::Failed
+                | TranscriptProcessingState::Skipped
+                | TranscriptProcessingState::Cancelled
+                | TranscriptProcessingState::Invalidated
+                | TranscriptProcessingState::Purged
+        );
+        let running = update.status == TranscriptProcessingState::Running;
+        let invalidated =
+            update.status == TranscriptProcessingState::Invalidated;
+        let purged = update.status == TranscriptProcessingState::Purged;
+        let error_excerpt = bounded_excerpt(update.last_error_excerpt);
+        let max_attempts = update.max_attempts.unwrap_or(3).max(0);
+
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_processing_status (
+                library_id,
+                media_id,
+                media_type,
+                media_file_id,
+                status,
+                source_count,
+                segment_count,
+                attempt_count,
+                max_attempts,
+                last_error_excerpt,
+                last_run_correlation_id,
+                next_retry_at,
+                started_at,
+                finished_at,
+                invalidated_at,
+                purged_at
+            ) VALUES (
+                $1,
+                $2,
+                ($3::text)::media_type,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                $12,
+                CASE WHEN $13 THEN now() ELSE NULL END,
+                CASE WHEN $14 THEN now() ELSE NULL END,
+                CASE WHEN $15 THEN now() ELSE NULL END,
+                CASE WHEN $16 THEN now() ELSE NULL END
+            )
+            ON CONFLICT (library_id, media_file_id) DO UPDATE SET
+                media_id = EXCLUDED.media_id,
+                media_type = EXCLUDED.media_type,
+                status = EXCLUDED.status,
+                source_count = EXCLUDED.source_count,
+                segment_count = EXCLUDED.segment_count,
+                attempt_count = EXCLUDED.attempt_count,
+                max_attempts = EXCLUDED.max_attempts,
+                last_error_excerpt = EXCLUDED.last_error_excerpt,
+                last_run_correlation_id = COALESCE(
+                    EXCLUDED.last_run_correlation_id,
+                    transcript_processing_status.last_run_correlation_id
+                ),
+                next_retry_at = EXCLUDED.next_retry_at,
+                started_at = CASE
+                    WHEN $13 THEN COALESCE(transcript_processing_status.started_at, now())
+                    ELSE NULL
+                END,
+                finished_at = CASE WHEN $14 THEN now() ELSE NULL END,
+                invalidated_at = CASE WHEN $15 THEN now() ELSE NULL END,
+                purged_at = CASE WHEN $16 THEN now() ELSE NULL END,
+                updated_at = now()
+            "#,
+        )
+        .bind(update.library_id.0)
+        .bind(*update.media_id.as_uuid())
+        .bind(media_type)
+        .bind(update.media_file_id)
+        .bind(status)
+        .bind(update.source_count.max(0))
+        .bind(update.segment_count.max(0))
+        .bind(update.attempt_count.max(0))
+        .bind(max_attempts)
+        .bind(error_excerpt)
+        .bind(update.last_run_correlation_id)
+        .bind(update.next_retry_at)
+        .bind(running)
+        .bind(terminal)
+        .bind(invalidated)
+        .bind(purged)
+        .execute(self.pool())
+        .await?;
+
+        Ok(())
     }
 
     async fn invalidate_media(
@@ -706,6 +885,16 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let media_type = playable_media_type_str(&media_id)?;
         let media_uuid = *media_id.as_uuid();
         let mut tx = self.pool().begin().await?;
+        let mut media_file_ids = media_file_ids_for_media(
+            &mut tx, library_id, media_uuid, media_type,
+        )
+        .await?;
+        let _ = delete_pending_transcript_jobs(
+            &mut tx,
+            library_id,
+            &media_file_ids,
+        )
+        .await?;
 
         let artifact_ids = sqlx::query_scalar::<_, Uuid>(
             r#"
@@ -800,6 +989,12 @@ impl TranscriptRepository for PostgresTranscriptRepository {
 
         for row in media_file_rows {
             let media_file_id: Uuid = row.try_get("media_file_id")?;
+            if !media_file_ids.contains(&media_file_id) {
+                media_file_ids.push(media_file_id);
+            }
+        }
+
+        for media_file_id in media_file_ids {
             let (source_count, segment_count) =
                 fetch_counts(&mut tx, library_id, media_file_id).await?;
             mark_status(
@@ -828,6 +1023,16 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let media_type = playable_media_type_str(&media_id)?;
         let media_uuid = *media_id.as_uuid();
         let mut tx = self.pool().begin().await?;
+        let mut media_file_ids = media_file_ids_for_media(
+            &mut tx, library_id, media_uuid, media_type,
+        )
+        .await?;
+        let _ = delete_pending_transcript_jobs(
+            &mut tx,
+            library_id,
+            &media_file_ids,
+        )
+        .await?;
 
         let rows = sqlx::query(
             r#"
@@ -846,7 +1051,6 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         .await?;
 
         let mut source_ids = Vec::with_capacity(rows.len());
-        let mut media_file_ids = Vec::new();
         let mut artifact_ids = Vec::new();
         for row in rows {
             source_ids.push(row.try_get::<Uuid, _>("id")?);
@@ -862,6 +1066,19 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         }
 
         if source_ids.is_empty() {
+            for media_file_id in media_file_ids {
+                mark_status(
+                    &mut tx,
+                    library_id,
+                    media_id,
+                    media_file_id,
+                    TranscriptProcessingState::Purged,
+                    0,
+                    0,
+                    Some(reason),
+                )
+                .await?;
+            }
             tx.commit().await?;
             return Ok(0);
         }

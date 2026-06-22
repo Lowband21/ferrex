@@ -736,14 +736,14 @@ impl RuntimeTaskGraph {
                             let _ = b.release(token).await;
                         }
                         Ok(None) => {
-                            scheduler.cancel(reservation.id).await;
+                            scheduler.discard_stale(reservation.id).await;
                             tracing::trace!(
                                 worker = %worker_id,
                                 kind = ?worker_kind,
                                 library = %reservation.library_id,
                                 priority = ?reservation.priority,
                                 reservation = %reservation.id,
-                                "scheduler reservation cancelled (no job ready)"
+                                "scheduler reservation discarded (ready count was stale)"
                             );
                             tokio::time::sleep(
                                 std::time::Duration::from_millis(100),
@@ -1009,5 +1009,6 @@ fn workload_for(kind: JobKind) -> WorkloadType {
         JobKind::EpisodeMatch => WorkloadType::MetadataEnrichment,
         JobKind::IndexUpsert => WorkloadType::Indexing,
         JobKind::ImageFetch => WorkloadType::ImageFetch,
+        JobKind::TranscriptExtract => WorkloadType::TranscriptExtraction,
     }
 }
