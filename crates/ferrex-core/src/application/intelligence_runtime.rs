@@ -98,6 +98,7 @@ pub struct IntelligenceRunManagerConfig {
     pub total_timeout: Duration,
     pub max_steps: u32,
     pub max_tool_calls: u32,
+    pub per_user_concurrency: u32,
     pub max_malformed_retries: u32,
     pub max_output_bytes: usize,
     pub max_tool_result_bytes: usize,
@@ -114,6 +115,7 @@ impl Default for IntelligenceRunManagerConfig {
             total_timeout: Duration::from_secs(180),
             max_steps: 12,
             max_tool_calls: 24,
+            per_user_concurrency: 1,
             max_malformed_retries: 1,
             max_output_bytes: 64 * 1024,
             max_tool_result_bytes: 256 * 1024,
@@ -250,6 +252,18 @@ impl IntelligenceRuntimeStore for RepositoryIntelligenceRuntimeStore {
     }
 }
 
+#[derive(Clone)]
+struct ActiveRun {
+    token: CancellationToken,
+    user_id: Option<Uuid>,
+}
+
+#[derive(Default)]
+struct ActiveRunState {
+    runs: HashMap<Uuid, ActiveRun>,
+    user_counts: HashMap<Option<Uuid>, usize>,
+}
+
 /// Grounded runtime manager for provider action loops and draft generation.
 #[derive(Clone)]
 pub struct IntelligenceRunManager {
@@ -257,7 +271,7 @@ pub struct IntelligenceRunManager {
     store: Arc<dyn IntelligenceRuntimeStore>,
     provider: Arc<dyn IntelligenceModelProvider>,
     tools: IntelligenceToolRegistry,
-    active_runs: Arc<Mutex<HashMap<Uuid, CancellationToken>>>,
+    active_runs: Arc<Mutex<ActiveRunState>>,
 }
 
 impl fmt::Debug for IntelligenceRunManager {
@@ -283,7 +297,7 @@ impl IntelligenceRunManager {
             store,
             provider,
             tools,
-            active_runs: Arc::new(Mutex::new(HashMap::new())),
+            active_runs: Arc::new(Mutex::new(ActiveRunState::default())),
         }
     }
 
@@ -336,10 +350,22 @@ impl IntelligenceRunManager {
         request: IntelligenceRunStartRequest,
         user_id: Option<Uuid>,
     ) -> Result<IntelligenceRunStartResponse> {
+        self.ensure_enabled()?;
+        self.reserve_active_slot(user_id)?;
         let model = selected_model(&self.config, &request);
-        let run_id = self.create_queued_run(&request, user_id).await?;
         let token = CancellationToken::new();
-        self.register_active(run_id, token.clone());
+        let reserved_run_id = Uuid::now_v7();
+        let run_id = match self
+            .create_queued_run(reserved_run_id, &request, user_id)
+            .await
+        {
+            Ok(run_id) => run_id,
+            Err(err) => {
+                self.release_active_slot(user_id);
+                return Err(err);
+            }
+        };
+        self.register_active(run_id, user_id, token.clone());
 
         let manager = self.clone();
         let request_for_task = request.clone();
@@ -384,8 +410,20 @@ impl IntelligenceRunManager {
         user_id: Option<Uuid>,
         token: CancellationToken,
     ) -> Result<IntelligenceRunStatusResponse> {
-        let run_id = self.create_queued_run(&request, user_id).await?;
-        self.register_active(run_id, token.clone());
+        self.ensure_enabled()?;
+        self.reserve_active_slot(user_id)?;
+        let reserved_run_id = Uuid::now_v7();
+        let run_id = match self
+            .create_queued_run(reserved_run_id, &request, user_id)
+            .await
+        {
+            Ok(run_id) => run_id,
+            Err(err) => {
+                self.release_active_slot(user_id);
+                return Err(err);
+            }
+        };
+        self.register_active(run_id, user_id, token.clone());
         let outcome = self
             .drive_existing_run(run_id, request, user_id, token)
             .await?;
@@ -614,16 +652,22 @@ impl IntelligenceRunManager {
             .await
     }
 
-    async fn create_queued_run(
-        &self,
-        request: &IntelligenceRunStartRequest,
-        user_id: Option<Uuid>,
-    ) -> Result<Uuid> {
+    fn ensure_enabled(&self) -> Result<()> {
         if !self.config.enabled {
             return Err(MediaError::InvalidMedia(
                 "intelligence runtime is disabled".to_string(),
             ));
         }
+        Ok(())
+    }
+
+    async fn create_queued_run(
+        &self,
+        run_id: Uuid,
+        request: &IntelligenceRunStartRequest,
+        user_id: Option<Uuid>,
+    ) -> Result<Uuid> {
+        self.ensure_enabled()?;
         let request_hash = hash_run_request(request, user_id);
         let prompt_excerpt =
             redacted_excerpt(&request.prompt, MAX_AUDIT_EXCERPT_CHARS);
@@ -631,7 +675,7 @@ impl IntelligenceRunManager {
         let run_id = self
             .store
             .create_run(IntelligenceRunCreate {
-                run_id: None,
+                run_id: Some(run_id),
                 run_kind: run_kind_for_purpose(request.purpose),
                 library_id: request.library_id,
                 user_id,
@@ -649,6 +693,7 @@ impl IntelligenceRunManager {
                     "runtime": {
                         "max_steps": self.config.max_steps,
                         "max_tool_calls": self.config.max_tool_calls,
+                        "per_user_concurrency": self.config.per_user_concurrency,
                         "model_timeout_ms": self.config.model_timeout.as_millis(),
                         "tool_timeout_ms": self.config.tool_timeout.as_millis(),
                         "total_timeout_ms": self.config.total_timeout.as_millis(),
@@ -996,11 +1041,13 @@ impl IntelligenceRunManager {
             }
 
             tool_calls = tool_calls.saturating_add(1);
+            // The audit row is created by the tool registry after this event, so
+            // do not attach tool_call_id yet; the finished event links to it.
             self.append_event(
                 run_id,
                 IntelligenceRunEventKind::ToolCallStarted,
                 Some(ApiRunStatus::Running),
-                Some(tool_call_id),
+                None,
                 None,
                 Some(format!("tool `{}` started", completion.action_name)),
                 json!({
@@ -1513,26 +1560,77 @@ impl IntelligenceRunManager {
         actions
     }
 
-    fn register_active(&self, run_id: Uuid, token: CancellationToken) {
-        self.active_runs
+    fn reserve_active_slot(&self, user_id: Option<Uuid>) -> Result<()> {
+        let limit = self.config.per_user_concurrency as usize;
+        let mut active = self
+            .active_runs
             .lock()
-            .expect("active intelligence run mutex poisoned")
-            .insert(run_id, token);
+            .expect("active intelligence run mutex poisoned");
+        let active_for_user =
+            active.user_counts.get(&user_id).copied().unwrap_or(0);
+        if active_for_user >= limit {
+            return Err(MediaError::ConcurrencyLimit(format!(
+                "intelligence per-user concurrency limit reached ({active_for_user} active run(s), limit {limit})"
+            )));
+        }
+        *active.user_counts.entry(user_id).or_insert(0) += 1;
+        Ok(())
+    }
+
+    fn release_active_slot(&self, user_id: Option<Uuid>) {
+        let mut active = self
+            .active_runs
+            .lock()
+            .expect("active intelligence run mutex poisoned");
+        decrement_active_user_count(&mut active, user_id);
+    }
+
+    fn register_active(
+        &self,
+        run_id: Uuid,
+        user_id: Option<Uuid>,
+        token: CancellationToken,
+    ) {
+        let mut active = self
+            .active_runs
+            .lock()
+            .expect("active intelligence run mutex poisoned");
+        if let Some(previous) =
+            active.runs.insert(run_id, ActiveRun { token, user_id })
+        {
+            decrement_active_user_count(&mut active, previous.user_id);
+        }
     }
 
     fn unregister_active(&self, run_id: Uuid) {
-        self.active_runs
+        let mut active = self
+            .active_runs
             .lock()
-            .expect("active intelligence run mutex poisoned")
-            .remove(&run_id);
+            .expect("active intelligence run mutex poisoned");
+        if let Some(run) = active.runs.remove(&run_id) {
+            decrement_active_user_count(&mut active, run.user_id);
+        }
     }
 
     fn active_token(&self, run_id: Uuid) -> Option<CancellationToken> {
         self.active_runs
             .lock()
             .expect("active intelligence run mutex poisoned")
+            .runs
             .get(&run_id)
-            .cloned()
+            .map(|run| run.token.clone())
+    }
+}
+
+fn decrement_active_user_count(
+    active: &mut ActiveRunState,
+    user_id: Option<Uuid>,
+) {
+    if let Some(count) = active.user_counts.get_mut(&user_id) {
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            active.user_counts.remove(&user_id);
+        }
     }
 }
 
@@ -1964,9 +2062,8 @@ mod tests {
             self: &Arc<Self>,
             provider: Arc<FakeIntelligenceProvider>,
         ) -> IntelligenceRunManager {
-            let store: Arc<dyn IntelligenceRuntimeStore> = self.clone();
-            let backend: Arc<dyn IntelligenceToolBackend> = self.clone();
-            IntelligenceRunManager::new(
+            self.manager_with_config(
+                provider,
                 IntelligenceRunManagerConfig {
                     enabled: true,
                     model_timeout: Duration::from_secs(5),
@@ -1977,6 +2074,18 @@ mod tests {
                     max_malformed_retries: 1,
                     ..IntelligenceRunManagerConfig::default()
                 },
+            )
+        }
+
+        fn manager_with_config(
+            self: &Arc<Self>,
+            provider: Arc<FakeIntelligenceProvider>,
+            config: IntelligenceRunManagerConfig,
+        ) -> IntelligenceRunManager {
+            let store: Arc<dyn IntelligenceRuntimeStore> = self.clone();
+            let backend: Arc<dyn IntelligenceToolBackend> = self.clone();
+            IntelligenceRunManager::new(
+                config,
                 store,
                 provider,
                 IntelligenceToolRegistry::new(backend),
@@ -2468,8 +2577,23 @@ mod tests {
 
         assert_eq!(response.status, ApiRunStatus::Succeeded);
         assert_eq!(response.draft_artifact_ids, vec![Uuid::from_u128(900)]);
-        assert_eq!(runtime.draft_creates.lock().unwrap().len(), 1);
-        assert_eq!(runtime.source_replacements.lock().unwrap().len(), 1);
+        let draft_creates = runtime.draft_creates.lock().unwrap();
+        assert_eq!(draft_creates.len(), 1);
+        assert_eq!(draft_creates[0].title, "Grounded draft");
+        assert_eq!(
+            draft_creates[0].scope.user_id(),
+            Some(Uuid::from_u128(200))
+        );
+        assert_eq!(draft_creates[0].media_id, Some(movie(1)));
+        assert_eq!(draft_creates[0].run_id, Some(response.run_id));
+        drop(draft_creates);
+        let source_replacements = runtime.source_replacements.lock().unwrap();
+        assert_eq!(source_replacements.len(), 1);
+        assert_eq!(source_replacements[0].0, Uuid::from_u128(900));
+        assert_eq!(source_replacements[0].1, Some(Uuid::from_u128(200)));
+        assert_eq!(source_replacements[0].2.len(), 1);
+        assert_eq!(source_replacements[0].2[0].source_media_id, Some(movie(1)));
+        drop(source_replacements);
         assert!(runtime.tool_creates.lock().unwrap().iter().all(|create| {
             !create.arguments.to_string().contains("sk-live-secret")
         }));
@@ -2508,6 +2632,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn per_user_concurrency_limit_rejects_second_active_run() {
+        let runtime = Arc::new(FakeRuntime::default());
+        *runtime.candidate_delay.lock().unwrap() = Some(Duration::from_secs(5));
+        let provider = Arc::new(FakeIntelligenceProvider::default());
+        provider.push_action(Ok(IntelligenceActionCompletion {
+            model: "fake-model".to_string(),
+            action_name: "candidate_search".to_string(),
+            arguments: json!({"query": "arrival", "library_ids": [library(1)]}),
+            attempts: 1,
+        }));
+        let manager = runtime.manager(provider);
+        let user_id = Some(Uuid::from_u128(200));
+
+        let first = manager.start_run(run_request(), user_id).await.unwrap();
+        assert_eq!(first.status, ApiRunStatus::Queued);
+
+        let err = manager
+            .start_run(run_request(), user_id)
+            .await
+            .expect_err("same user should be limited while a run is active");
+        assert!(matches!(
+            err,
+            MediaError::ConcurrencyLimit(ref message)
+                if message.contains("per-user concurrency limit")
+        ));
+        assert_eq!(runtime.runs.lock().unwrap().len(), 1);
+
+        let other_user = manager
+            .start_run(run_request(), Some(Uuid::from_u128(201)))
+            .await
+            .unwrap();
+        assert_eq!(other_user.status, ApiRunStatus::Queued);
+    }
+
+    #[tokio::test]
     async fn grounding_validator_rejects_unseen_draft_media() {
         let runtime = Arc::new(FakeRuntime::default());
         let provider = Arc::new(FakeIntelligenceProvider::default());
@@ -2537,6 +2696,145 @@ mod tests {
         );
         assert!(runtime.draft_creates.lock().unwrap().is_empty());
         assert!(runtime.tool_creates.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn malformed_final_response_fails_without_side_effects() {
+        let runtime = Arc::new(FakeRuntime::default());
+        let provider = Arc::new(FakeIntelligenceProvider::default());
+        provider.push_action(Ok(IntelligenceActionCompletion {
+            model: "fake-model".to_string(),
+            action_name: FINAL_RESPONSE_ACTION.to_string(),
+            arguments: json!({"selected_media_ids": []}),
+            attempts: 1,
+        }));
+        let manager = runtime.manager(provider);
+
+        let response = manager
+            .run_to_completion(run_request(), Some(Uuid::from_u128(200)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, ApiRunStatus::Failed);
+        assert_eq!(
+            response.error.as_ref().map(|error| error.code),
+            Some(IntelligenceErrorCode::InvalidRequest)
+        );
+        assert!(runtime.tool_creates.lock().unwrap().is_empty());
+        assert!(runtime.draft_creates.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn direct_write_actions_are_rejected_before_tool_execution() {
+        let runtime = Arc::new(FakeRuntime::default());
+        let provider = Arc::new(FakeIntelligenceProvider::default());
+        for _ in 0..2 {
+            provider.push_action(Ok(IntelligenceActionCompletion {
+                model: "fake-model".to_string(),
+                action_name: "delete_media".to_string(),
+                arguments: json!({"media_id": movie(1)}),
+                attempts: 1,
+            }));
+        }
+        let manager = runtime.manager(provider);
+
+        let response = manager
+            .run_to_completion(run_request(), Some(Uuid::from_u128(200)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, ApiRunStatus::Failed);
+        assert_eq!(
+            response.error.as_ref().map(|error| error.code),
+            Some(IntelligenceErrorCode::ProviderError)
+        );
+        assert!(runtime.tool_creates.lock().unwrap().is_empty());
+        assert!(runtime.draft_creates.lock().unwrap().is_empty());
+        assert!(runtime.events.lock().unwrap().iter().any(|event| {
+            event.event_kind == IntelligenceRunEventKind::Failed
+                && event
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.message.contains("unapproved"))
+        }));
+    }
+
+    #[tokio::test]
+    async fn runtime_tool_result_byte_budget_stops_run() {
+        let runtime = Arc::new(FakeRuntime::default());
+        let provider = Arc::new(FakeIntelligenceProvider::default());
+        provider.push_action(Ok(IntelligenceActionCompletion {
+            model: "fake-model".to_string(),
+            action_name: "candidate_search".to_string(),
+            arguments: json!({"query": "arrival", "library_ids": [library(1)]}),
+            attempts: 1,
+        }));
+        let manager = runtime.manager_with_config(
+            provider,
+            IntelligenceRunManagerConfig {
+                enabled: true,
+                model_timeout: Duration::from_secs(5),
+                tool_timeout: Duration::from_secs(5),
+                total_timeout: Duration::from_secs(10),
+                max_steps: 2,
+                max_tool_calls: 4,
+                max_malformed_retries: 1,
+                max_tool_result_bytes: 8,
+                ..IntelligenceRunManagerConfig::default()
+            },
+        );
+
+        let response = manager
+            .run_to_completion(run_request(), Some(Uuid::from_u128(200)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, ApiRunStatus::Failed);
+        assert_eq!(
+            response.error.as_ref().map(|error| error.code),
+            Some(IntelligenceErrorCode::InvalidRequest)
+        );
+        assert!(
+            response
+                .error
+                .as_ref()
+                .is_some_and(|error| error.message.contains("byte budget"))
+        );
+        assert_eq!(runtime.tool_creates.lock().unwrap().len(), 1);
+        assert!(runtime.draft_creates.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn runtime_tool_call_budget_stops_extra_actions() {
+        let runtime = Arc::new(FakeRuntime::default());
+        let provider = Arc::new(FakeIntelligenceProvider::default());
+        for _ in 0..5 {
+            provider.push_action(Ok(IntelligenceActionCompletion {
+                model: "fake-model".to_string(),
+                action_name: "candidate_search".to_string(),
+                arguments: json!({"query": "arrival", "library_ids": [library(1)]}),
+                attempts: 1,
+            }));
+        }
+        let manager = runtime.manager(provider);
+
+        let response = manager
+            .run_to_completion(run_request(), Some(Uuid::from_u128(200)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, ApiRunStatus::Failed);
+        assert_eq!(
+            response.error.as_ref().map(|error| error.code),
+            Some(IntelligenceErrorCode::InvalidRequest)
+        );
+        assert!(
+            response.error.as_ref().is_some_and(|error| error
+                .message
+                .contains("tool call budget"))
+        );
+        assert_eq!(runtime.tool_creates.lock().unwrap().len(), 4);
+        assert!(runtime.draft_creates.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

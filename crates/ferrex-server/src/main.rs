@@ -716,6 +716,7 @@ fn build_intelligence_run_manager(
         total_timeout: limits.total_timeout,
         max_steps: limits.max_steps,
         max_tool_calls: limits.max_tool_calls,
+        per_user_concurrency: limits.per_user_concurrency,
         max_malformed_retries: runtime.retry.max_retries,
         max_output_bytes: limits.max_output_bytes,
         max_tool_result_bytes: limits.max_tool_result_bytes,

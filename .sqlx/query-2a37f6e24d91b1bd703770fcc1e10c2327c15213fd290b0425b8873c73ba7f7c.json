@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE intelligence_tool_calls\n                SET status = 'cancelled',\n                    error_excerpt = COALESCE(error_excerpt, $2),\n                    finished_at = COALESCE(finished_at, now()),\n                    updated_at = now()\n                WHERE run_id = ANY($1)\n                  AND status IN ('queued', 'running')\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2a37f6e24d91b1bd703770fcc1e10c2327c15213fd290b0425b8873c73ba7f7c"
+}

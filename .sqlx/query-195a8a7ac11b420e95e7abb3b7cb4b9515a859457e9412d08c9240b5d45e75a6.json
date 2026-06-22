@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE intelligence_runs\n            SET status = 'failed',\n                error_excerpt = $1,\n                finished_at = COALESCE(finished_at, now()),\n                updated_at = now()\n            WHERE status IN ('queued', 'running')\n            RETURNING id AS \"id!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "195a8a7ac11b420e95e7abb3b7cb4b9515a859457e9412d08c9240b5d45e75a6"
+}

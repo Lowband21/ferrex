@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT source_ordinal AS \"source_ordinal!\",\n               source_kind::text AS \"source_kind!\",\n               source_media_context_id, source_search_document_id,\n               source_artifact_id, source_run_id, source_tool_call_id,\n               source_library_id, source_user_id, source_media_id,\n               source_media_type::text AS source_media_type,\n               source_revision AS \"source_revision!\",\n               source_content_hash, source_excerpt,\n               source_locator AS \"source_locator!\"\n        FROM intelligence_artifact_sources\n        WHERE artifact_id = $1\n          AND status = 'active'\n          AND invalidated_at IS NULL\n        ORDER BY source_ordinal, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source_ordinal!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "source_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_media_context_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "source_search_document_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "source_artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_tool_call_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "source_library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "source_media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "source_media_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "source_revision!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "source_content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "source_excerpt",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "source_locator!",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "a28cc1057af82994d473489f0672202fc3ac3a11ecb231829e50159be4865899"
+}

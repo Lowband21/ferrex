@@ -33,17 +33,17 @@ These are the most commonly used variables. See `.env.example` for the authorita
 
 ## Intelligence Runtime Variables
 
-The Phase 2 intelligence runtime contracts are configured with `FERREX_INTELLIGENCE_*` variables. The runtime is disabled by default and this slice does not make provider calls.
+The Phase 2 intelligence runtime is configured with `FERREX_INTELLIGENCE_*` variables. The runtime is disabled by default; when enabled it calls the configured local/trusted OpenAI-compatible provider.
 
-- `FERREX_INTELLIGENCE_ENABLED` – Enables future runtime execution when set to `true`.
+- `FERREX_INTELLIGENCE_ENABLED` – Enables grounded runtime execution when set to `true`.
 - `FERREX_INTELLIGENCE_BASE_URL` – OpenAI-compatible provider base URL. Local development default: `http://localhost:8081/v1`.
 - `FERREX_INTELLIGENCE_API_KEY` – Optional provider API key placeholder; leave blank for local providers that do not require a key.
 - `FERREX_INTELLIGENCE_MODEL` – Optional model override. Local development default: `gemma-4-12b`.
 - `FERREX_INTELLIGENCE_MODEL_TIMEOUT_MS`, `FERREX_INTELLIGENCE_TOOL_TIMEOUT_MS`, `FERREX_INTELLIGENCE_TOTAL_TIMEOUT_MS` – Model, tool, and whole-run timeout budgets in milliseconds.
-- `FERREX_INTELLIGENCE_MAX_STEPS`, `FERREX_INTELLIGENCE_MAX_TOOL_CALLS` – Upper bounds for future runtime loops.
+- `FERREX_INTELLIGENCE_MAX_STEPS`, `FERREX_INTELLIGENCE_MAX_TOOL_CALLS` – Upper bounds for runtime loops.
 - `FERREX_INTELLIGENCE_MAX_OUTPUT_BYTES`, `FERREX_INTELLIGENCE_MAX_TOOL_RESULT_BYTES` – Byte caps for generated output and persisted tool results.
 - `FERREX_INTELLIGENCE_MAX_RETRIES` – Retry count for transient provider/runtime failures.
-- `FERREX_INTELLIGENCE_PER_USER_CONCURRENCY` – Per-user concurrent run limit.
+- `FERREX_INTELLIGENCE_PER_USER_CONCURRENCY` – Per-user concurrent run limit; additional active run starts for the same user receive a `concurrency_limit` response until a slot is free.
 
 ## Generating Configuration
 

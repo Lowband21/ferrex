@@ -459,6 +459,10 @@ impl IntelligenceToolError {
                 IntelligenceToolErrorCode::InvalidRequest,
                 "tool request conflicted with current Ferrex state",
             ),
+            MediaError::ConcurrencyLimit(_) => Self::new(
+                IntelligenceToolErrorCode::InvalidRequest,
+                "tool request exceeded a Ferrex concurrency limit",
+            ),
             MediaError::Serialization(_) => Self::new(
                 IntelligenceToolErrorCode::Internal,
                 "tool response could not be serialized safely",
@@ -1276,7 +1280,7 @@ impl IntelligenceToolRegistry {
                     summary: input.summary,
                     excerpt: input.excerpt,
                     content: input.content,
-                    metadata: input.metadata,
+                    metadata: object_or_empty(input.metadata)?,
                     source_revision: input.source_revision.unwrap_or(1),
                 };
                 let artifact_id = self
@@ -1397,6 +1401,19 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(
             "tool arguments did not match the declared JSON schema",
         )
     })
+}
+
+fn object_or_empty(
+    value: Value,
+) -> std::result::Result<Value, IntelligenceToolError> {
+    match value {
+        Value::Null => Ok(json!({})),
+        Value::Object(_) => Ok(value),
+        _ => Err(IntelligenceToolError::new(
+            IntelligenceToolErrorCode::MalformedArguments,
+            "draft metadata must be a JSON object",
+        )),
+    }
 }
 
 fn ensure_object_with_allowed_keys(

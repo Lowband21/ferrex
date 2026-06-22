@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE intelligence_artifacts\n            SET status = $2::varchar,\n                invalidated_at = CASE\n                    WHEN $3 THEN COALESCE(invalidated_at, now())\n                    WHEN $4 THEN NULL\n                    ELSE invalidated_at\n                END,\n                invalidation_reason = CASE\n                    WHEN $3 THEN $5::varchar\n                    WHEN $4 THEN NULL\n                    ELSE invalidation_reason\n                END,\n                updated_at = now()\n            WHERE id = $1\n              AND (($6::uuid IS NULL AND user_id IS NULL) OR user_id = $6)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Bool",
+        "Bool",
+        "Varchar",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "40ce383578be0a0f2b1916e00e8c4b6cf224de8e794c6f3f1a85b5fa0df4b4c5"
+}

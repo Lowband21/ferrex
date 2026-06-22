@@ -862,4 +862,90 @@ mod tests {
                 if path == "$.title"
         ));
     }
+
+    #[tokio::test]
+    async fn fake_provider_contract_responses_are_queue_backed() {
+        let provider = fake::FakeIntelligenceProvider::new("contract-fake");
+        let no_native_tools_model = IntelligenceModelStatus {
+            name: "fake-no-tools".to_string(),
+            selected: true,
+            available: true,
+            supports_tools: false,
+            context_window_tokens: Some(4096),
+        };
+        provider.push_models(Ok(vec![no_native_tools_model.clone()]));
+        provider.push_chat(Ok(IntelligenceChatCompletion {
+            model: "fake-no-tools".to_string(),
+            content: json!({"title": "Arrival"}),
+            attempts: 1,
+        }));
+        provider.push_action(Ok(IntelligenceActionCompletion {
+            model: "fake-no-tools".to_string(),
+            action_name: "final_response".to_string(),
+            arguments: json!({"summary": "grounded"}),
+            attempts: 1,
+        }));
+
+        let status = provider
+            .status(IntelligenceProviderRequestOptions::default())
+            .await
+            .expect("fake status should use queued models");
+        assert_eq!(status.provider_name, "contract-fake");
+        assert_eq!(status.models, vec![no_native_tools_model]);
+        assert!(!status.models[0].supports_tools);
+
+        let completion = provider
+            .complete_chat(
+                IntelligenceChatCompletionRequest::new(
+                    vec![IntelligenceChatMessage::user("name a movie")],
+                    IntelligenceJsonSchema::new(
+                        "movie_answer",
+                        json!({
+                            "type": "object",
+                            "required": ["title"],
+                            "properties": {"title": {"type": "string"}},
+                        }),
+                    ),
+                ),
+                IntelligenceProviderRequestOptions::default(),
+            )
+            .await
+            .expect("queued chat response should be returned");
+        assert_eq!(completion.content, json!({"title": "Arrival"}));
+
+        let action = provider
+            .complete_action(
+                IntelligenceActionCompletionRequest::new(
+                    vec![IntelligenceChatMessage::user("finish")],
+                    vec![IntelligenceActionSpec::new(
+                        "final_response",
+                        "Finish the run",
+                        json!({"type": "object"}),
+                    )],
+                ),
+                IntelligenceProviderRequestOptions::default(),
+            )
+            .await
+            .expect("queued action response should be returned");
+        assert_eq!(action.action_name, "final_response");
+
+        let err = provider
+            .complete_action(
+                IntelligenceActionCompletionRequest::new(
+                    vec![IntelligenceChatMessage::user("again")],
+                    vec![IntelligenceActionSpec::new(
+                        "final_response",
+                        "Finish the run",
+                        json!({"type": "object"}),
+                    )],
+                ),
+                IntelligenceProviderRequestOptions::default(),
+            )
+            .await
+            .expect_err("empty fake action queue is deterministic");
+        assert!(matches!(
+            err,
+            IntelligenceProviderError::InvalidRequest { .. }
+        ));
+    }
 }

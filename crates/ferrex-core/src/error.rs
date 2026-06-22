@@ -43,6 +43,9 @@ pub enum MediaError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("Concurrency limit exceeded: {0}")]
+    ConcurrencyLimit(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 }

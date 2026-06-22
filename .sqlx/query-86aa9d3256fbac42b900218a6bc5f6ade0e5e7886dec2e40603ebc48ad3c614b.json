@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id AS \"id!\" FROM intelligence_artifacts\n            WHERE id = $1\n              AND (($2::uuid IS NULL AND user_id IS NULL) OR user_id = $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "86aa9d3256fbac42b900218a6bc5f6ade0e5e7886dec2e40603ebc48ad3c614b"
+}

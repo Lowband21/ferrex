@@ -16,7 +16,6 @@ use ferrex_core::{
     },
     application::intelligence_runtime::IntelligenceRunManagerConfig,
     database::repository_ports::intelligence::{
-        IntelligenceArtifactScope, IntelligenceDraftArtifactCreate,
         IntelligenceRunCreate, IntelligenceRunKind,
     },
     domain::intelligence::{
@@ -26,6 +25,7 @@ use ferrex_core::{
         IntelligenceProviderRequestOptions, IntelligenceProviderResult,
     },
 };
+use ferrex_model::{LibraryId, MediaID, MovieID};
 use ferrex_server::infra::{app_state::AppState, startup::NoopStartupHooks};
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -50,6 +50,7 @@ struct RouteFakeProvider {
     actions: Mutex<
         VecDeque<IntelligenceProviderResult<IntelligenceActionCompletion>>,
     >,
+    action_delay: Mutex<Option<Duration>>,
 }
 
 impl RouteFakeProvider {
@@ -67,14 +68,25 @@ impl RouteFakeProvider {
         self.actions.lock().unwrap().push_back(result);
     }
 
+    fn delay_actions_by(&self, delay: Duration) {
+        *self.action_delay.lock().unwrap() = Some(delay);
+    }
+
     fn default_models(&self) -> Vec<IntelligenceModelStatus> {
-        vec![IntelligenceModelStatus {
-            name: "fake-model".to_string(),
-            selected: true,
-            available: true,
-            supports_tools: true,
-            context_window_tokens: Some(8192),
-        }]
+        vec![route_model_status("fake-model", true)]
+    }
+}
+
+fn route_model_status(
+    name: impl Into<String>,
+    supports_tools: bool,
+) -> IntelligenceModelStatus {
+    IntelligenceModelStatus {
+        name: name.into(),
+        selected: true,
+        available: true,
+        supports_tools,
+        context_window_tokens: Some(8192),
     }
 }
 
@@ -126,6 +138,10 @@ impl IntelligenceModelProvider for RouteFakeProvider {
         _request: IntelligenceActionCompletionRequest,
         _options: IntelligenceProviderRequestOptions,
     ) -> IntelligenceProviderResult<IntelligenceActionCompletion> {
+        let delay = *self.action_delay.lock().unwrap();
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
         self.actions.lock().unwrap().pop_front().unwrap_or_else(|| {
             Err(IntelligenceProviderError::InvalidRequest {
                 message: "fake action queue is empty".to_string(),
@@ -144,6 +160,7 @@ fn enabled_runtime_config() -> IntelligenceRunManagerConfig {
         total_timeout: Duration::from_secs(5),
         max_steps: 4,
         max_tool_calls: 4,
+        per_user_concurrency: 1,
         max_malformed_retries: 0,
         max_output_bytes: 64 * 1024,
         max_tool_result_bytes: 64 * 1024,
@@ -368,7 +385,54 @@ fn media_segment(movie_id: Uuid) -> String {
     format!("movie:{movie_id}")
 }
 
-fn final_response_action(summary: &str) -> IntelligenceActionCompletion {
+fn candidate_search_action(
+    query: &str,
+    library_id: Uuid,
+) -> IntelligenceActionCompletion {
+    IntelligenceActionCompletion {
+        model: "fake-model".to_string(),
+        action_name: "candidate_search".to_string(),
+        arguments: json!({
+            "query": query,
+            "library_ids": [library_id]
+        }),
+        attempts: 1,
+    }
+}
+
+fn create_grounded_draft_action(
+    draft_id: Uuid,
+    library_id: Uuid,
+    movie_id: Uuid,
+) -> IntelligenceActionCompletion {
+    let library_id = LibraryId(library_id);
+    let media_id = MediaID::Movie(MovieID(movie_id));
+    IntelligenceActionCompletion {
+        model: "fake-model".to_string(),
+        action_name: "create_draft".to_string(),
+        arguments: json!({
+            "artifact_id": draft_id,
+            "kind": "generated_answer",
+            "library_id": library_id,
+            "media_id": media_id,
+            "title": "Grounded route draft",
+            "summary": "A private grounded route draft",
+            "content": {"answer": "Cosmic Arrival is a grounded pick"},
+            "sources": [{
+                "source_ordinal": 0,
+                "source_kind": "media",
+                "source_library_id": library_id,
+                "source_media_id": media_id
+            }]
+        }),
+        attempts: 1,
+    }
+}
+
+fn final_response_with_draft(
+    summary: &str,
+    draft_id: Uuid,
+) -> IntelligenceActionCompletion {
     IntelligenceActionCompletion {
         model: "fake-model".to_string(),
         action_name: "final_response".to_string(),
@@ -376,7 +440,7 @@ fn final_response_action(summary: &str) -> IntelligenceActionCompletion {
             "summary": summary,
             "selected_media_ids": [],
             "artifact_citations": [],
-            "draft_artifact_ids": []
+            "draft_artifact_ids": [draft_id]
         }),
         attempts: 1,
     }
@@ -651,9 +715,77 @@ async fn intelligence_routes_are_authenticated_bounded_and_scoped(
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn intelligence_run_start_enforces_per_user_concurrency(
+    pool: PgPool,
+) -> Result<()> {
+    let provider = Arc::new(RouteFakeProvider::default());
+    provider.delay_actions_by(Duration::from_secs(5));
+    let (server, _state, _tempdir) =
+        build_server_with_provider(pool.clone(), provider).await?;
+    let (_user_id, access_token) =
+        register_user(&server, "runtime_concurrency_owner").await?;
+    let (_other_user_id, other_access_token) =
+        register_user(&server, "runtime_concurrency_other").await?;
+    let request = json!({
+        "purpose": "recommendation",
+        "prompt": "recommend something while another run is active",
+        "model": "fake-model"
+    });
+
+    let first = server
+        .post(routes::v1::intelligence::RUN_START)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&request)
+        .await;
+    first.assert_status_ok();
+
+    let same_user = server
+        .post(routes::v1::intelligence::RUN_START)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&request)
+        .await;
+    same_user.assert_status(StatusCode::TOO_MANY_REQUESTS);
+    let same_user_body: Value = same_user.json();
+    assert_eq!(same_user_body["error"]["code"], "concurrency_limit");
+
+    let other_user = server
+        .post(routes::v1::intelligence::RUN_START)
+        .add_header("Authorization", bearer(&other_access_token))
+        .json(&request)
+        .await;
+    other_user.assert_status_ok();
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
     pool: PgPool,
 ) -> Result<()> {
+    let runtime_library_id = Uuid::from_u128(0x6260);
+    let runtime_movie_id = Uuid::from_u128(0x6261);
+    let runtime_draft_id = Uuid::from_u128(0x6262);
+    seed_library(&pool, runtime_library_id).await;
+    seed_movie(
+        &pool,
+        runtime_library_id,
+        runtime_movie_id,
+        Uuid::from_u128(0x6263),
+        626,
+        "Cosmic Arrival",
+        878,
+        "Science Fiction",
+    )
+    .await;
+    seed_search_document(
+        &pool,
+        runtime_library_id,
+        runtime_movie_id,
+        "Cosmic Arrival",
+        "A grounded runtime route candidate.",
+    )
+    .await;
+
     let (disabled_server, _disabled_state, _disabled_tempdir) =
         build_server(pool.clone()).await?;
     let (_disabled_user_id, disabled_token) =
@@ -703,13 +835,38 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
     assert_eq!(unavailable_body["error"]["code"], "provider_unavailable");
 
     let provider = Arc::new(RouteFakeProvider::default());
-    provider.push_action(Ok(final_response_action("fake grounded answer")));
+    provider.push_models(Ok(vec![route_model_status("fake-model", false)]));
+    provider
+        .push_action(Ok(candidate_search_action("cosmic", runtime_library_id)));
+    provider.push_action(Ok(create_grounded_draft_action(
+        runtime_draft_id,
+        runtime_library_id,
+        runtime_movie_id,
+    )));
+    provider.push_action(Ok(final_response_with_draft(
+        "fake grounded draft ready",
+        runtime_draft_id,
+    )));
     let (server, state, _tempdir) =
         build_server_with_provider(pool.clone(), provider).await?;
     let (user_id, access_token) =
         register_user(&server, "runtime_owner").await?;
     let (_other_user_id, other_access_token) =
         register_user(&server, "runtime_other").await?;
+
+    let provider_status = server
+        .get(routes::v1::intelligence::PROVIDER_STATUS)
+        .add_header("Authorization", bearer(&access_token))
+        .await;
+    provider_status.assert_status_ok();
+    let provider_status_body: Value = provider_status.json();
+    assert_eq!(provider_status_body["data"]["state"], "ready");
+    assert_eq!(
+        provider_status_body["data"]["models"][0]["supports_tools"]
+            .as_bool()
+            .unwrap_or(false),
+        false
+    );
 
     let bad_request = server
         .post(routes::v1::intelligence::RUN_START)
@@ -728,8 +885,10 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
         .add_header("Authorization", bearer(&access_token))
         .json(&json!({
             "purpose": "recommendation",
+            "library_id": runtime_library_id,
             "prompt": "recommend something grounded",
-            "model": "fake-model"
+            "model": "fake-model",
+            "metadata": {"refresh_token": "route-secret"}
         }))
         .await;
     start.assert_status_ok();
@@ -743,8 +902,9 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
         "{run_id}",
         run_id.to_string(),
     );
+    tokio::time::sleep(Duration::from_millis(500)).await;
     let mut status_body = Value::Null;
-    for _ in 0..40 {
+    for _ in 0..120 {
         let status = server
             .get(&status_path)
             .add_header("Authorization", bearer(&access_token))
@@ -756,11 +916,18 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert_eq!(status_body["data"]["status"], "succeeded");
+    assert_eq!(
+        status_body["data"]["status"], "succeeded",
+        "status body after polling: {status_body}"
+    );
     assert_eq!(status_body["data"]["terminal"], true);
     assert_eq!(
         status_body["data"]["output_summary"]["text"],
-        "fake grounded answer"
+        "fake grounded draft ready"
+    );
+    assert_eq!(
+        status_body["data"]["draft_artifact_ids"][0],
+        runtime_draft_id.to_string()
     );
     assert!(status_body["data"]["provider"].as_str().is_some());
     assert!(status_body["data"]["model"].as_str().is_some());
@@ -788,6 +955,7 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
         events_text.contains("event: started")
             || events_text.contains("event: completed")
     );
+    assert!(events_text.contains("event: draft_artifact_created"));
     assert!(!events_text.contains("id: 0\n"));
 
     let cancel_run_id = state
@@ -831,28 +999,10 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
     let cancel_again_body: Value = cancel_again.json();
     assert_eq!(cancel_again_body["error"]["code"], "conflict");
 
-    let draft_id = state
-        .unit_of_work()
-        .intelligence
-        .create_draft_artifact(IntelligenceDraftArtifactCreate {
-            artifact_id: Some(Uuid::from_u128(0x6251)),
-            kind: IntelligenceArtifactKind::GeneratedAnswer,
-            scope: IntelligenceArtifactScope::User(user_id),
-            library_id: None,
-            media_id: None,
-            run_id: Some(run_id),
-            title: "Private draft".to_string(),
-            summary: Some("owner-only draft".to_string()),
-            excerpt: None,
-            content: json!({"answer": "private"}),
-            metadata: json!({"test": true}),
-            source_revision: 1,
-        })
-        .await?;
     let draft_path = route_utils::replace_param(
         routes::v1::intelligence::DRAFT_ARTIFACT_DETAIL,
         "{artifact_id}",
-        draft_id.to_string(),
+        runtime_draft_id.to_string(),
     );
     let owner_draft = server
         .get(&draft_path)
@@ -862,9 +1012,20 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
     let owner_draft_body: Value = owner_draft.json();
     assert_eq!(
         owner_draft_body["data"]["artifact_id"],
-        draft_id.to_string()
+        runtime_draft_id.to_string()
     );
-    assert_eq!(owner_draft_body["data"]["content"]["answer"], "private");
+    assert_eq!(
+        owner_draft_body["data"]["content"]["answer"],
+        "Cosmic Arrival is a grounded pick"
+    );
+    assert_eq!(owner_draft_body["data"]["status"], "draft");
+    assert_eq!(
+        owner_draft_body["data"]["sources"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     let hidden_draft = server
         .get(&draft_path)
@@ -881,7 +1042,7 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
     let draft_list_body: Value = draft_list.json();
     assert_eq!(
         draft_list_body["data"]["drafts"][0]["artifact_id"],
-        draft_id.to_string()
+        runtime_draft_id.to_string()
     );
 
     let hidden_draft_list = server

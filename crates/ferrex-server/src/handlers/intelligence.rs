@@ -143,6 +143,11 @@ impl IntelligenceHttpError {
         match error {
             MediaError::NotFound(message) => Self::not_found(message),
             MediaError::Conflict(message) => Self::conflict(message),
+            MediaError::ConcurrencyLimit(message) => Self::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                IntelligenceErrorCode::ConcurrencyLimit,
+                message,
+            ),
             MediaError::Cancelled(message) => Self::new(
                 StatusCode::REQUEST_TIMEOUT,
                 IntelligenceErrorCode::RunCancelled,
