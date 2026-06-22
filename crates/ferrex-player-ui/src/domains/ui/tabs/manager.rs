@@ -78,7 +78,7 @@ impl TabManager {
             .tabs
             .keys()
             .filter(|tab_id| match tab_id {
-                TabId::Home => true,
+                TabId::Home | TabId::Collections => true,
                 TabId::Library(id) => self.library_info.contains_key(id),
             })
             .cloned()
@@ -101,6 +101,9 @@ impl TabManager {
                     // All tab should always exist, but create if needed
                     //self.tabs
                     //    .insert(tab_id, TabState::new_all(self.repo_accessor.as_ref()));
+                }
+                TabId::Collections => {
+                    self.tabs.insert(tab_id, TabState::new_collections());
                 }
                 TabId::Library(library_id) => {
                     // Create library tab if we have the library info
@@ -197,6 +200,11 @@ impl TabManager {
                 self.active_tab = tab_id;
                 true
             }
+            TabId::Collections => {
+                self.get_or_create_tab(tab_id);
+                self.active_tab = tab_id;
+                true
+            }
             TabId::Library(library_id) => {
                 if self.library_info.contains_key(&library_id) {
                     // Ensure tab exists
@@ -277,8 +285,8 @@ impl TabManager {
         if let Some(tab) = self.get_tab_mut(tab_id) {
             match tab {
                 TabState::Library(state) => state.mark_needs_refresh(),
-                TabState::Home(_) => {
-                    // AllTabState refresh is handled differently
+                TabState::Home(_) | TabState::Collections(_) => {
+                    // Home and Collections refreshes are handled by their own loaders.
                 }
             }
         }
@@ -289,8 +297,8 @@ impl TabManager {
         for (_, tab) in self.tabs.iter_mut() {
             match tab {
                 TabState::Library(state) => state.mark_needs_refresh(),
-                TabState::Home(_) => {
-                    // AllTabState refresh is handled differently
+                TabState::Home(_) | TabState::Collections(_) => {
+                    // Home and Collections refreshes are handled by their own loaders.
                 }
             }
         }
@@ -300,9 +308,8 @@ impl TabManager {
     pub fn refresh_active_tab(&mut self) {
         match self.get_active_tab() {
             TabState::Library(state) => state.refresh_from_repo(),
-            TabState::Home(_state) => {
-                // Refresh All view model
-                //state.view_model.refresh_from_repo();
+            TabState::Home(_) | TabState::Collections(_) => {
+                // Home view models and Collections API refreshes are triggered separately.
             }
         }
     }
@@ -312,7 +319,7 @@ impl TabManager {
         for (_, tab) in self.tabs.iter_mut() {
             match tab {
                 TabState::Library(state) => state.refresh_from_repo(),
-                TabState::Home(_state) => {} //state.view_model.refresh_from_repo(),
+                TabState::Home(_) | TabState::Collections(_) => {}
             }
         }
     }

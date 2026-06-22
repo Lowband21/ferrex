@@ -6,10 +6,16 @@ use crate::infra::api_types::{LibraryType, Media};
 // no poster-checking helpers needed; core compare_media handles poster-first
 use super::HomeFocusState;
 use crate::infra::repository::accessor::{Accessor, ReadOnly};
-use ferrex_core::player_prelude::{
-    ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedModel,
-    ArchivedMovieReference, ArchivedSeries, LibraryId, MediaID, MediaIDLike,
-    MediaOps, MovieID, SeriesID, SortBy, SortOrder, compare_media,
+use ferrex_core::{
+    api::types::collections::{
+        CollectionDetail, CollectionId, CollectionPageInfo, CollectionSummary,
+    },
+    player_prelude::{
+        ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedModel,
+        ArchivedMovieReference, ArchivedSeries, LibraryId, MediaID,
+        MediaIDLike, MediaOps, MovieID, SeriesID, SortBy, SortOrder,
+        compare_media,
+    },
 };
 use iced::widget::Id;
 use std::cmp::Ordering;
@@ -21,6 +27,9 @@ use uuid::Uuid;
 pub enum TabState {
     /// State for the home tab showing curated content
     Home(Box<HomeTabState>),
+
+    /// State for the collections tab showing server-side collection summaries
+    Collections(Box<CollectionsTabState>),
 
     /// State for a library-specific tab
     Library(Box<LibraryTabState>),
@@ -40,6 +49,11 @@ impl TabState {
         TabState::Home(Box::new(HomeTabState::new(accessor)))
     }
 
+    /// Create a new Collections tab state
+    pub fn new_collections() -> Self {
+        TabState::Collections(Box::new(CollectionsTabState::new()))
+    }
+
     /// Create a new Library tab state
     pub fn new_library(
         library_id: LibraryId,
@@ -57,7 +71,7 @@ impl TabState {
     pub fn grid_state(&self) -> Option<&VirtualGridState> {
         match self {
             TabState::Library(state) => Some(&state.grid_state),
-            TabState::Home(_) => None,
+            TabState::Home(_) | TabState::Collections(_) => None,
         }
     }
 
@@ -65,7 +79,7 @@ impl TabState {
     pub fn grid_state_mut(&mut self) -> Option<&mut VirtualGridState> {
         match self {
             TabState::Library(state) => Some(&mut state.grid_state),
-            TabState::Home(_) => None,
+            TabState::Home(_) | TabState::Collections(_) => None,
         }
     }
 
@@ -73,9 +87,8 @@ impl TabState {
     pub fn get_visible_items(&self) -> Vec<ArchivedMediaID> {
         match self {
             TabState::Library(state) => state.get_visible_items(),
-            TabState::Home(_) => {
-                // Home  tab uses carousel view, not virtual grid
-                // Return empty for now - could be extended to return carousel visible items
+            TabState::Home(_) | TabState::Collections(_) => {
+                // Home and Collections tabs do not use the library virtual grid.
                 Vec::new()
             }
         }
@@ -85,9 +98,8 @@ impl TabState {
     pub fn get_prefetch_items(&self) -> Vec<ArchivedMediaID> {
         match self {
             TabState::Library(state) => state.get_preload_items(),
-            TabState::Home(_) => {
-                // Home  tab uses carousel view, not virtual grid
-                // Return empty for now - could be extended to return carousel visible items
+            TabState::Home(_) | TabState::Collections(_) => {
+                // Home and Collections tabs do not use the library virtual grid.
                 Vec::new()
             }
         }
@@ -438,6 +450,153 @@ impl HomeTabState {
     //pub fn set_repo_accessor(&mut self, accessor: Option<&UIMediaAccessor>) {
     //    self.view_model.set_repo_accessor(accessor);
     //}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionsLoadState {
+    NotLoaded,
+    Loading,
+    Loaded,
+    Empty,
+    Error(String),
+}
+
+impl Default for CollectionsLoadState {
+    fn default() -> Self {
+        Self::NotLoaded
+    }
+}
+
+impl CollectionsLoadState {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Loaded | Self::Empty)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CollectionDetailLoadState {
+    NotLoaded,
+    Loading,
+    Loaded(CollectionDetail),
+    Error(String),
+}
+
+impl Default for CollectionDetailLoadState {
+    fn default() -> Self {
+        Self::NotLoaded
+    }
+}
+
+/// State for the desktop Collections tab and detail cache.
+#[derive(Debug)]
+pub struct CollectionsTabState {
+    /// Summaries currently rendered in the Collections tab.
+    pub summaries: Vec<CollectionSummary>,
+
+    /// Current list-loading state.
+    pub load_state: CollectionsLoadState,
+
+    /// Pagination metadata returned by the API for the last refresh.
+    pub page: Option<CollectionPageInfo>,
+
+    /// Scrollable widget id used for desktop tab scroll restoration.
+    pub scrollable_id: Id,
+
+    /// Per-collection detail state, loaded on demand when cards are opened.
+    pub detail_states: HashMap<CollectionId, CollectionDetailLoadState>,
+}
+
+impl CollectionsTabState {
+    pub fn new() -> Self {
+        Self {
+            summaries: Vec::new(),
+            load_state: CollectionsLoadState::NotLoaded,
+            page: None,
+            scrollable_id: Id::from("collections-tab"),
+            detail_states: HashMap::new(),
+        }
+    }
+
+    pub fn should_load_initial(&self) -> bool {
+        matches!(
+            self.load_state,
+            CollectionsLoadState::NotLoaded | CollectionsLoadState::Error(_)
+        )
+    }
+
+    pub fn mark_loading(&mut self) {
+        self.load_state = CollectionsLoadState::Loading;
+    }
+
+    pub fn mark_loaded(
+        &mut self,
+        summaries: Vec<CollectionSummary>,
+        page: CollectionPageInfo,
+    ) {
+        self.summaries = summaries;
+        self.page = Some(page);
+        self.load_state = if self.summaries.is_empty() {
+            CollectionsLoadState::Empty
+        } else {
+            CollectionsLoadState::Loaded
+        };
+    }
+
+    pub fn mark_error(&mut self, message: impl Into<String>) {
+        self.load_state = CollectionsLoadState::Error(message.into());
+    }
+
+    pub fn summary(
+        &self,
+        collection_id: CollectionId,
+    ) -> Option<&CollectionSummary> {
+        self.summaries
+            .iter()
+            .find(|summary| summary.identity.id == collection_id)
+    }
+
+    pub fn mark_detail_loading(&mut self, collection_id: CollectionId) {
+        self.detail_states
+            .insert(collection_id, CollectionDetailLoadState::Loading);
+    }
+
+    pub fn mark_detail_loaded(&mut self, detail: CollectionDetail) {
+        self.detail_states.insert(
+            detail.summary.identity.id,
+            CollectionDetailLoadState::Loaded(detail),
+        );
+    }
+
+    pub fn mark_detail_error(
+        &mut self,
+        collection_id: CollectionId,
+        message: impl Into<String>,
+    ) {
+        self.detail_states.insert(
+            collection_id,
+            CollectionDetailLoadState::Error(message.into()),
+        );
+    }
+
+    pub fn detail_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionDetailLoadState {
+        self.detail_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+impl Default for CollectionsTabState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// State for a library-specific tab

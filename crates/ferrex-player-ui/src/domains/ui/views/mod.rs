@@ -21,6 +21,7 @@ pub use error::*;
 pub use loading::*;
 
 pub mod carousel;
+pub mod collections;
 pub mod components;
 pub mod detail;
 pub mod virtual_carousel;

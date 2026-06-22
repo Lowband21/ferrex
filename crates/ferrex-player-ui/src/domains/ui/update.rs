@@ -32,6 +32,12 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
         UiMessage::Feedback(feedback_msg) => {
             update_feedback_ui(state, feedback_msg)
         }
+        UiMessage::Collections(collections_msg) => {
+            crate::domains::ui::collections::update_collections_ui(
+                state,
+                collections_msg,
+            )
+        }
         UiMessage::Window(window_msg) => update_window_ui(state, window_msg),
         UiMessage::Header(header_msg) => update_header_ui(state, header_msg),
         UiMessage::VirtualCarousel(vc_msg) => DomainUpdateResult::task(

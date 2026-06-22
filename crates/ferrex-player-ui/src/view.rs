@@ -8,6 +8,7 @@ use crate::domains::ui::views::admin::{
     view_admin_dashboard, view_admin_users, view_library_management,
 };
 use crate::domains::ui::views::auth::view_auth;
+use crate::domains::ui::views::collections::view_collection_detail;
 #[cfg(test)]
 use crate::domains::ui::views::detail::DetailTheaterPlateRect;
 use crate::domains::ui::views::detail::{
@@ -148,6 +149,10 @@ pub fn view(
                 .map(DomainMessage::from),
             ViewState::EpisodeDetail { episode_id, .. } => {
                 view_episode_detail(state, episode_id).map(DomainMessage::from)
+            }
+            ViewState::CollectionDetail { collection_id } => {
+                view_collection_detail(state, *collection_id)
+                    .map(DomainMessage::from)
             }
             ViewState::UserSettings => {
                 view_unified_settings(state).map(DomainMessage::from)

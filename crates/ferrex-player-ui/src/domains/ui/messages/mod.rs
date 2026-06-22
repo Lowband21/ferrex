@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::domains::ui::{
     background_ui::BackgroundMessage,
+    collections::CollectionsMessage,
     feedback_ui::FeedbackMessage,
     header_ui::HeaderMessage,
     interaction_ui::InteractionMessage,
@@ -36,6 +37,7 @@ pub enum UiMessage {
     Header(HeaderMessage),
     Playback(PlaybackMessage),
     Feedback(FeedbackMessage),
+    Collections(CollectionsMessage),
 
     // Virtual carousel events (new module)
     VirtualCarousel(VirtualCarouselMessage),
@@ -72,6 +74,7 @@ impl UiMessage {
             Self::Header(msg) => msg.name(),
             Self::Playback(msg) => msg.name(),
             Self::Feedback(msg) => msg.name(),
+            Self::Collections(msg) => msg.name(),
 
             Self::VirtualCarousel(_) => "UI::VirtualCarousel",
             Self::TenFootHome(_) => "UI::TenFootHome",
@@ -101,6 +104,9 @@ impl std::fmt::Debug for UiMessage {
             Self::Header(msg) => write!(f, "UI::Header({:?})", msg),
             Self::Playback(msg) => write!(f, "UI::Playback({:?})", msg),
             Self::Feedback(msg) => write!(f, "UI::Feedback({:?})", msg),
+            Self::Collections(msg) => {
+                write!(f, "UI::Collections({:?})", msg)
+            }
 
             Self::VirtualCarousel(msg) => {
                 write!(f, "UI::VirtualCarousel({:?})", msg)

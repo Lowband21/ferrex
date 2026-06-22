@@ -3,6 +3,7 @@
 //! Contains all UI-related state and logic
 
 pub mod background_ui;
+pub mod collections;
 pub mod components;
 pub mod feedback_ui;
 pub mod header_ui;

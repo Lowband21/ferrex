@@ -23,7 +23,7 @@ pub fn update_view_model_ui(
             bump_keep_alive(state);
             // Update library filters based on current display mode
             let library_filter = match state.domains.ui.state.scope {
-                Scope::Home => None, // Show all libraries
+                Scope::Home | Scope::Collections => None, // Show all libraries / non-library tab
                 Scope::Library(id) => Some(id),
             };
 
@@ -61,7 +61,7 @@ pub fn update_view_model_ui(
             bump_keep_alive(state);
             let library_filter = match state.domains.ui.state.scope {
                 Scope::Library(id) => Some(id),
-                Scope::Home => None,
+                Scope::Home | Scope::Collections => None,
             };
 
             log::debug!(

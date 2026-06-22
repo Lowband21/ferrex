@@ -208,7 +208,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
         ViewState::MovieDetail { .. }
         | ViewState::SeriesDetail { .. }
         | ViewState::SeasonDetail { .. }
-        | ViewState::EpisodeDetail { .. } => {
+        | ViewState::EpisodeDetail { .. }
+        | ViewState::CollectionDetail { .. } => {
             // Detail views header with global search in the center
             let left_section_items = vec![
                 // Home button
@@ -707,6 +708,7 @@ fn view_tenfoot_primary_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
             | ViewState::SeriesDetail { .. }
             | ViewState::SeasonDetail { .. }
             | ViewState::EpisodeDetail { .. }
+            | ViewState::CollectionDetail { .. }
     );
 
     let mut left_section_items =
@@ -861,6 +863,23 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, UiMessage> {
         )
         .on_press(UiShellMessage::SelectScope(Scope::Home).into())
         .style(home_style)
+        .padding([0, 16])
+        .height(HEIGHT)
+        .into(),
+    );
+
+    let collections_style = if active_tab_id == TabId::Collections {
+        theme::Button::HeaderTabActive.style()
+    } else {
+        theme::Button::HeaderIcon.style()
+    };
+    tabs_vec.push(
+        button(
+            container(text("Collections").size(fonts.caption))
+                .center_y(Length::Fill),
+        )
+        .on_press(UiShellMessage::SelectScope(Scope::Collections).into())
+        .style(collections_style)
         .padding([0, 16])
         .height(HEIGHT)
         .into(),

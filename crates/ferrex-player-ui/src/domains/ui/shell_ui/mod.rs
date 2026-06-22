@@ -1,8 +1,9 @@
 pub mod update;
 
 use crate::domains::ui::{messages::UiMessage, tabs::TabId};
-use ferrex_core::player_prelude::{
-    EpisodeID, LibraryId, MovieID, SeasonID, SeriesID,
+use ferrex_core::{
+    api::types::collections::CollectionId,
+    player_prelude::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID},
 };
 use iced::window;
 
@@ -13,6 +14,8 @@ pub use update::update_shell_ui;
 pub enum Scope {
     /// Home (curated view)
     Home,
+    /// Collections summary/listing view
+    Collections,
     /// Single library view
     Library(LibraryId),
 }
@@ -22,6 +25,7 @@ impl Scope {
     pub fn to_tab_id(&self) -> TabId {
         match self {
             Scope::Home => TabId::Home,
+            Scope::Collections => TabId::Collections,
             Scope::Library(id) => TabId::Library(*id),
         }
     }
@@ -29,7 +33,7 @@ impl Scope {
     /// Get library id from current library scope if present
     pub fn lib_id(&self) -> Option<LibraryId> {
         match self {
-            Scope::Home => None,
+            Scope::Home | Scope::Collections => None,
             Scope::Library(lib_id) => Some(*lib_id),
         }
     }
@@ -46,6 +50,7 @@ pub enum UiShellMessage {
     ViewTvShow(SeriesID),
     ViewSeason(SeriesID, SeasonID),
     ViewEpisode(EpisodeID),
+    ViewCollection(CollectionId),
 
     // Header navigation
     NavigateHome,
@@ -90,6 +95,7 @@ impl UiShellMessage {
             Self::ViewTvShow(_) => "UI::ViewTvShow",
             Self::ViewSeason(_, _) => "UI::ViewSeason",
             Self::ViewEpisode(_) => "UI::ViewEpisode",
+            Self::ViewCollection(_) => "UI::ViewCollection",
 
             // Header navigation
             Self::NavigateHome => "UI::NavigateHome",
@@ -138,6 +144,9 @@ impl std::fmt::Debug for UiShellMessage {
             }
             UiShellMessage::ViewEpisode(id) => {
                 write!(f, "UI::ViewEpisode({})", id)
+            }
+            UiShellMessage::ViewCollection(id) => {
+                write!(f, "UI::ViewCollection({})", id)
             }
             UiShellMessage::NavigateHome => write!(f, "UI::NavigateHome"),
             UiShellMessage::NavigateBack => write!(f, "UI::NavigateBack"),
