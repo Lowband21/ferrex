@@ -453,6 +453,8 @@
               pkg-config
               llvmPackages.clang
               just
+              # Node includes Corepack; docs/package.json pins the pnpm version.
+              nodejs_24
               jq
               python3
               gh
@@ -491,6 +493,8 @@
               pkg-config
               llvmPackages.clang
               just
+              # Node includes Corepack; docs/package.json pins the pnpm version.
+              nodejs_24
               jq
               python3
               gh

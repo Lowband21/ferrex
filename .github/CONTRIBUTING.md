@@ -27,6 +27,7 @@ Prerequisites:
 - just (command runner): https://github.com/casey/just
 - Docker + Docker Compose (for DB/Redis and full stack)
 - pre-commit (to run tracked git hooks)
+- Node.js `>=22.12.0` with Corepack, or the Nix dev shell, for documentation work
 
 Recommended tool installs:
 
@@ -81,6 +82,21 @@ For player crate graph or UI/domain extraction changes, also run:
 ./scripts/check-player-crate-boundaries.sh
 cargo test -p ferrex-player-app --test ui_end_to_end
 ```
+
+## Documentation Site
+
+The Starlight documentation app lives under `docs/`. The Nix `.#server` and `.#ferrex-player` dev shells include Node.js 24 and Corepack; Corepack selects the PNPM version pinned in `docs/package.json`.
+
+```bash
+nix develop .#server
+just docs-install
+just docs-check      # astro check
+just docs-build      # static build and internal Starlight link validation
+just docs-dev        # local authoring server
+just docs-preview    # preview docs/dist after a build
+```
+
+Without Nix, install Node.js `>=22.12.0` with Corepack and use the documented `corepack pnpm --dir docs ...` commands in [`docs/README.md`](../docs/README.md). External-link crawling is not part of CI; manually review external URLs when adding or changing them.
 
 ## Database and SQLx
 
@@ -164,10 +180,10 @@ CI builds on Linux/macOS/Windows. Linux/macOS run `fmt`, `audit`, `deny`, `clipp
 Dependabot maintains third‑party dependencies with small, predictable batches.
 
 - Schedule: weekly on Mondays at 04:00 UTC.
-- Scope: Cargo workspace, GitHub Actions, and Dockerfiles under `docker/`.
+- Scope: Cargo workspace, GitHub Actions, the Starlight docs package under `docs/`, and Dockerfiles under `docker/`.
 - Grouping:
   - Cargo: one PR for all patch updates, one for all minor updates (majors are separate).
-  - Actions/Docker: one PR grouping patch + minor updates.
+  - Actions/Docs/Docker: one PR grouping patch + minor updates per ecosystem.
 - Labels: `dependencies`. Reviewer: `@Lowband21`.
 
 Review/merge guidelines:

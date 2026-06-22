@@ -17,6 +17,11 @@ test_output := '--show-output > logs/test/test_' + date + '.log'
 
 diagnostic_filter := 'utils/jq/cargo-diagnostic-filter.jq'
 
+# Documentation package manager through Corepack.
+# Uses the pnpm version pinned by docs/package.json.
+
+docs_pnpm := "corepack pnpm --dir docs"
+
 # Timestamped log file definitions
 
 warn_file := 'logs/warn/warn_' + date + '.log'
@@ -212,6 +217,31 @@ default:
 [no-cd]
 dev: check fmt lint
     @echo "✅ All checks passed!"
+
+# Documentation site
+[no-cd]
+docs-install:
+    {{ docs_pnpm }} install --frozen-lockfile
+
+[no-cd]
+docs-dev *args:
+    {{ docs_pnpm }} run dev {{ args }}
+
+[no-cd]
+docs-check:
+    {{ docs_pnpm }} run check
+
+[no-cd]
+docs-build:
+    {{ docs_pnpm }} run build
+
+[no-cd]
+docs-preview *args:
+    {{ docs_pnpm }} run preview {{ args }}
+
+[no-cd]
+docs-link-check: docs-build
+    @echo "✅ Starlight build completed; internal docs links were validated."
 
 # # Check
 [no-cd]

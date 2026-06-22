@@ -4,20 +4,37 @@ This directory contains the Ferrex documentation app built with [Astro Starlight
 
 ## Local commands
 
-Use Corepack or a locally installed PNPM matching the `packageManager` field in `package.json`.
+Recommended Nix workflow from the repository root:
 
 ```bash
-pnpm --dir docs install --frozen-lockfile
-pnpm --dir docs run check
-pnpm --dir docs run build
+nix develop .#server
+just docs-install
+just docs-check
+just docs-build
+just docs-dev      # local authoring server at http://127.0.0.1:4321/
+just docs-preview  # preview the last static build at http://127.0.0.1:4321/
 ```
 
-Helpful development commands:
+The default `.#ferrex-player` shell exposes the same documentation tooling. Both dev shells include Node.js 24 and Corepack; Corepack uses the PNPM version pinned by the `packageManager` field in `docs/package.json`.
+
+Non-Nix fallback:
 
 ```bash
-pnpm --dir docs run dev
-pnpm --dir docs run preview
+corepack pnpm --dir docs install --frozen-lockfile
+corepack pnpm --dir docs run check
+corepack pnpm --dir docs run build
+corepack pnpm --dir docs run dev
+corepack pnpm --dir docs run preview
 ```
+
+If your Node.js distribution does not include Corepack, install Node.js `>=22.12.0` plus PNPM `>=11.8.0` and run the same commands as `pnpm --dir docs ...`.
+
+## Checks and link validation
+
+- `just docs-check` runs `astro check` for the Starlight/TypeScript content model.
+- `just docs-build` runs `astro build`; the build fails on invalid internal Starlight links and produces static output under `docs/dist/`.
+- `just docs-link-check` is a documented alias for the build-time internal link validation.
+- External-link crawling is not configured in this build-only workflow; verify external URLs manually when adding or changing them.
 
 ## Deployment scope
 
