@@ -186,7 +186,8 @@ impl<T> ScanEventBus for T where T: JobEventPublisher + ScanEventPublisher {}
 use crate::domain::scan::actors::index::IndexingOutcome;
 use crate::domain::scan::actors::metadata::MediaReadyForIndex;
 use crate::domain::scan::{
-    FolderScanSummary, MediaFileDiscovered, ScanReason, analyze::MediaAnalyzed,
+    FolderScanSummary, MediaFileDiscovered, ScanReason,
+    actors::analyze::MediaAnalyzed,
 };
 #[cfg(feature = "compat")]
 pub use ScanEvent as DomainEvent;

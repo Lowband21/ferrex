@@ -5,7 +5,6 @@
 //! follow-up automation using the same runtime that production nodes execute.
 
 use std::{
-    collections::HashMap,
     fmt,
     sync::{
         Arc, Mutex as StdMutex,
@@ -23,29 +22,27 @@ use ferrex_core::domain::scan::actors::{
     LibraryActorConfig, LibraryRootsId, NoopActorObserver,
     analyze::{DefaultMediaAnalyzeActor, MediaAnalyzeActor},
     folder::{FolderScanActor, ScannerFileFilterPolicy},
+    image_fetch::{DefaultImageFetchActor, ImageFetchActor},
+    index::{DefaultIndexerActor, IndexerActor},
+    metadata::MetadataActor,
 };
-use ferrex_core::domain::scan::image_fetch::{
-    DefaultImageFetchActor, ImageFetchActor,
-};
-use ferrex_core::domain::scan::index::{DefaultIndexerActor, IndexerActor};
-use ferrex_core::domain::scan::metadata::MetadataActor;
 use ferrex_core::domain::scan::orchestration::{
     budget::InMemoryBudget,
     config::OrchestratorConfig,
     correlation::CorrelationCache,
     dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
+    enqueuer::PipelineEnqueuer,
     events::{
         JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
         stable_path_key,
     },
-    job::{EnqueueRequest, JobHandle, JobKind, JobPriority},
+    job::{EnqueueRequest, JobHandle, JobKind},
     lease::{DequeueRequest, JobLease},
     queue::QueueService,
     runtime::{
         InProcJobEventBus, LibraryActorHandle, LibraryCommandExecutor,
         OrchestratorRuntime, OrchestratorRuntimeBuilder,
     },
-    scheduler::ReadyCountEntry,
     series::{
         DefaultSeriesResolver, SeriesMetadataProvider, SeriesResolverPort,
     },
@@ -412,7 +409,6 @@ impl ScanOrchestrator {
     }
 
     pub async fn start(self: &Arc<Self>) -> Result<()> {
-        self.prime_ready_jobs().await?;
         self.runtime.start().await?;
         self.start_maintenance_scheduler().await;
         Ok(())
@@ -446,128 +442,13 @@ impl ScanOrchestrator {
     }
 
     pub async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
-        let queue = self.runtime.queue();
-        let events = self.runtime.events();
-
-        let path_key = stable_path_key(&request.payload);
-        let library_id = request.payload.library_id();
-        let idempotency_key = request.dedupe_key().to_string();
-        let priority = request.priority;
-        let correlation_hint = request.correlation_id;
-
-        let handle = queue.enqueue(request).await?;
-
-        let correlation_for_event = if handle.accepted {
-            correlation_hint
-        } else if let Some(existing) = handle.merged_into {
-            self.correlations
-                .fetch(&existing)
-                .await
-                .or(correlation_hint)
-        } else {
-            correlation_hint
-        };
-
-        let payload = if handle.accepted {
-            JobEventPayload::Enqueued {
-                job_id: handle.job_id,
-                kind: handle.kind,
-                priority,
-            }
-        } else if let Some(existing_job_id) = handle.merged_into {
-            JobEventPayload::Merged {
-                existing_job_id,
-                merged_job_id: handle.job_id,
-                kind: handle.kind,
-                priority,
-            }
-        } else {
-            JobEventPayload::Enqueued {
-                job_id: handle.job_id,
-                kind: handle.kind,
-                priority,
-            }
-        };
-
-        let event = JobEvent::from_job(
-            correlation_for_event,
-            library_id,
-            idempotency_key,
-            path_key,
-            payload,
+        let enqueuer = PipelineEnqueuer::new(
+            self.runtime.queue(),
+            self.runtime.events(),
+            self.correlations.clone(),
         );
 
-        if handle.accepted {
-            self.correlations
-                .remember(handle.job_id, event.meta.correlation_id)
-                .await;
-        } else {
-            self.correlations
-                .remember_if_absent(handle.job_id, event.meta.correlation_id)
-                .await;
-        }
-
-        events.publish(event).await.map_err(|err| {
-            MediaError::Internal(format!(
-                "failed to publish enqueue event: {err}"
-            ))
-        })?;
-
-        Ok(handle)
-    }
-
-    #[instrument(skip(self), level = "debug", err)]
-    async fn prime_ready_jobs(&self) -> Result<()> {
-        let queue = self.runtime.queue();
-        let scheduler = self.runtime.scheduler();
-
-        let persistent_counts = queue.ready_counts_grouped().await?;
-        if persistent_counts.is_empty() {
-            debug!("no ready jobs found during scheduler prime");
-            return Ok(());
-        }
-
-        let mut totals: HashMap<(LibraryId, JobPriority), usize> =
-            HashMap::new();
-        let mut ready_total = 0usize;
-
-        for bucket in persistent_counts.iter() {
-            if bucket.ready == 0 {
-                continue;
-            }
-
-            ready_total += bucket.ready;
-            totals
-                .entry((bucket.library_id, bucket.priority))
-                .and_modify(|count| *count += bucket.ready)
-                .or_insert(bucket.ready);
-        }
-
-        if totals.is_empty() {
-            debug!("no ready jobs to apply after filtering zero-count buckets");
-            return Ok(());
-        }
-
-        let bucket_total = totals.len();
-        let ready_entries: Vec<ReadyCountEntry> = totals
-            .into_iter()
-            .map(|((library_id, priority), count)| ReadyCountEntry {
-                library_id,
-                priority,
-                count,
-            })
-            .collect();
-
-        scheduler.record_ready_bulk(ready_entries).await;
-
-        info!(
-            ready_total,
-            bucket_total,
-            persistent_buckets = persistent_counts.len(),
-            "primed scheduler ready counts from persistence"
-        );
-
-        Ok(())
+        enqueuer.enqueue(request).await
     }
 
     pub async fn dequeue(

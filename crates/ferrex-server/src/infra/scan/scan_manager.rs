@@ -1,16 +1,15 @@
-use ferrex_model::{MediaID, SubjectKey};
+use ferrex_model::SubjectKey;
 
 use ferrex_core::{
     api::types::{
         ScanLifecycleStatus as ApiScanLifecycleStatus, ScanRunMode,
-        ScanSnapshotDto, ScanStartDisposition, SeriesBundleResponse,
+        ScanSnapshotDto, ScanStartDisposition,
     },
     application::unit_of_work::AppUnitOfWork,
     domain::scan::{
         actors::{
             FileSystemEvent, FileSystemEventKind, FolderScanOutcome,
-            LibraryRootsId,
-            index::{IndexingChange, IndexingOutcome},
+            LibraryRootsId, index::IndexingOutcome,
         },
         orchestration::{
             JobEvent, LibraryActorCommand, LibraryScanRun,
@@ -18,31 +17,27 @@ use ferrex_core::{
             events::{JobEventPayload, ScanEvent, ScanSeedSummary},
             job::{JobId, JobKind},
             scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
+            series::{SeriesBundleFinalization, SeriesBundleTracker},
         },
     },
-    error::MediaError,
-    player_prelude::MediaIDLike,
     types::{
-        LibraryId, Media, MediaEvent, ScanEventMetadata,
-        ScanPathReasonCategory, ScanPathReasonDetail, ScanProgressEvent,
-        ScanStageLatencySummary, events::ScanSseEventType,
+        LibraryId, MediaEvent, ScanPathReasonCategory, ScanPathReasonDetail,
+        ScanProgressEvent, ScanStageLatencySummary, events::ScanSseEventType,
     },
 };
 
-use crate::infra::{
-    orchestration::ScanOrchestrator,
-    scan::media_event_bus::{MediaEventBus, MediaEventFrame},
-    scan::movie_batch_notifier::MovieBatchFinalizationNotifiers,
-    scan::series_bundle_tracker::{
-        SeriesBundleFinalization, SeriesBundleTracker,
-    },
+pub use super::media_event_bus::MediaEventFrame;
+
+use super::{
+    catalog_event_projection::CatalogEventProjection,
+    media_event_bus::MediaEventBus,
+    movie_batch_notifier::MovieBatchFinalizationNotifiers,
 };
+use crate::infra::orchestration::ScanOrchestrator;
 
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
-
 use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt,
@@ -56,7 +51,7 @@ use tokio::{
     time::interval,
 };
 
-use tracing::{error, info, instrument, warn};
+use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 const EVENT_VERSION: &str = "2";
@@ -157,14 +152,8 @@ pub struct ScanControlPlane {
 
 impl fmt::Debug for ScanControlPlane {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let active = self
-            .inner
-            .active_by_scan_id
-            .try_read()
-            .ok()
-            .map(|guard| guard.len());
-        let history =
-            self.inner.history.try_read().ok().map(|guard| guard.len());
+        let active = self.inner.progress.active_count();
+        let history = self.inner.progress.history_count();
         let receiver_count = self.inner.media_bus.receiver_count();
         let uow_ptr = Arc::as_ptr(&self.inner.unit_of_work);
         let orchestrator_ptr = Arc::as_ptr(&self.inner.orchestrator);
@@ -182,13 +171,9 @@ impl fmt::Debug for ScanControlPlane {
 struct ScanControlPlaneInner {
     unit_of_work: Arc<AppUnitOfWork>,
     orchestrator: Arc<ScanOrchestrator>,
-    active_by_scan_id: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
-    active_by_run_key: RwLock<HashMap<String, Arc<ScanRun>>>,
-    history: RwLock<VecDeque<ScanHistoryEntry>>,
-    final_events: RwLock<HashMap<Uuid, VecDeque<ScanBroadcastFrame>>>,
+    progress: ScanRunProgressTracker,
     media_bus: Arc<MediaEventBus>,
-    aggregator: ScanRunAggregator,
-    movie_batch_notifiers: MovieBatchFinalizationNotifiers,
+    catalog_events: CatalogEventProjection,
 }
 
 impl ScanControlPlane {
@@ -212,24 +197,24 @@ impl ScanControlPlane {
             MEDIA_EVENT_HISTORY_CAPACITY,
             MEDIA_EVENT_BROADCAST_CAPACITY,
         ));
-        let aggregator = ScanRunAggregator::new(
-            Arc::clone(&orchestrator),
-            quiescence,
-            Arc::clone(&media_bus),
+        let catalog_events = CatalogEventProjection::new(
             unit_of_work.clone(),
+            Arc::clone(&media_bus),
+        );
+        let progress = ScanRunProgressTracker::new(
+            Arc::clone(&unit_of_work),
+            Arc::clone(&orchestrator),
+            catalog_events.clone(),
+            quiescence,
         );
 
         Self {
             inner: Arc::new(ScanControlPlaneInner {
                 unit_of_work,
                 orchestrator,
-                active_by_scan_id: RwLock::new(HashMap::new()),
-                active_by_run_key: RwLock::new(HashMap::new()),
-                history: RwLock::new(VecDeque::with_capacity(HISTORY_CAPACITY)),
-                final_events: RwLock::new(HashMap::new()),
+                progress,
                 media_bus,
-                aggregator,
-                movie_batch_notifiers: MovieBatchFinalizationNotifiers::new(),
+                catalog_events,
             }),
         }
     }
@@ -245,7 +230,7 @@ impl ScanControlPlane {
     }
 
     pub fn publish_media_event(&self, event: MediaEvent) {
-        self.inner.media_bus.publish(event);
+        self.inner.catalog_events.publish_event(event);
     }
 
     pub fn media_event_history_since_sequence(
@@ -266,12 +251,7 @@ impl ScanControlPlane {
         &self,
         scan_id: Uuid,
     ) -> Result<broadcast::Receiver<ScanBroadcastFrame>, ScanControlError> {
-        let guard = self.inner.active_by_scan_id.read().await;
-        guard
-            .get(&scan_id)
-            .cloned()
-            .map(|run| run.subscribe())
-            .ok_or(ScanControlError::ScanNotFound)
+        self.inner.progress.subscribe_scan(scan_id).await
     }
 
     #[instrument(skip(self))]
@@ -310,7 +290,11 @@ impl ScanControlPlane {
 
         let durable = get_or_create.run;
         let disposition = get_or_create.disposition;
-        let run = self.inner.register_durable_run(durable.clone()).await;
+        let run = self
+            .inner
+            .progress
+            .register_durable_run(durable.clone())
+            .await;
 
         if disposition == ScanStartDisposition::Created {
             run.begin().await;
@@ -347,30 +331,7 @@ impl ScanControlPlane {
     pub async fn rehydrate_active_runs(
         &self,
     ) -> Result<usize, ScanControlError> {
-        let active_runs = self
-            .inner
-            .unit_of_work
-            .scan_runs
-            .list_active()
-            .await
-            .map_err(|err| ScanControlError::internal(err.to_string()))?;
-
-        let mut restored = 0usize;
-        for durable in active_runs {
-            let already_active = {
-                let guard = self.inner.active_by_scan_id.read().await;
-                guard.contains_key(&durable.scan_id)
-            };
-            if already_active {
-                continue;
-            }
-
-            let run = self.inner.register_durable_run(durable).await;
-            run.seed_rehydrated_progress().await;
-            restored += 1;
-        }
-
-        Ok(restored)
+        self.inner.progress.rehydrate_active_runs().await
     }
 
     pub async fn inject_created_folders(
@@ -470,7 +431,11 @@ impl ScanControlPlane {
         library_id: LibraryId,
         scan_id: &Uuid,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
-        let run = self.inner.lookup_for_library(scan_id, library_id).await?;
+        let run = self
+            .inner
+            .progress
+            .lookup_for_library(scan_id, library_id)
+            .await?;
         let requested_correlation_id = Uuid::now_v7();
         run.pause(requested_correlation_id).await?;
         let snapshot = run.snapshot().await?;
@@ -492,7 +457,11 @@ impl ScanControlPlane {
         library_id: LibraryId,
         scan_id: &Uuid,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
-        let run = self.inner.lookup_for_library(scan_id, library_id).await?;
+        let run = self
+            .inner
+            .progress
+            .lookup_for_library(scan_id, library_id)
+            .await?;
         let requested_correlation_id = Uuid::now_v7();
         run.resume(requested_correlation_id).await?;
         let snapshot = run.snapshot().await?;
@@ -514,7 +483,11 @@ impl ScanControlPlane {
         library_id: LibraryId,
         scan_id: &Uuid,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
-        let run = self.inner.lookup_for_library(scan_id, library_id).await?;
+        let run = self
+            .inner
+            .progress
+            .lookup_for_library(scan_id, library_id)
+            .await?;
         let requested_correlation_id = Uuid::now_v7();
         run.cancel(requested_correlation_id).await?;
         let snapshot = run.snapshot().await?;
@@ -532,6 +505,189 @@ impl ScanControlPlane {
     }
 
     pub async fn active_scans(&self) -> Vec<ScanSnapshot> {
+        self.inner.progress.active_scans().await
+    }
+
+    pub async fn history(&self, limit: usize) -> Vec<ScanHistoryEntry> {
+        self.inner.progress.history(limit).await
+    }
+
+    pub async fn snapshot(&self, scan_id: &Uuid) -> Option<ScanSnapshot> {
+        self.inner.progress.snapshot(scan_id).await
+    }
+
+    pub async fn events(
+        &self,
+        scan_id: &Uuid,
+    ) -> Result<Vec<ScanBroadcastFrame>, ScanControlError> {
+        self.inner.progress.events(scan_id).await
+    }
+}
+
+#[derive(Clone)]
+struct ScanRunProgressTracker {
+    inner: Arc<ScanRunProgressTrackerInner>,
+}
+
+struct ScanRunProgressTrackerInner {
+    unit_of_work: Arc<AppUnitOfWork>,
+    orchestrator: Arc<ScanOrchestrator>,
+    active_by_scan_id: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
+    active_by_run_key: RwLock<HashMap<String, Arc<ScanRun>>>,
+    archive: ScanRunProgressArchive,
+    catalog_events: CatalogEventProjection,
+    aggregator: ScanRunAggregator,
+    movie_batch_notifiers: MovieBatchFinalizationNotifiers,
+}
+
+struct ScanRunProgressArchive {
+    history: RwLock<VecDeque<ScanHistoryEntry>>,
+    final_events: RwLock<HashMap<Uuid, VecDeque<ScanBroadcastFrame>>>,
+}
+
+impl ScanRunProgressArchive {
+    fn new() -> Self {
+        Self {
+            history: RwLock::new(VecDeque::with_capacity(HISTORY_CAPACITY)),
+            final_events: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn history_count(&self) -> Option<usize> {
+        self.history.try_read().ok().map(|guard| guard.len())
+    }
+
+    async fn history(&self, limit: usize) -> Vec<ScanHistoryEntry> {
+        let guard = self.history.read().await;
+        guard.iter().rev().take(limit).cloned().collect()
+    }
+
+    async fn replay_events(
+        &self,
+        scan_id: &Uuid,
+    ) -> Option<Vec<ScanBroadcastFrame>> {
+        let final_events = self.final_events.read().await;
+        final_events
+            .get(scan_id)
+            .map(|events| events.iter().cloned().collect())
+    }
+
+    async fn record_terminal(
+        &self,
+        snapshot: ScanHistoryEntry,
+        final_events: Vec<ScanBroadcastFrame>,
+    ) {
+        let scan_id = snapshot.scan_id;
+        {
+            let mut events = self.final_events.write().await;
+            events.insert(scan_id, final_events.into_iter().collect());
+        }
+
+        let evicted_scan_id = {
+            let mut history = self.history.write().await;
+            let evicted = if history.len() == HISTORY_CAPACITY {
+                history.pop_front().map(|entry| entry.scan_id)
+            } else {
+                None
+            };
+            history.push_back(snapshot);
+            evicted
+        };
+
+        if let Some(evicted_scan_id) = evicted_scan_id {
+            let mut events = self.final_events.write().await;
+            events.remove(&evicted_scan_id);
+        }
+    }
+}
+
+impl ScanRunProgressTracker {
+    fn new(
+        unit_of_work: Arc<AppUnitOfWork>,
+        orchestrator: Arc<ScanOrchestrator>,
+        catalog_events: CatalogEventProjection,
+        quiescence: Duration,
+    ) -> Self {
+        let aggregator = ScanRunAggregator::new(
+            Arc::clone(&orchestrator),
+            quiescence,
+            catalog_events.clone(),
+        );
+
+        Self {
+            inner: Arc::new(ScanRunProgressTrackerInner {
+                unit_of_work,
+                orchestrator,
+                active_by_scan_id: RwLock::new(HashMap::new()),
+                active_by_run_key: RwLock::new(HashMap::new()),
+                archive: ScanRunProgressArchive::new(),
+                catalog_events,
+                aggregator,
+                movie_batch_notifiers: MovieBatchFinalizationNotifiers::new(),
+            }),
+        }
+    }
+
+    fn active_count(&self) -> Option<usize> {
+        self.inner
+            .active_by_scan_id
+            .try_read()
+            .ok()
+            .map(|guard| guard.len())
+    }
+
+    fn history_count(&self) -> Option<usize> {
+        self.inner.archive.history_count()
+    }
+
+    async fn subscribe_scan(
+        &self,
+        scan_id: Uuid,
+    ) -> Result<broadcast::Receiver<ScanBroadcastFrame>, ScanControlError> {
+        let guard = self.inner.active_by_scan_id.read().await;
+        guard
+            .get(&scan_id)
+            .cloned()
+            .map(|run| run.subscribe())
+            .ok_or(ScanControlError::ScanNotFound)
+    }
+
+    async fn register_durable_run(
+        &self,
+        durable: LibraryScanRun,
+    ) -> Arc<ScanRun> {
+        let run = ScanRun::from_durable(Arc::clone(&self.inner), durable);
+        self.inner.register_run(run).await
+    }
+
+    async fn rehydrate_active_runs(&self) -> Result<usize, ScanControlError> {
+        let active_runs = self
+            .inner
+            .unit_of_work
+            .scan_runs
+            .list_active()
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+
+        let mut restored = 0usize;
+        for durable in active_runs {
+            let already_active = {
+                let guard = self.inner.active_by_scan_id.read().await;
+                guard.contains_key(&durable.scan_id)
+            };
+            if already_active {
+                continue;
+            }
+
+            let run = self.register_durable_run(durable).await;
+            run.seed_rehydrated_progress().await;
+            restored += 1;
+        }
+
+        Ok(restored)
+    }
+
+    async fn active_scans(&self) -> Vec<ScanSnapshot> {
         let guard = self.inner.active_by_scan_id.read().await;
         let runs: Vec<_> = guard.values().cloned().collect();
         drop(guard);
@@ -545,12 +701,11 @@ impl ScanControlPlane {
         snapshots
     }
 
-    pub async fn history(&self, limit: usize) -> Vec<ScanHistoryEntry> {
-        let guard = self.inner.history.read().await;
-        guard.iter().rev().take(limit).cloned().collect()
+    async fn history(&self, limit: usize) -> Vec<ScanHistoryEntry> {
+        self.inner.archive.history(limit).await
     }
 
-    pub async fn snapshot(&self, scan_id: &Uuid) -> Option<ScanSnapshot> {
+    async fn snapshot(&self, scan_id: &Uuid) -> Option<ScanSnapshot> {
         let guard = self.inner.active_by_scan_id.read().await;
         let run = guard.get(scan_id).cloned();
         drop(guard);
@@ -561,7 +716,7 @@ impl ScanControlPlane {
         }
     }
 
-    pub async fn events(
+    async fn events(
         &self,
         scan_id: &Uuid,
     ) -> Result<Vec<ScanBroadcastFrame>, ScanControlError> {
@@ -573,23 +728,38 @@ impl ScanControlPlane {
             return Ok(run.event_log().await);
         }
 
-        let final_events = self.inner.final_events.read().await;
-        final_events
-            .get(scan_id)
-            .map(|events| events.iter().cloned().collect())
+        self.inner
+            .archive
+            .replay_events(scan_id)
+            .await
             .ok_or(ScanControlError::ScanNotFound)
+    }
+
+    async fn lookup(
+        &self,
+        scan_id: &Uuid,
+    ) -> Result<Arc<ScanRun>, ScanControlError> {
+        let guard = self.inner.active_by_scan_id.read().await;
+        guard
+            .get(scan_id)
+            .cloned()
+            .ok_or(ScanControlError::ScanNotFound)
+    }
+
+    async fn lookup_for_library(
+        &self,
+        scan_id: &Uuid,
+        library_id: LibraryId,
+    ) -> Result<Arc<ScanRun>, ScanControlError> {
+        let run = self.lookup(scan_id).await?;
+        if run.library_id() != library_id {
+            return Err(ScanControlError::LibraryMismatch);
+        }
+        Ok(run)
     }
 }
 
-impl ScanControlPlaneInner {
-    async fn register_durable_run(
-        self: &Arc<Self>,
-        durable: LibraryScanRun,
-    ) -> Arc<ScanRun> {
-        let run = ScanRun::from_durable(Arc::clone(self), durable);
-        self.register_run(run).await
-    }
-
+impl ScanRunProgressTrackerInner {
     async fn register_run(&self, run: Arc<ScanRun>) -> Arc<ScanRun> {
         let scan_id = run.scan_id();
         let run_key = run.run_key();
@@ -614,7 +784,7 @@ impl ScanControlPlaneInner {
             .on_run_started(
                 run.library_id(),
                 Arc::clone(&self.unit_of_work),
-                Arc::clone(&self.media_bus),
+                self.catalog_events.clone(),
             )
             .await;
 
@@ -630,10 +800,9 @@ impl ScanControlPlaneInner {
         snapshot: ScanHistoryEntry,
         final_events: Vec<ScanBroadcastFrame>,
     ) {
-        {
-            let mut events = self.final_events.write().await;
-            events.insert(scan_id, final_events.into_iter().collect());
-        }
+        self.archive
+            .record_terminal(snapshot.clone(), final_events)
+            .await;
         {
             let mut by_scan_id = self.active_by_scan_id.write().await;
             by_scan_id.remove(&scan_id);
@@ -644,22 +813,6 @@ impl ScanControlPlaneInner {
             .on_run_finished(snapshot.library_id)
             .await;
         self.aggregator.drop(&correlation_id).await;
-
-        let evicted_scan_id = {
-            let mut history = self.history.write().await;
-            let evicted = if history.len() == HISTORY_CAPACITY {
-                history.pop_front().map(|entry| entry.scan_id)
-            } else {
-                None
-            };
-            history.push_back(snapshot.clone());
-            evicted
-        };
-
-        if let Some(evicted_scan_id) = evicted_scan_id {
-            let mut events = self.final_events.write().await;
-            events.remove(&evicted_scan_id);
-        }
 
         // Rebuild precomputed sort positions for the completed library scan
         if snapshot.status == ScanLifecycleStatus::Completed {
@@ -682,29 +835,6 @@ impl ScanControlPlaneInner {
                 );
             }
         }
-    }
-
-    async fn lookup(
-        &self,
-        scan_id: &Uuid,
-    ) -> Result<Arc<ScanRun>, ScanControlError> {
-        let guard = self.active_by_scan_id.read().await;
-        guard
-            .get(scan_id)
-            .cloned()
-            .ok_or(ScanControlError::ScanNotFound)
-    }
-
-    async fn lookup_for_library(
-        &self,
-        scan_id: &Uuid,
-        library_id: LibraryId,
-    ) -> Result<Arc<ScanRun>, ScanControlError> {
-        let run = self.lookup(scan_id).await?;
-        if run.library_id() != library_id {
-            return Err(ScanControlError::LibraryMismatch);
-        }
-        Ok(run)
     }
 }
 
@@ -804,7 +934,7 @@ struct ScanRun {
     correlation_id: Uuid,
     state: Mutex<ScanRunState>,
     tx: broadcast::Sender<ScanBroadcastFrame>,
-    inner: Weak<ScanControlPlaneInner>,
+    inner: Weak<ScanRunProgressTrackerInner>,
     events: Mutex<VecDeque<ScanBroadcastFrame>>,
     start_mode: StartMode,
     log: Mutex<ScanLogWatermark>,
@@ -847,6 +977,14 @@ struct ScanCounterSnapshot {
     retrying_items: u64,
     completed_items: u64,
     reason_details: Vec<ScanPathReasonDetail>,
+}
+
+#[derive(Debug, Clone)]
+struct ScanTerminalArtifacts {
+    snapshot: ScanHistoryEntry,
+    progress: LibraryScanRunProgressUpdate,
+    terminal_at: DateTime<Utc>,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -955,7 +1093,7 @@ impl ScanItemState {
 
 impl ScanRun {
     fn from_durable(
-        inner: Arc<ScanControlPlaneInner>,
+        inner: Arc<ScanRunProgressTrackerInner>,
         durable: LibraryScanRun,
     ) -> Arc<Self> {
         let (tx, _rx) = broadcast::channel(1024);
@@ -1877,7 +2015,11 @@ impl ScanRun {
             None
         };
         self.maybe_log_summary(&event, &payload).await;
-        self.emit_media_event(event, payload, error);
+        if let Some(inner) = self.inner.upgrade() {
+            inner
+                .catalog_events
+                .publish_scan_progress_event(event, payload, error);
+        }
     }
 
     fn progress_pct(completed: u64, dead: u64, total: u64) -> u8 {
@@ -2021,49 +2163,18 @@ impl ScanRun {
     }
 
     async fn finalize_history(&self, terminal: ScanLifecycleStatus) {
-        let (snapshot, progress, terminal_at, last_error) = {
+        let artifacts = {
             let state = self.state.lock().await;
-            let counters = state.counter_snapshot();
-            let completed_items = counters.completed_items;
-            let retrying_items = counters.retrying_items;
-            let failed_items = counters.failed_items;
-            let terminal_at = state.terminal_at.unwrap_or_else(Utc::now);
-            (
-                ScanHistoryEntry {
-                    scan_id: state.scan_id,
-                    library_id: state.library_id,
-                    status: terminal.clone(),
-                    completed_items,
-                    total_items: state.total_items,
-                    validated_items: counters.validated_items,
-                    known_unchanged_items: counters.known_unchanged_items,
-                    skipped_items: counters.skipped_items,
-                    failed_items,
-                    needs_attention_items: counters.needs_attention_items,
-                    retrying_items,
-                    started_at: state.started_at,
-                    terminal_at,
-                    reason_details: counters.reason_details,
-                },
-                LibraryScanRunProgressUpdate {
-                    scan_id: state.scan_id,
-                    status: None,
-                    completed_items,
-                    total_items: state.total_items,
-                    retrying_items,
-                    dead_lettered_items: failed_items,
-                    current_path: state.current_path.clone(),
-                    sequence: state.event_sequence,
-                },
-                terminal_at,
-                state.last_error.clone(),
-            )
+            state.terminal_artifacts(terminal.clone())
         };
         let final_events = self.event_log().await;
 
         if let Some(inner) = self.inner.upgrade() {
-            if let Err(err) =
-                inner.unit_of_work.scan_runs.update_progress(progress).await
+            if let Err(err) = inner
+                .unit_of_work
+                .scan_runs
+                .update_progress(artifacts.progress)
+                .await
             {
                 warn!(
                     scan = %self.scan_id,
@@ -2080,8 +2191,8 @@ impl ScanRun {
                 .mark_terminal(
                     self.scan_id,
                     terminal.clone().into(),
-                    terminal_at,
-                    last_error,
+                    artifacts.terminal_at,
+                    artifacts.last_error,
                 )
                 .await
             {
@@ -2099,62 +2210,13 @@ impl ScanRun {
                     self.scan_id,
                     self.run_key(),
                     self.correlation_id,
-                    snapshot,
+                    artifacts.snapshot,
                     final_events,
                 )
                 .await;
         }
 
         warn!(scan = %self.scan_id, status = ?terminal, "finalized scan run");
-    }
-
-    fn emit_media_event(
-        &self,
-        event: ScanEventKind,
-        payload: ScanProgressEvent,
-        error: Option<String>,
-    ) {
-        if let Some(inner) = self.inner.upgrade() {
-            let message = match event {
-                ScanEventKind::Started => MediaEvent::ScanStarted {
-                    scan_id: payload.scan_id,
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-                ScanEventKind::Progress => MediaEvent::ScanProgress {
-                    scan_id: payload.scan_id,
-                    progress: payload.clone(),
-                },
-                ScanEventKind::Quiescing => MediaEvent::ScanProgress {
-                    scan_id: payload.scan_id,
-                    progress: payload.clone(),
-                },
-                ScanEventKind::Completed => MediaEvent::ScanCompleted {
-                    scan_id: payload.scan_id,
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-                ScanEventKind::Failed => MediaEvent::ScanFailed {
-                    scan_id: payload.scan_id,
-                    error: error.unwrap_or_else(|| "scan_failed".to_string()),
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-            };
-            inner.media_bus.publish(message);
-        }
     }
 }
 
@@ -2192,6 +2254,48 @@ impl ScanRunState {
                     | ScanLifecycleStatus::Failed
                     | ScanLifecycleStatus::Canceled
             )
+    }
+
+    fn terminal_artifacts(
+        &self,
+        terminal: ScanLifecycleStatus,
+    ) -> ScanTerminalArtifacts {
+        let counters = self.counter_snapshot();
+        let completed_items = counters.completed_items;
+        let retrying_items = counters.retrying_items;
+        let failed_items = counters.failed_items;
+        let terminal_at = self.terminal_at.unwrap_or_else(Utc::now);
+
+        ScanTerminalArtifacts {
+            snapshot: ScanHistoryEntry {
+                scan_id: self.scan_id,
+                library_id: self.library_id,
+                status: terminal,
+                completed_items,
+                total_items: self.total_items,
+                validated_items: counters.validated_items,
+                known_unchanged_items: counters.known_unchanged_items,
+                skipped_items: counters.skipped_items,
+                failed_items,
+                needs_attention_items: counters.needs_attention_items,
+                retrying_items,
+                started_at: self.started_at,
+                terminal_at,
+                reason_details: counters.reason_details,
+            },
+            progress: LibraryScanRunProgressUpdate {
+                scan_id: self.scan_id,
+                status: None,
+                completed_items,
+                total_items: self.total_items,
+                retrying_items,
+                dead_lettered_items: failed_items,
+                current_path: self.current_path.clone(),
+                sequence: self.event_sequence,
+            },
+            terminal_at,
+            last_error: self.last_error.clone(),
+        }
     }
 
     fn counter_snapshot(&self) -> ScanCounterSnapshot {
@@ -3307,6 +3411,159 @@ mod tests {
         );
         assert!(second.is_none());
     }
+
+    #[test]
+    fn terminal_artifacts_keep_final_progress_non_terminal() {
+        let mut state = test_state();
+        let now = Utc::now();
+        state.event_sequence = 7;
+        state.current_path = Some("/library/attention".to_string());
+        state.terminal_at = Some(now);
+        state.last_error = Some("scan_failed".to_string());
+
+        state.update_item_status(
+            "validated-job",
+            Some(JobId::new()),
+            ScanItemStatus::Completed,
+            now,
+            SubjectKey::path("/library/validated".to_string()).ok(),
+            None,
+        );
+        state.update_item_status(
+            "unchanged-job",
+            Some(JobId::new()),
+            ScanItemStatus::KnownUnchanged,
+            now,
+            SubjectKey::path("/library/unchanged".to_string()).ok(),
+            None,
+        );
+        state.update_item_status(
+            "attention-job",
+            Some(JobId::new()),
+            ScanItemStatus::DeadLettered,
+            now,
+            SubjectKey::path("/library/attention".to_string()).ok(),
+            Some("permission denied".to_string()),
+        );
+
+        let artifacts = state.terminal_artifacts(ScanLifecycleStatus::Failed);
+
+        assert_eq!(artifacts.progress.status, None);
+        assert_eq!(artifacts.progress.completed_items, 2);
+        assert_eq!(artifacts.progress.total_items, 3);
+        assert_eq!(artifacts.progress.dead_lettered_items, 1);
+        assert_eq!(artifacts.progress.sequence, 7);
+        assert_eq!(artifacts.terminal_at, now);
+        assert_eq!(artifacts.last_error.as_deref(), Some("scan_failed"));
+
+        assert_eq!(artifacts.snapshot.status, ScanLifecycleStatus::Failed);
+        assert_eq!(artifacts.snapshot.completed_items, 2);
+        assert_eq!(artifacts.snapshot.failed_items, 1);
+        assert_eq!(artifacts.snapshot.needs_attention_items, 1);
+        assert_eq!(artifacts.snapshot.terminal_at, now);
+        assert!(
+            artifacts
+                .snapshot
+                .reason_details
+                .iter()
+                .any(|detail| detail.reason_code == "permission_denied")
+        );
+    }
+
+    fn history_entry(
+        scan_id: Uuid,
+        library_id: LibraryId,
+        completed_items: u64,
+    ) -> ScanHistoryEntry {
+        ScanHistoryEntry {
+            scan_id,
+            library_id,
+            status: ScanLifecycleStatus::Completed,
+            completed_items,
+            total_items: completed_items,
+            validated_items: completed_items,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
+            retrying_items: 0,
+            started_at: Utc::now(),
+            terminal_at: Utc::now(),
+            reason_details: Vec::new(),
+        }
+    }
+
+    fn replay_frame(
+        scan_id: Uuid,
+        library_id: LibraryId,
+        sequence: u64,
+    ) -> ScanBroadcastFrame {
+        let mut state = test_state();
+        state.scan_id = scan_id;
+        state.library_id = library_id;
+        state.status = ScanLifecycleStatus::Completed;
+        state.phase = ScanPhase::Completed;
+        state.event_sequence = sequence;
+        state.idempotency_prefix = format!("scan:{}:", scan_id);
+        ScanBroadcastFrame {
+            event: ScanEventKind::Completed,
+            payload: state.build_current_payload(),
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_archive_replays_terminal_frames_and_evicts() {
+        let archive = ScanRunProgressArchive::new();
+        let library_id = LibraryId::new();
+        let first_scan_id = Uuid::now_v7();
+
+        archive
+            .record_terminal(
+                history_entry(first_scan_id, library_id, 1),
+                vec![replay_frame(first_scan_id, library_id, 1)],
+            )
+            .await;
+
+        let replay = archive
+            .replay_events(&first_scan_id)
+            .await
+            .expect("terminal frames should be replayable");
+        assert_eq!(replay.len(), 1);
+        assert!(matches!(replay[0].event, ScanEventKind::Completed));
+        assert_eq!(replay[0].payload.sequence, 1);
+
+        for sequence in 2..=HISTORY_CAPACITY as u64 {
+            let scan_id = Uuid::now_v7();
+            archive
+                .record_terminal(
+                    history_entry(scan_id, library_id, sequence),
+                    vec![replay_frame(scan_id, library_id, sequence)],
+                )
+                .await;
+        }
+        assert!(archive.replay_events(&first_scan_id).await.is_some());
+
+        let evicting_scan_id = Uuid::now_v7();
+        archive
+            .record_terminal(
+                history_entry(
+                    evicting_scan_id,
+                    library_id,
+                    HISTORY_CAPACITY as u64 + 1,
+                ),
+                vec![replay_frame(
+                    evicting_scan_id,
+                    library_id,
+                    HISTORY_CAPACITY as u64 + 1,
+                )],
+            )
+            .await;
+
+        assert!(archive.replay_events(&first_scan_id).await.is_none());
+        let latest = archive.history(1).await;
+        assert_eq!(latest[0].scan_id, evicting_scan_id);
+        assert_eq!(latest[0].completed_items, HISTORY_CAPACITY as u64 + 1);
+    }
 }
 
 #[derive(Clone)]
@@ -3319,9 +3576,7 @@ struct ScanRunAggregatorInner {
     runs: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     quiescence_chrono: ChronoDuration,
     stall_timeout: ChronoDuration,
-    media_bus: Arc<MediaEventBus>,
-    unit_of_work: Arc<AppUnitOfWork>,
-    seen_media: Mutex<HashSet<Uuid>>,
+    catalog_events: CatalogEventProjection,
     series_bundles: Mutex<HashMap<LibraryId, SeriesBundleTrackerEntry>>,
 }
 
@@ -3350,8 +3605,7 @@ impl ScanRunAggregator {
     fn new(
         orchestrator: Arc<ScanOrchestrator>,
         quiescence: Duration,
-        media_bus: Arc<MediaEventBus>,
-        unit_of_work: Arc<AppUnitOfWork>,
+        catalog_events: CatalogEventProjection,
     ) -> Self {
         let chrono_window = ChronoDuration::from_std(quiescence)
             .unwrap_or_else(|_| ChronoDuration::seconds(3));
@@ -3365,9 +3619,7 @@ impl ScanRunAggregator {
             runs: RwLock::new(HashMap::new()),
             quiescence_chrono: chrono_window,
             stall_timeout: stall_window,
-            media_bus,
-            unit_of_work,
-            seen_media: Mutex::new(HashSet::new()),
+            catalog_events,
             series_bundles: Mutex::new(HashMap::new()),
         });
 
@@ -3654,7 +3906,10 @@ impl ScanRunAggregatorInner {
             }
             ScanEvent::Indexed(outcome) => {
                 let outcome = *outcome;
-                let result = self.handle_indexed_outcome(outcome.clone()).await;
+                let result = self
+                    .catalog_events
+                    .publish_indexed_outcome(outcome.clone())
+                    .await;
                 let ok = result.is_ok();
 
                 // Attribute index outcome to any active runs for this library
@@ -3761,23 +4016,17 @@ impl ScanRunAggregatorInner {
         };
 
         for finalization in candidates {
-            if !self
-                .confirm_series_bundle_ready(
+            let receivers = self.catalog_events.receiver_count();
+            let Some(frame) = self
+                .catalog_events
+                .publish_series_bundle_finalized(
                     finalization.library_id,
                     finalization.series_id,
                 )
                 .await
-            {
+            else {
                 continue;
-            }
-
-            let event = MediaEvent::SeriesBundleFinalized {
-                library_id: finalization.library_id,
-                series_id: finalization.series_id,
             };
-
-            let receivers = self.media_bus.receiver_count();
-            let frame = self.media_bus.publish(event);
 
             let mut guard = self.series_bundles.lock().await;
             if let Some(entry) = guard.get_mut(&library_id) {
@@ -3792,224 +4041,6 @@ impl ScanRunAggregatorInner {
                 sequence = frame.sequence,
                 "published series bundle finalization"
             );
-        }
-    }
-
-    async fn confirm_series_bundle_ready(
-        &self,
-        library_id: LibraryId,
-        series_id: ferrex_core::types::SeriesID,
-    ) -> bool {
-        let uow = &self.unit_of_work;
-
-        let (series, seasons, episodes) = tokio::join!(
-            uow.media_refs.get_series_reference(&series_id),
-            uow.media_refs.get_series_seasons(&series_id),
-            uow.media_refs.get_series_episodes(&series_id),
-        );
-
-        let mut series = match series {
-            Ok(series) if series.library_id == library_id => series,
-            Ok(_) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    "series bundle finalization library mismatch"
-                );
-                return false;
-            }
-            Err(err) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = %err,
-                    "series bundle finalization failed to hydrate series"
-                );
-                return false;
-            }
-        };
-
-        let seasons = match seasons {
-            Ok(seasons) => seasons,
-            Err(err) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = %err,
-                    "series bundle finalization failed to hydrate seasons"
-                );
-                return false;
-            }
-        };
-
-        let episodes = match episodes {
-            Ok(episodes) => episodes,
-            Err(err) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = %err,
-                    "series bundle finalization failed to hydrate episodes"
-                );
-                return false;
-            }
-        };
-
-        // Ensure the server-side versioning record is up to date at the point
-        // we consider a series bundle "finalized".
-        //
-        // This keeps the version monotonic only when the serialized bundle
-        // payload changes, which is what the player-side cache invalidation
-        // relies on.
-        series.details.available_seasons = Some(seasons.len() as u16);
-        series.details.available_episodes = Some(episodes.len() as u16);
-
-        let response = SeriesBundleResponse {
-            library_id,
-            series_id,
-            series,
-            seasons,
-            episodes,
-        };
-
-        let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&response) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = ?err,
-                    "series bundle finalization failed to serialize bundle response"
-                );
-                return false;
-            }
-        };
-
-        let digest = sha2::Sha256::digest(bytes.as_slice());
-        let hash = u64::from_be_bytes(
-            digest[..8]
-                .try_into()
-                .expect("sha256 digest must be at least 8 bytes"),
-        );
-
-        match uow
-            .media_refs
-            .upsert_series_bundle_hash(&library_id, &series_id, hash)
-            .await
-        {
-            Ok(()) => true,
-            Err(err) => {
-                error!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = %err,
-                    "failed to upsert series bundle hash during finalization"
-                );
-                false
-            }
-        }
-    }
-
-    async fn handle_indexed_outcome(
-        &self,
-        outcome: IndexingOutcome,
-    ) -> Result<(), String> {
-        let mut media = outcome.media.clone();
-
-        if media.is_none() {
-            media = self.load_media(outcome.media_id).await;
-        }
-
-        let media = match media {
-            Some(media) => media,
-            None => {
-                return Err(format!(
-                    "missing media reference for library {} path {}",
-                    outcome.library_id, outcome.path_norm
-                ));
-            }
-        };
-
-        let mut seen = self.seen_media.lock().await;
-        let first_seen = seen.insert(outcome.media_id.to_uuid());
-        drop(seen);
-
-        let change = match outcome.change {
-            IndexingChange::Created if first_seen => IndexingChange::Created,
-            _ => IndexingChange::Updated,
-        };
-
-        let event = match (media, change) {
-            (Media::Movie(movie), IndexingChange::Created) => {
-                MediaEvent::MovieAdded { movie: *movie }
-            }
-            (Media::Movie(movie), IndexingChange::Updated) => {
-                MediaEvent::MovieUpdated { movie: *movie }
-            }
-            (Media::Series(series), IndexingChange::Created) => {
-                MediaEvent::SeriesAdded { series: *series }
-            }
-            (Media::Series(series), IndexingChange::Updated) => {
-                MediaEvent::SeriesUpdated { series: *series }
-            }
-            (_, _) => return Ok(()),
-        };
-
-        let _ = self.media_bus.publish(event);
-
-        Ok(())
-    }
-
-    async fn load_media(&self, mid: MediaID) -> Option<Media> {
-        let media_refs = &self.unit_of_work.media_refs;
-
-        match mid {
-            MediaID::Movie(movie_id) => {
-                match media_refs.get_movie_reference(&movie_id).await {
-                    Ok(movie) => Some(Media::Movie(Box::new(movie))),
-                    Err(MediaError::NotFound(_)) => None,
-                    Err(err) => {
-                        warn!("failed to hydrate movie reference {mid}: {err}");
-                        None
-                    }
-                }
-            }
-            MediaID::Series(series_id) => {
-                match media_refs.get_series_reference(&series_id).await {
-                    Ok(series) => Some(Media::Series(Box::new(series))),
-                    Err(MediaError::NotFound(_)) => None,
-                    Err(err) => {
-                        warn!(
-                            "failed to hydrate series reference {mid}: {err}"
-                        );
-                        None
-                    }
-                }
-            }
-            MediaID::Season(season_id) => {
-                match media_refs.get_season_reference(&season_id).await {
-                    Ok(season) => Some(Media::Season(Box::new(season))),
-                    Err(MediaError::NotFound(_)) => None,
-                    Err(err) => {
-                        warn!(
-                            "failed to hydrate season reference {mid}: {err}"
-                        );
-                        None
-                    }
-                }
-            }
-            MediaID::Episode(episode_id) => {
-                match media_refs.get_episode_reference(&episode_id).await {
-                    Ok(episode) => Some(Media::Episode(Box::new(episode))),
-                    Err(MediaError::NotFound(_)) => None,
-                    Err(err) => {
-                        warn!(
-                            "failed to hydrate episode reference {mid}: {err}"
-                        );
-                        None
-                    }
-                }
-            }
         }
     }
 

@@ -326,6 +326,52 @@ mod tests {
         assert_eq!(after.status, SeriesScanStatus::Resolved);
         assert!(after.is_resolved());
     }
+
+    #[tokio::test]
+    async fn mark_discovered_does_not_demote_resolved_state() {
+        let repo = InMemorySeriesScanStateRepository::default();
+        let library_id = lib(4);
+        let root = series_root("/demo/Shows/Rediscovered");
+
+        let series_id = SeriesID(Uuid::from_u128(5));
+        repo.mark_resolved(
+            library_id,
+            root.clone(),
+            SeriesRef {
+                id: series_id,
+                slug: Some("rediscovered".into()),
+                title: Some("Rediscovered".into()),
+            },
+        )
+        .await
+        .expect("mark resolved");
+
+        let after = repo
+            .mark_discovered(
+                library_id,
+                root.clone(),
+                Some(SeriesHint {
+                    title: "Rediscovered".into(),
+                    slug: Some("rediscovered".into()),
+                    year: Some(2024),
+                    region: None,
+                }),
+            )
+            .await
+            .expect("mark discovered");
+
+        assert_eq!(after.series_id, Some(series_id));
+        assert_eq!(after.status, SeriesScanStatus::Resolved);
+        assert!(after.is_resolved());
+        assert_eq!(
+            repo.get(library_id, &root)
+                .await
+                .expect("state lookup")
+                .expect("state exists")
+                .status,
+            SeriesScanStatus::Resolved
+        );
+    }
 }
 
 #[cfg(feature = "database")]

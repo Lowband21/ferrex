@@ -16,11 +16,12 @@ use crate::domain::scan::orchestration::context::{
     SeasonFolderScanContext, SeriesFolderScanContext, SeriesRootPath,
 };
 use crate::domain::scan::orchestration::job::{
-    EnqueueRequest, FolderScanJob, JobPayload, JobPriority, ScanReason,
+    EnqueueRequest, JobPriority, ScanReason,
 };
 use crate::domain::scan::orchestration::scan_cursor::{
-    ScanCursorRepository, normalize_path,
+    ScanCursor, ScanCursorRepository, normalize_path,
 };
+use crate::domain::scan::orchestration::work_planning::folder_scan_enqueue_request;
 use crate::error::{MediaError, Result};
 use crate::types::{ids::LibraryId, library::LibraryType};
 
@@ -75,6 +76,31 @@ impl MaintenancePlanningLimits {
             max_root_entries_per_library: max_root_entries_per_library.max(1),
         }
     }
+}
+
+/// Minimal cursor fields needed by the maintenance planner.
+#[derive(Clone, Debug)]
+pub struct MaintenanceCursorSummary {
+    pub folder_path_norm: String,
+    pub last_scan_at: DateTime<Utc>,
+}
+
+impl From<&ScanCursor> for MaintenanceCursorSummary {
+    fn from(cursor: &ScanCursor) -> Self {
+        Self {
+            folder_path_norm: cursor.folder_path_norm.clone(),
+            last_scan_at: cursor.last_scan_at,
+        }
+    }
+}
+
+/// Explicit inputs for one bounded maintenance planning pass.
+#[derive(Debug)]
+pub struct MaintenanceSweepPlanningInput<'a> {
+    pub library: &'a MaintenanceLibrary,
+    pub cursor_summaries: &'a [MaintenanceCursorSummary],
+    pub limits: MaintenancePlanningLimits,
+    pub now: DateTime<Utc>,
 }
 
 /// Bounded work selected for one library at one scheduler tick.
@@ -137,14 +163,33 @@ pub async fn plan_maintenance_sweep<C>(
 where
     C: ScanCursorRepository + ?Sized,
 {
-    let due = library_due_for_maintenance(library, now);
-    let mut plan = MaintenancePlan::empty(library.id, due);
+    let all_cursors = cursors.list_by_library(library.id).await?;
+    let cursor_summaries: Vec<MaintenanceCursorSummary> = all_cursors
+        .iter()
+        .map(MaintenanceCursorSummary::from)
+        .collect();
+
+    plan_maintenance_sweep_from_summaries(MaintenanceSweepPlanningInput {
+        library,
+        cursor_summaries: &cursor_summaries,
+        limits,
+        now,
+    })
+    .await
+}
+
+/// Build bounded `MaintenanceSweep` enqueue requests from explicit cursor summaries.
+pub async fn plan_maintenance_sweep_from_summaries(
+    input: MaintenanceSweepPlanningInput<'_>,
+) -> Result<MaintenancePlan> {
+    let due = library_due_for_maintenance(input.library, input.now);
+    let mut plan = MaintenancePlan::empty(input.library.id, due);
     if !due {
         return Ok(plan);
     }
 
-    let all_cursors = cursors.list_by_library(library.id).await?;
-    let known_cursor_paths: HashSet<String> = all_cursors
+    let known_cursor_paths: HashSet<String> = input
+        .cursor_summaries
         .iter()
         .map(|cursor| cursor.folder_path_norm.clone())
         .collect();
@@ -152,22 +197,22 @@ where
     let mut planned_paths = HashSet::new();
 
     let root_discovery = discover_new_root_folders(
-        library,
+        input.library,
         &known_cursor_paths,
-        limits.max_root_entries_per_library,
+        input.limits.max_root_entries_per_library,
     )
     .await;
     plan.skipped_root_entries += root_discovery.skipped_entries;
     plan.errors.extend(root_discovery.errors);
 
     for folder_path_norm in root_discovery.folders {
-        if plan.requests.len() >= limits.max_jobs_per_library {
+        if plan.requests.len() >= input.limits.max_jobs_per_library {
             break;
         }
         if !planned_paths.insert(folder_path_norm.clone()) {
             continue;
         }
-        match maintenance_request(library, folder_path_norm, now) {
+        match maintenance_request(input.library, folder_path_norm, input.now) {
             Ok(request) => {
                 plan.new_root_folder_count += 1;
                 plan.requests.push(request);
@@ -176,23 +221,28 @@ where
         }
     }
 
-    if plan.requests.len() < limits.max_jobs_per_library {
-        let older_than = now - library.scan_interval();
-        let mut stale = cursors.list_stale(library.id, older_than).await?;
-        stale.sort_by_key(|cursor| cursor.last_scan_at);
-        plan.stale_cursor_count = stale.len();
+    let older_than = input.now - input.library.scan_interval();
+    let mut stale: Vec<MaintenanceCursorSummary> = input
+        .cursor_summaries
+        .iter()
+        .filter(|cursor| cursor.last_scan_at < older_than)
+        .cloned()
+        .collect();
+    stale.sort_by_key(|cursor| cursor.last_scan_at);
+    plan.stale_cursor_count = stale.len();
 
+    if plan.requests.len() < input.limits.max_jobs_per_library {
         for cursor in stale {
-            if plan.requests.len() >= limits.max_jobs_per_library {
+            if plan.requests.len() >= input.limits.max_jobs_per_library {
                 break;
             }
             if !planned_paths.insert(cursor.folder_path_norm.clone()) {
                 continue;
             }
             match maintenance_request(
-                library,
+                input.library,
                 cursor.folder_path_norm.clone(),
-                now,
+                input.now,
             ) {
                 Ok(request) => plan.requests.push(request),
                 Err(err) => plan.errors.push(format!(
@@ -201,11 +251,6 @@ where
                 )),
             }
         }
-    } else {
-        plan.stale_cursor_count = cursors
-            .list_stale(library.id, now - library.scan_interval())
-            .await?
-            .len();
     }
 
     Ok(plan)
@@ -217,15 +262,12 @@ fn maintenance_request(
     now: DateTime<Utc>,
 ) -> Result<EnqueueRequest> {
     let context = build_maintenance_context(library, &folder_path_norm)?;
-    let job = FolderScanJob {
+    Ok(folder_scan_enqueue_request(
         context,
-        scan_reason: ScanReason::MaintenanceSweep,
-        enqueue_time: now,
-        device_id: None,
-    };
-    Ok(EnqueueRequest::new(
         JobPriority::P2,
-        JobPayload::FolderScan(job),
+        ScanReason::MaintenanceSweep,
+        None,
+        now,
     ))
 }
 
@@ -444,7 +486,7 @@ async fn discover_new_root_folders(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::scan::orchestration::scan_cursor::ScanCursor;
+    use crate::domain::scan::orchestration::job::JobPayload;
     use async_trait::async_trait;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -582,6 +624,78 @@ mod tests {
             panic!("expected folder scan")
         };
         assert_eq!(job.scan_reason, ScanReason::MaintenanceSweep);
+        assert!(job.context.folder_path_norm().ends_with("New Movie"));
+    }
+
+    #[tokio::test]
+    async fn plan_ignores_root_media_and_manifest_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        std::fs::write(root.join("loose-root-video.mkv"), b"fixture")
+            .expect("root media file");
+        std::fs::write(root.join("manifest.json"), b"{}")
+            .expect("manifest file");
+        let library = test_library(root, None, false);
+        let repo = FakeCursorRepository::default();
+
+        let plan = plan_maintenance_sweep(
+            &library,
+            &repo,
+            MaintenancePlanningLimits::new(16, 16),
+            Utc::now(),
+        )
+        .await
+        .expect("plan");
+
+        assert!(plan.due);
+        assert!(plan.requests.is_empty());
+        assert_eq!(plan.new_root_folder_count, 0);
+        assert_eq!(plan.skipped_root_entries, 1);
+    }
+
+    #[tokio::test]
+    async fn plan_prioritizes_new_root_folder_before_stale_cursor_when_limited()
+    {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        let new_dir = root.join("New Movie");
+        let stale_dir = root.join("Stale Movie");
+        std::fs::create_dir_all(&new_dir).expect("new dir");
+        std::fs::create_dir_all(&stale_dir).expect("stale dir");
+        let now = Utc::now();
+        let library =
+            test_library(root.clone(), Some(now - Duration::minutes(61)), true);
+        let repo = FakeCursorRepository::default();
+        let stale_path_norm = normalize_path(&stale_dir).expect("normalize");
+        repo.insert(ScanCursor {
+            id: crate::domain::scan::orchestration::scan_cursor::ScanCursorId::new(
+                library.id,
+                &vec![PathBuf::from(&stale_path_norm)],
+            ),
+            folder_path_norm: stale_path_norm,
+            listing_hash: "hash".into(),
+            entry_count: 0,
+            last_scan_at: now - Duration::minutes(90),
+            last_modified_at: None,
+            device_id: None,
+        })
+        .await;
+
+        let plan = plan_maintenance_sweep(
+            &library,
+            &repo,
+            MaintenancePlanningLimits::new(1, 16),
+            now,
+        )
+        .await
+        .expect("plan");
+
+        assert_eq!(plan.requests.len(), 1);
+        assert_eq!(plan.new_root_folder_count, 1);
+        assert_eq!(plan.stale_cursor_count, 1);
+        let JobPayload::FolderScan(job) = &plan.requests[0].payload else {
+            panic!("expected folder scan")
+        };
         assert!(job.context.folder_path_norm().ends_with("New Movie"));
     }
 

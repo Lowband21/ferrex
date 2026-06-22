@@ -578,7 +578,7 @@ fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
 }
 
 fn media_frame_to_sse(
-    frame: crate::infra::scan::media_event_bus::MediaEventFrame,
+    frame: crate::infra::scan::scan_manager::MediaEventFrame,
 ) -> Option<Event> {
     let name = frame.event.sse_event_type().event_name();
 

@@ -1,11 +1,9 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use ferrex_core::{
-    api::types::MovieReferenceBatchResponse,
     application::unit_of_work::AppUnitOfWork,
-    types::{LibraryId, MediaEvent, MovieBatchId},
+    types::{LibraryId, MovieBatchId},
 };
-use sha2::Digest;
 use tokio::{
     sync::{Mutex, watch},
     task::JoinHandle,
@@ -13,7 +11,7 @@ use tokio::{
 };
 use tracing::{info, warn};
 
-use super::media_event_bus::MediaEventBus;
+use super::catalog_event_projection::CatalogEventProjection;
 
 const MOVIE_BATCH_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -24,7 +22,7 @@ struct LibraryNotifier {
     task: JoinHandle<()>,
 }
 
-/// Tracks active scans per library and emits `MediaEvent::MovieReferenceBatchFinalized`
+/// Tracks active scans per library and emits `MediaEvent::MovieBatchFinalized`
 /// for newly-finalized movie reference batches.
 ///
 /// This is intentionally polling-based (via `list_finalized_movie_reference_batches`)
@@ -45,7 +43,7 @@ impl MovieBatchFinalizationNotifiers {
         &self,
         library_id: LibraryId,
         unit_of_work: Arc<AppUnitOfWork>,
-        media_bus: Arc<MediaEventBus>,
+        catalog_events: CatalogEventProjection,
     ) {
         let mut guard = self.libraries.lock().await;
         if let Some(notifier) = guard.get_mut(&library_id) {
@@ -59,7 +57,7 @@ impl MovieBatchFinalizationNotifiers {
         let task = tokio::spawn(movie_batch_notifier_loop(
             library_id,
             unit_of_work,
-            media_bus,
+            catalog_events,
             stop_rx,
             initial_last_finalized,
         ));
@@ -114,7 +112,7 @@ async fn fetch_last_finalized_batch_id(
 async fn movie_batch_notifier_loop(
     library_id: LibraryId,
     unit_of_work: Arc<AppUnitOfWork>,
-    media_bus: Arc<MediaEventBus>,
+    catalog_events: CatalogEventProjection,
     mut stop_rx: watch::Receiver<bool>,
     mut last_notified: Option<MovieBatchId>,
 ) {
@@ -157,23 +155,20 @@ async fn movie_batch_notifier_loop(
                 continue;
             }
 
-            // Keep the server-side hash/version record in sync as batches are
-            // finalized by the scan pipeline (not only when a client downloads).
-            if let Err(err) =
-                upsert_movie_batch_hash(&unit_of_work, &library_id, batch_id)
-                    .await
+            let receivers = catalog_events.receiver_count();
+            let frame = match catalog_events
+                .publish_movie_batch_finalized(library_id, batch_id)
+                .await
             {
-                warn!(
-                    "movie batch versioning upsert failed (library {}, batch {}): {}",
-                    library_id, batch_id, err
-                );
-            }
-
-            let receivers = media_bus.receiver_count();
-            let frame = media_bus.publish(MediaEvent::MovieBatchFinalized {
-                library_id,
-                batch_id,
-            });
+                Ok(frame) => frame,
+                Err(err) => {
+                    warn!(
+                        "movie batch finalization projection failed (library {}, batch {}): {}",
+                        library_id, batch_id, err
+                    );
+                    break;
+                }
+            };
             info!(
                 library = %library_id,
                 batch_id = %batch_id,
@@ -185,41 +180,4 @@ async fn movie_batch_notifier_loop(
             last_notified = Some(batch_id);
         }
     }
-}
-
-async fn upsert_movie_batch_hash(
-    unit_of_work: &AppUnitOfWork,
-    library_id: &LibraryId,
-    batch_id: MovieBatchId,
-) -> anyhow::Result<()> {
-    let movies = unit_of_work
-        .media_refs
-        .get_movie_references_by_batch(library_id, batch_id)
-        .await?;
-
-    let response = MovieReferenceBatchResponse {
-        library_id: *library_id,
-        batch_id,
-        movies,
-    };
-
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)?;
-    let digest = sha2::Sha256::digest(bytes.as_slice());
-    let hash = u64::from_be_bytes(
-        digest[..8]
-            .try_into()
-            .expect("sha256 digest must be at least 8 bytes"),
-    );
-
-    unit_of_work
-        .media_refs
-        .upsert_movie_batch_hash(
-            library_id,
-            &batch_id,
-            hash,
-            response.movies.len() as u32,
-        )
-        .await?;
-
-    Ok(())
 }
