@@ -9,10 +9,13 @@
 pub mod archive;
 /// On-disk cache infrastructure.
 pub mod cache;
+/// Intelligence provider integrations.
+pub mod intelligence;
 /// Media metadata, image, and provider integrations.
 pub mod media;
 
 #[cfg(feature = "rkyv")]
 pub use archive::*;
 pub use cache::*;
+pub use intelligence::*;
 pub use media::*;

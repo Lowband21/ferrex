@@ -115,6 +115,7 @@ database = ["dep:sqlx", "dep:redis", "dep:ipnetwork", "dep:image", "dep:notify",
 compat = []
 demo = []
 rkyv = ["ferrex-model/rkyv", "ferrex-contracts/rkyv"]
+test-utils = []
 
 # Bundles the queue, watcher, and scan orchestrator runtime. Keeping this behind its own flag lets
 # us eventually build a lean `ffi` profile without pulling in SQLx or notify.
