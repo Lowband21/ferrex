@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO intelligence_artifacts (\n                        id, artifact_kind, scope, status, library_id, user_id,\n                        media_id, media_type, run_id, supersedes_artifact_id,\n                        title, summary, excerpt, content, metadata,\n                        source_system, source_revision, source_updated_at, content_hash\n                    )\n                    VALUES ($1, $2::varchar, $3::varchar, 'active', $4, $5, $6, ($7::text)::media_type,\n                            $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb,\n                            'ferrex', $15, now(), $16)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Jsonb",
+        "Jsonb",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da8d87f3f939df95a0c80713c2a596f1a38f3b07e4882caba71e852a871b09e7"
+}

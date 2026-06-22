@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use ferrex_contracts::id::MediaIDLike;
 use ferrex_model::MediaID;
 use ferrex_model::media_type::VideoMediaType;
-use sqlx::{PgPool, Postgres, Row, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::database::repository_ports::media_files::{
@@ -1309,22 +1309,22 @@ impl FolderDeltaRepository for PostgresMediaRepository {
             .map(|prefix| prefix.trim_end_matches('/').to_owned())
             .collect();
 
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
             WITH target_prefixes AS (
                 SELECT root,
                        root || '/%' AS child_pattern
                 FROM UNNEST($2::text[]) AS root
             )
-            SELECT DISTINCT mf.media_id, mf.media_type::text AS media_type
+            SELECT DISTINCT mf.media_id AS "media_id!", mf.media_type::text AS "media_type!"
             FROM media_files AS mf
             JOIN target_prefixes AS p
               ON mf.file_path = p.root OR mf.file_path LIKE p.child_pattern
             WHERE mf.library_id = $1
             "#,
+            library_id.as_uuid(),
+            &roots
         )
-        .bind(library_id.as_uuid())
-        .bind(&roots)
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -1335,21 +1335,7 @@ impl FolderDeltaRepository for PostgresMediaRepository {
         })?;
 
         rows.into_iter()
-            .map(|row| {
-                let media_id =
-                    row.try_get::<Uuid, _>("media_id").map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode media id under prefixes: {e}"
-                        ))
-                    })?;
-                let media_type =
-                    row.try_get::<String, _>("media_type").map_err(|e| {
-                        MediaError::Internal(format!(
-                            "Failed to decode media type under prefixes: {e}"
-                        ))
-                    })?;
-                Self::media_id_from_parts(media_id, &media_type)
-            })
+            .map(|row| Self::media_id_from_parts(row.media_id, &row.media_type))
             .collect()
     }
 

@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id AS \"id!\", artifact_kind::text AS \"artifact_kind!\",\n                   library_id, media_id, media_type::text AS media_type,\n                   title AS \"title!\", summary, created_at AS \"created_at!\", updated_at AS \"updated_at!\"\n            FROM intelligence_artifacts\n            WHERE id = $1\n              AND status = 'active'\n              AND invalidated_at IS NULL\n              AND (user_id IS NULL OR user_id = $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "artifact_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "media_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "title!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "summary",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      true,
+      null,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "524f18be52137af19f20d435b6f9fb91cf2bb34237b6d22e55f585fe466b9b53"
+}

@@ -554,13 +554,6 @@ pub enum IntelligenceArtifactKind {
     AuditRecord,
 }
 
-/// Compact artifact reference without artifact body content.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct IntelligenceArtifactRef {
-    pub artifact_id: Uuid,
-    pub kind: IntelligenceArtifactKind,
-}
-
 /// Bounded artifact summary. The raw artifact body remains out-of-band.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntelligenceArtifactSummary {
@@ -601,7 +594,7 @@ pub struct IntelligenceArtifactSearchRequest {
 /// Response for artifact summary search.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntelligenceArtifactSearchResponse {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub artifacts: Vec<IntelligenceArtifactSummary>,
     #[serde(default)]
     pub page: IntelligencePageInfo,

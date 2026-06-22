@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT rating AS \"rating!\", count(*)::bigint AS \"cnt!\" FROM (\n            SELECT mm.primary_certification AS rating\n            FROM movie_references mr\n            JOIN media_files mf ON mr.file_id = mf.id\n                AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL\n            JOIN movie_metadata mm ON mm.movie_id = mr.id\n            WHERE mr.library_id = $1 AND mm.primary_certification IS NOT NULL\n            UNION ALL\n            SELECT sm.primary_content_rating AS rating\n            FROM series s\n            JOIN series_metadata sm ON sm.series_id = s.id\n            WHERE s.library_id = $1 AND sm.primary_content_rating IS NOT NULL\n              AND EXISTS (\n                SELECT 1 FROM episode_references er\n                JOIN media_files mf ON er.file_id = mf.id\n                    AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL\n                WHERE er.series_id = s.id\n              )\n        ) ratings\n        WHERE rating IS NOT NULL AND rating <> ''\n        GROUP BY rating\n        ORDER BY count(*) DESC, rating\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rating!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "cnt!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "0f1698a2cf40d40dd18af213231359f808749743ec97d4025b8fe4ebf63a5902"
+}

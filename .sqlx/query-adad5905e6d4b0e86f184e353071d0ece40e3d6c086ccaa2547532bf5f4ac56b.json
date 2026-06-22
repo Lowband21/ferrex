@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT er.id AS \"media_id!\", er.series_id AS \"series_id!\", er.season_id AS \"season_id!\",\n                           er.season_number AS \"season_number!\", er.episode_number AS \"episode_number!\",\n                           em.name AS title, em.overview, em.air_date, em.runtime\n                    FROM episode_references er\n                    JOIN series s ON er.series_id = s.id AND s.library_id = $2\n                    JOIN media_files mf ON er.file_id = mf.id\n                        AND mf.is_available = TRUE\n                        AND mf.tombstoned_at IS NULL\n                    LEFT JOIN episode_metadata em ON em.episode_id = er.id\n                    WHERE er.id = $1\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "series_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "season_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "season_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "episode_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 8,
+        "name": "runtime",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "adad5905e6d4b0e86f184e353071d0ece40e3d6c086ccaa2547532bf5f4ac56b"
+}

@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT s.id AS \"id!\", s.library_id AS \"library_id!\", s.title AS \"title!\",\n               sm.overview, sm.first_air_date, sm.primary_poster_image_id AS \"primary_poster_image_id?\"\n        FROM series s\n        LEFT JOIN series_metadata sm ON sm.series_id = s.id\n        WHERE s.id = $1\n          AND ($2::uuid IS NULL OR s.library_id = $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "title!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "first_air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 5,
+        "name": "primary_poster_image_id?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "4b9ec66727468ab0d769fc42b7ff70698c43420350ab4b720a1e9cbbd8aa5195"
+}

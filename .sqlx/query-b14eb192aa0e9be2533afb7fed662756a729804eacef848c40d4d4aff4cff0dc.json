@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT er.id AS \"id!\", er.season_number AS \"season_number!\", er.episode_number AS \"episode_number!\", em.name AS title\n            FROM episode_references er\n            LEFT JOIN episode_metadata em ON em.episode_id = er.id\n            WHERE er.series_id = $1 AND er.id <> $2\n            ORDER BY er.season_number, er.episode_number, er.id\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "season_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "b14eb192aa0e9be2533afb7fed662756a729804eacef848c40d4d4aff4cff0dc"
+}

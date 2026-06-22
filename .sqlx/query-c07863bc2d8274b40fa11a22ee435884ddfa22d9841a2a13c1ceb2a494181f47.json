@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE intelligence_runs\n            SET status = COALESCE($2::varchar, status),\n                provider_name = COALESCE($3, provider_name),\n                model_name = COALESCE($4, model_name),\n                result_summary = COALESCE($5, result_summary),\n                error_excerpt = COALESCE($6, error_excerpt),\n                started_at = COALESCE($7, started_at),\n                finished_at = COALESCE($8, finished_at),\n                metadata = COALESCE($9::jsonb, metadata),\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Timestamptz",
+        "Timestamptz",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c07863bc2d8274b40fa11a22ee435884ddfa22d9841a2a13c1ceb2a494181f47"
+}

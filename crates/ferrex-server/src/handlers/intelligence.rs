@@ -217,14 +217,17 @@ fn split_media_path(raw: &str) -> Option<(&str, &str)> {
     if let Some((kind, id)) = raw.split_once('_') {
         return Some((normalize_media_kind(kind)?, id));
     }
+    if let Some(open) = raw.find('(') {
+        let close = raw.strip_suffix(')')?;
+        let kind = normalize_media_kind(&raw[..open])?;
+        return Some((kind, &close[open + 1..]));
+    }
+
     if let Some((kind, id)) = raw.split_once('-') {
         return Some((normalize_media_kind(kind)?, id));
     }
 
-    let open = raw.find('(')?;
-    let close = raw.strip_suffix(')')?;
-    let kind = normalize_media_kind(&raw[..open])?;
-    Some((kind, &close[open + 1..]))
+    None
 }
 
 fn normalize_media_kind(kind: &str) -> Option<&'static str> {

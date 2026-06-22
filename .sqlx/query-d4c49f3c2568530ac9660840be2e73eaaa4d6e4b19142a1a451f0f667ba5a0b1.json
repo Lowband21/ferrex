@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO intelligence_media_context (\n                library_id, user_id, media_id, media_type, context_kind, status,\n                title, sort_title, summary, excerpt, release_date, runtime_seconds,\n                source_system, source_revision, source_updated_at, content_hash, metadata\n            )\n            VALUES ($1, $2, $3, ($4::text)::media_type, $5, 'active', $6, $7, $8, $9, $10, $11,\n                    'ferrex', $12, now(), $13, $14::jsonb)\n            ON CONFLICT (library_id, media_type, media_id, context_kind)\n                WHERE user_id IS NULL\n            DO UPDATE SET\n                status = 'active',\n                title = EXCLUDED.title,\n                sort_title = EXCLUDED.sort_title,\n                summary = EXCLUDED.summary,\n                excerpt = EXCLUDED.excerpt,\n                release_date = EXCLUDED.release_date,\n                runtime_seconds = EXCLUDED.runtime_seconds,\n                source_revision = EXCLUDED.source_revision,\n                source_updated_at = now(),\n                content_hash = EXCLUDED.content_hash,\n                metadata = EXCLUDED.metadata,\n                invalidated_at = NULL,\n                invalidation_reason = NULL,\n                updated_at = now()\n            WHERE intelligence_media_context.status <> 'active'\n               OR intelligence_media_context.content_hash IS DISTINCT FROM EXCLUDED.content_hash\n               OR intelligence_media_context.invalidated_at IS NOT NULL\n               OR intelligence_media_context.invalidation_reason IS NOT NULL\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Date",
+        "Int4",
+        "Int8",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d4c49f3c2568530ac9660840be2e73eaaa4d6e4b19142a1a451f0f667ba5a0b1"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n        FROM movie_references mr\n        JOIN media_files mf ON mr.file_id = mf.id\n            AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL\n        WHERE mr.library_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2bfcdc3852380f4f1d756d30823e29bdffb6a668970d35aa7cfbae7f4e94690a"
+}

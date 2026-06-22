@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT source_kind::text AS \"source_kind!\", source_run_id, source_tool_call_id\n        FROM intelligence_artifact_sources\n        WHERE artifact_id = $1 AND status = 'active'\n        ORDER BY source_ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "source_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_tool_call_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "e1905123827444923587225f1915237fd7b13e1df288f5e711f2fad7b1c06548"
+}

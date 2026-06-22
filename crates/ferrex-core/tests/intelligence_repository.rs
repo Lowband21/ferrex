@@ -13,7 +13,7 @@ use ferrex_core::api::types::intelligence::{
     IntelligenceItemContextRequest, IntelligenceLibraryOverviewRequest,
     IntelligenceMediaKind, IntelligencePagination,
     IntelligenceRelatedContextRequest, IntelligenceRelationshipKind,
-    IntelligenceRunAuditRequest,
+    IntelligenceRunAuditRequest, MAX_INTELLIGENCE_ARTIFACT_LIMIT,
 };
 use ferrex_core::database::repositories::intelligence::PostgresIntelligenceRepository;
 use ferrex_core::database::repository_ports::intelligence::{
@@ -649,6 +649,94 @@ async fn artifact_upsert_list_get_invalidate_global_and_user(pool: PgPool) {
             .await
             .unwrap()
             .is_none()
+    );
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(
+        path = "../fixtures",
+        scripts("test_libraries", "intelligence_base")
+    )
+)]
+async fn artifact_search_clamps_pagination_and_omits_raw_content(pool: PgPool) {
+    let repo = repo(&pool);
+    let raw_payload = "RAW_PROVIDER_PAYLOAD_SHOULD_NOT_LEAK".repeat(256);
+
+    for index in 0..(MAX_INTELLIGENCE_ARTIFACT_LIMIT + 2) {
+        repo.upsert_artifact(IntelligenceArtifactUpsert {
+            artifact_id: None,
+            kind: IntelligenceArtifactKind::Summary,
+            scope: IntelligenceArtifactScope::Global,
+            library_id: Some(lib_a()),
+            media_id: Some(movie_from_str(MOVIE_ARRIVAL)),
+            run_id: None,
+            supersedes_artifact_id: None,
+            title: format!("Bounded Arrival artifact {index}"),
+            summary: Some(format!(
+                "Artifact {index} summary intentionally exceeds the tiny cap."
+            )),
+            excerpt: Some("Fixture excerpt remains bounded.".to_string()),
+            content: json!({
+                "raw_provider_dump": raw_payload.clone(),
+                "messages": ["unbounded payload must stay out of DTOs"]
+            }),
+            metadata: json!({"fixture_index": index}),
+            source_revision: i64::from(index),
+        })
+        .await
+        .unwrap();
+    }
+
+    let response = repo
+        .artifact_search(
+            &IntelligenceArtifactSearchRequest {
+                artifact_ids: Vec::new(),
+                media_ids: Vec::new(),
+                library_ids: vec![lib_a()],
+                kinds: vec![IntelligenceArtifactKind::Summary],
+                pagination: IntelligencePagination {
+                    cursor: None,
+                    limit: u16::MAX,
+                },
+                caps: IntelligenceCaps {
+                    artifact_limit: u16::MAX,
+                    summary_max_chars: 16,
+                    ..Default::default()
+                },
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.artifacts.len(),
+        usize::from(MAX_INTELLIGENCE_ARTIFACT_LIMIT),
+        "artifact_limit cap should bound returned summaries"
+    );
+    assert_eq!(
+        response.page.limit, MAX_INTELLIGENCE_ARTIFACT_LIMIT,
+        "oversized pagination and artifact caps clamp to the public maximum"
+    );
+    assert!(response.page.has_more, "extra rows should set has_more");
+    for artifact in &response.artifacts {
+        let summary = artifact
+            .summary
+            .as_ref()
+            .expect("fixture artifacts carry summaries");
+        assert!(summary.text.chars().count() <= 16);
+        assert!(summary.truncated);
+    }
+
+    let serialized = serde_json::to_string(&response).unwrap();
+    assert!(
+        !serialized.contains("RAW_PROVIDER_PAYLOAD_SHOULD_NOT_LEAK"),
+        "raw artifact content must not leak through summary DTOs"
+    );
+    assert!(
+        !serialized.contains("raw_provider_dump"),
+        "raw provider field names must stay out of public DTOs"
     );
 }
 

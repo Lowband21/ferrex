@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id AS \"id!\", run_kind::text AS \"run_kind!\", status::text AS \"status!\",\n                   user_id, model_name, provider_name, prompt_excerpt,\n                   result_summary, error_excerpt, started_at, finished_at,\n                   created_at AS \"created_at!\", updated_at AS \"updated_at!\"\n            FROM intelligence_runs\n            WHERE id = $1\n              AND (user_id IS NULL OR user_id = $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "run_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "model_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "prompt_excerpt",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "result_summary",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "error_excerpt",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "96b9284f70bd75308d2f7e644d611f34d8652704e3bd08b35bea346149f744e5"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id AS \"id!\" FROM intelligence_artifacts\n            WHERE run_id = $1\n              AND status = 'active'\n              AND invalidated_at IS NULL\n              AND (user_id IS NULL OR user_id = $2)\n            ORDER BY updated_at DESC, id\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bdb8e8cda8900202485faad957f0e529170c9962ceb8ca7cba6d71fd17961174"
+}

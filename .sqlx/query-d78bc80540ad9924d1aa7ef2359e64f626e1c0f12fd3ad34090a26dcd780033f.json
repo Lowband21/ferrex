@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE intelligence_artifacts\n            SET status = 'invalidated',\n                invalidated_at = now(),\n                invalidation_reason = $1,\n                updated_at = now()\n            WHERE id = $2\n              AND (($3::uuid IS NULL AND user_id IS NULL) OR user_id = $3)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d78bc80540ad9924d1aa7ef2359e64f626e1c0f12fd3ad34090a26dcd780033f"
+}

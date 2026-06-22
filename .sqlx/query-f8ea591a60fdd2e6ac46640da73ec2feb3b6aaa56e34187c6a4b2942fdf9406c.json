@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT bucket AS \"bucket!\", count(*)::bigint AS \"cnt!\" FROM (\n            SELECT CASE\n                WHEN mm.runtime < 60 THEN 'short'\n                WHEN mm.runtime < 120 THEN 'standard'\n                WHEN mm.runtime < 180 THEN 'long'\n                ELSE 'extended'\n            END AS bucket\n            FROM movie_references mr\n            JOIN media_files mf ON mr.file_id = mf.id\n                AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL\n            JOIN movie_metadata mm ON mm.movie_id = mr.id\n            WHERE mr.library_id = $1 AND mm.runtime IS NOT NULL\n        ) buckets\n        WHERE bucket IS NOT NULL\n        GROUP BY bucket\n        ORDER BY bucket\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bucket!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "cnt!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "f8ea591a60fdd2e6ac46640da73ec2feb3b6aaa56e34187c6a4b2942fdf9406c"
+}

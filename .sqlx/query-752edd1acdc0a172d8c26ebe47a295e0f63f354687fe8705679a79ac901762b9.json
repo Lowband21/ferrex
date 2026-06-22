@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT er.id AS \"id!\" FROM episode_references er\n                    JOIN series s ON er.series_id = s.id AND s.library_id = $2\n                    JOIN media_files mf ON er.file_id = mf.id\n                        AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL\n                    WHERE er.series_id = $1\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "752edd1acdc0a172d8c26ebe47a295e0f63f354687fe8705679a79ac901762b9"
+}

@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT sr.id AS \"id!\", sr.library_id AS \"library_id!\", sr.season_number AS \"season_number!\",\n               sm.name, sm.overview, sm.air_date,\n               sm.primary_poster_image_id AS \"primary_poster_image_id?\"\n        FROM season_references sr\n        LEFT JOIN season_metadata sm ON sm.season_id = sr.id\n        WHERE sr.id = $1\n          AND ($2::uuid IS NULL OR sr.library_id = $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "season_number!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 6,
+        "name": "primary_poster_image_id?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "f1451f534bfbfd7fdc7b7700723a27455593354e11101cb0537849f59f11e869"
+}

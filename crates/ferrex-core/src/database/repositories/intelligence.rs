@@ -1,8 +1,7 @@
 //! PostgreSQL-backed implementation of [`IntelligenceRepository`].
 //!
-//! All queries use the runtime `sqlx::query` form (matching the watch-status
-//! adapter) so the crate continues to compile under `SQLX_OFFLINE=true` without
-//! per-query offline data. Behavior is validated by the SQLx-backed
+//! Repository/business SQL uses SQLx compile-checked macros so schema drift is
+//! caught by offline metadata and CI. Behavior is validated by the SQLx-backed
 //! integration tests in `tests/intelligence_repository.rs`.
 
 use async_trait::async_trait;
@@ -12,7 +11,7 @@ use ferrex_model::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -251,30 +250,22 @@ async fn fetch_genres(
     pool: &PgPool,
     media_id: &MediaID,
 ) -> Result<Vec<String>> {
-    let rows = match media_id {
-        MediaID::Movie(id) => sqlx::query(
-            "SELECT name FROM movie_genres WHERE movie_id = $1 ORDER BY name",
+    match media_id {
+        MediaID::Movie(id) => sqlx::query_scalar!(
+            r#"SELECT name AS "name!" FROM movie_genres WHERE movie_id = $1 ORDER BY name"#,
+            id.0
         )
-        .bind(id.0)
         .fetch_all(pool)
         .await,
-        MediaID::Series(id) => sqlx::query(
-            "SELECT name FROM series_genres WHERE series_id = $1 ORDER BY name",
+        MediaID::Series(id) => sqlx::query_scalar!(
+            r#"SELECT name AS "name!" FROM series_genres WHERE series_id = $1 ORDER BY name"#,
+            id.0
         )
-        .bind(id.0)
         .fetch_all(pool)
         .await,
         _ => return Ok(Vec::new()),
     }
-    .map_err(|e| internal_err(format!("failed to load genres: {e}")))?;
-
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.push(row.try_get::<String, _>("name").map_err(|e| {
-            internal_err(format!("failed to decode genre name: {e}"))
-        })?);
-    }
-    Ok(out)
+    .map_err(|e| internal_err(format!("failed to load genres: {e}")))
 }
 
 /// Cast/crew names for a media item, ordered deterministically and bounded.
@@ -283,9 +274,9 @@ async fn fetch_people(
     media_id: &MediaID,
 ) -> Result<Vec<String>> {
     let rows = match media_id {
-        MediaID::Movie(id) => sqlx::query(
+        MediaID::Movie(id) => sqlx::query_scalar!(
             r#"
-            SELECT p.name
+            SELECT p.name AS "name!"
             FROM (
                 SELECT mc.person_id, COALESCE(mc.order_index, 32767) AS order_key
                 FROM movie_cast mc
@@ -299,13 +290,13 @@ async fn fetch_people(
             ORDER BY credits.order_key, p.name
             LIMIT 12
             "#,
+            id.0
         )
-        .bind(id.0)
         .fetch_all(pool)
         .await,
-        MediaID::Series(id) => sqlx::query(
+        MediaID::Series(id) => sqlx::query_scalar!(
             r#"
-            SELECT p.name
+            SELECT p.name AS "name!"
             FROM (
                 SELECT sc.person_id, COALESCE(sc.order_index, 32767) AS order_key
                 FROM series_cast sc
@@ -319,13 +310,13 @@ async fn fetch_people(
             ORDER BY credits.order_key, p.name
             LIMIT 12
             "#,
+            id.0
         )
-        .bind(id.0)
         .fetch_all(pool)
         .await,
-        MediaID::Episode(id) => sqlx::query(
+        MediaID::Episode(id) => sqlx::query_scalar!(
             r#"
-            SELECT p.name
+            SELECT p.name AS "name!"
             FROM (
                 SELECT ec.person_id, COALESCE(ec.order_index, 32767) AS order_key
                 FROM episode_cast ec
@@ -343,8 +334,8 @@ async fn fetch_people(
             ORDER BY credits.order_key, p.name
             LIMIT 12
             "#,
+            id.0
         )
-        .bind(id.0)
         .fetch_all(pool)
         .await,
         MediaID::Season(_) => return Ok(Vec::new()),
@@ -352,10 +343,7 @@ async fn fetch_people(
     .map_err(|e| internal_err(format!("failed to load people: {e}")))?;
 
     let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        let name = row.try_get::<String, _>("name").map_err(|e| {
-            internal_err(format!("failed to decode person name: {e}"))
-        })?;
+    for name in rows {
         if !out.iter().any(|existing| existing == &name) {
             out.push(name);
         }
@@ -384,52 +372,33 @@ async fn fetch_movie_ref_row(
     id: &MovieID,
     library_id: Option<LibraryId>,
 ) -> Result<Option<MediaRefRow>> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
-        SELECT mr.id, mr.library_id, mr.title,
+        SELECT mr.id AS "id!", mr.library_id AS "library_id!", mr.title AS "title!",
                mm.overview, mm.release_date, mm.runtime,
-               mm.primary_poster_image_id
+               mm.primary_poster_image_id AS "primary_poster_image_id?"
         FROM movie_references mr
         LEFT JOIN movie_metadata mm ON mm.movie_id = mr.id
         WHERE mr.id = $1
           AND ($2::uuid IS NULL OR mr.library_id = $2)
         "#,
+        id.0,
+        library_id.map(|l| l.0)
     )
-    .bind(id.0)
-    .bind(library_id.map(|l| l.0))
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load movie ref: {e}")))?;
 
     let Some(row) = row else { return Ok(None) };
-    let title: String = row.try_get("title").map_err(|e| {
-        internal_err(format!("failed to decode movie title: {e}"))
-    })?;
     Ok(Some(MediaRefRow {
         media_id: MediaID::Movie(*id),
-        library_id: LibraryId(row.try_get::<Uuid, _>("library_id").map_err(
-            |e| internal_err(format!("failed to decode library_id: {e}")),
-        )?),
-        title,
-        year: year_from_date(
-            row.try_get::<Option<NaiveDate>, _>("release_date")
-                .ok()
-                .flatten(),
-        ),
-        poster_iid: row
-            .try_get::<Option<Uuid>, _>("primary_poster_image_id")
-            .ok()
-            .flatten(),
-        overview: row.try_get::<Option<String>, _>("overview").ok().flatten(),
-        runtime_seconds: row
-            .try_get::<Option<i32>, _>("runtime")
-            .ok()
-            .flatten()
-            .map(|m| m.saturating_mul(60)),
-        release_date: row
-            .try_get::<Option<NaiveDate>, _>("release_date")
-            .ok()
-            .flatten(),
+        library_id: LibraryId(row.library_id),
+        title: row.title,
+        year: year_from_date(row.release_date),
+        poster_iid: row.primary_poster_image_id,
+        overview: row.overview,
+        runtime_seconds: row.runtime.map(|m| m.saturating_mul(60)),
+        release_date: row.release_date,
     }))
 }
 
@@ -438,47 +407,32 @@ async fn fetch_series_ref_row(
     id: &SeriesID,
     library_id: Option<LibraryId>,
 ) -> Result<Option<MediaRefRow>> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
-        SELECT s.id, s.library_id, s.title,
-               sm.overview, sm.first_air_date, sm.primary_poster_image_id
+        SELECT s.id AS "id!", s.library_id AS "library_id!", s.title AS "title!",
+               sm.overview, sm.first_air_date, sm.primary_poster_image_id AS "primary_poster_image_id?"
         FROM series s
         LEFT JOIN series_metadata sm ON sm.series_id = s.id
         WHERE s.id = $1
           AND ($2::uuid IS NULL OR s.library_id = $2)
         "#,
+        id.0,
+        library_id.map(|l| l.0)
     )
-    .bind(id.0)
-    .bind(library_id.map(|l| l.0))
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load series ref: {e}")))?;
 
     let Some(row) = row else { return Ok(None) };
-    let title: String = row.try_get("title").map_err(|e| {
-        internal_err(format!("failed to decode series title: {e}"))
-    })?;
     Ok(Some(MediaRefRow {
         media_id: MediaID::Series(*id),
-        library_id: LibraryId(row.try_get::<Uuid, _>("library_id").map_err(
-            |e| internal_err(format!("failed to decode library_id: {e}")),
-        )?),
-        title,
-        year: year_from_date(
-            row.try_get::<Option<NaiveDate>, _>("first_air_date")
-                .ok()
-                .flatten(),
-        ),
-        poster_iid: row
-            .try_get::<Option<Uuid>, _>("primary_poster_image_id")
-            .ok()
-            .flatten(),
-        overview: row.try_get::<Option<String>, _>("overview").ok().flatten(),
+        library_id: LibraryId(row.library_id),
+        title: row.title,
+        year: year_from_date(row.first_air_date),
+        poster_iid: row.primary_poster_image_id,
+        overview: row.overview,
         runtime_seconds: None,
-        release_date: row
-            .try_get::<Option<NaiveDate>, _>("first_air_date")
-            .ok()
-            .flatten(),
+        release_date: row.first_air_date,
     }))
 }
 
@@ -487,51 +441,36 @@ async fn fetch_season_ref_row(
     id: &SeasonID,
     library_id: Option<LibraryId>,
 ) -> Result<Option<MediaRefRow>> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
-        SELECT sr.id, sr.library_id, sr.season_number,
+        SELECT sr.id AS "id!", sr.library_id AS "library_id!", sr.season_number AS "season_number!",
                sm.name, sm.overview, sm.air_date,
-               sm.primary_poster_image_id
+               sm.primary_poster_image_id AS "primary_poster_image_id?"
         FROM season_references sr
         LEFT JOIN season_metadata sm ON sm.season_id = sr.id
         WHERE sr.id = $1
           AND ($2::uuid IS NULL OR sr.library_id = $2)
         "#,
+        id.0,
+        library_id.map(|l| l.0)
     )
-    .bind(id.0)
-    .bind(library_id.map(|l| l.0))
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load season ref: {e}")))?;
 
     let Some(row) = row else { return Ok(None) };
-    let season_number: i16 = row.try_get("season_number").map_err(|e| {
-        internal_err(format!("failed to decode season_number: {e}"))
-    })?;
-    let name: Option<String> =
-        row.try_get::<Option<String>, _>("name").ok().flatten();
-    let title = name.unwrap_or_else(|| format!("Season {}", season_number));
+    let title = row
+        .name
+        .unwrap_or_else(|| format!("Season {}", row.season_number));
     Ok(Some(MediaRefRow {
         media_id: MediaID::Season(*id),
-        library_id: LibraryId(row.try_get::<Uuid, _>("library_id").map_err(
-            |e| internal_err(format!("failed to decode library_id: {e}")),
-        )?),
+        library_id: LibraryId(row.library_id),
         title,
-        year: year_from_date(
-            row.try_get::<Option<NaiveDate>, _>("air_date")
-                .ok()
-                .flatten(),
-        ),
-        poster_iid: row
-            .try_get::<Option<Uuid>, _>("primary_poster_image_id")
-            .ok()
-            .flatten(),
-        overview: row.try_get::<Option<String>, _>("overview").ok().flatten(),
+        year: year_from_date(row.air_date),
+        poster_iid: row.primary_poster_image_id,
+        overview: row.overview,
         runtime_seconds: None,
-        release_date: row
-            .try_get::<Option<NaiveDate>, _>("air_date")
-            .ok()
-            .flatten(),
+        release_date: row.air_date,
     }))
 }
 
@@ -540,61 +479,37 @@ async fn fetch_episode_ref_row(
     id: &EpisodeID,
     library_id: Option<LibraryId>,
 ) -> Result<Option<MediaRefRow>> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
-        SELECT er.id, er.season_number, er.episode_number,
-               s.library_id, em.name, em.overview, em.air_date,
-               em.runtime, em.primary_thumbnail_image_id
+        SELECT er.id AS "id!", er.season_number AS "season_number!", er.episode_number AS "episode_number!",
+               s.library_id AS "library_id!", em.name, em.overview, em.air_date,
+               em.runtime, em.primary_thumbnail_image_id AS "primary_thumbnail_image_id?"
         FROM episode_references er
         JOIN series s ON er.series_id = s.id
         LEFT JOIN episode_metadata em ON em.episode_id = er.id
         WHERE er.id = $1
           AND ($2::uuid IS NULL OR s.library_id = $2)
         "#,
+        id.0,
+        library_id.map(|l| l.0)
     )
-    .bind(id.0)
-    .bind(library_id.map(|l| l.0))
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load episode ref: {e}")))?;
 
     let Some(row) = row else { return Ok(None) };
-    let season_number: i16 = row.try_get("season_number").map_err(|e| {
-        internal_err(format!("failed to decode season_number: {e}"))
-    })?;
-    let episode_number: i16 = row.try_get("episode_number").map_err(|e| {
-        internal_err(format!("failed to decode episode_number: {e}"))
-    })?;
-    let name: Option<String> =
-        row.try_get::<Option<String>, _>("name").ok().flatten();
-    let title = name.unwrap_or_else(|| {
-        format!("S{:02}E{:02}", season_number, episode_number)
+    let title = row.name.unwrap_or_else(|| {
+        format!("S{:02}E{:02}", row.season_number, row.episode_number)
     });
     Ok(Some(MediaRefRow {
         media_id: MediaID::Episode(*id),
-        library_id: LibraryId(row.try_get::<Uuid, _>("library_id").map_err(
-            |e| internal_err(format!("failed to decode library_id: {e}")),
-        )?),
+        library_id: LibraryId(row.library_id),
         title,
-        year: year_from_date(
-            row.try_get::<Option<NaiveDate>, _>("air_date")
-                .ok()
-                .flatten(),
-        ),
-        poster_iid: row
-            .try_get::<Option<Uuid>, _>("primary_thumbnail_image_id")
-            .ok()
-            .flatten(),
-        overview: row.try_get::<Option<String>, _>("overview").ok().flatten(),
-        runtime_seconds: row
-            .try_get::<Option<i32>, _>("runtime")
-            .ok()
-            .flatten()
-            .map(|m| m.saturating_mul(60)),
-        release_date: row
-            .try_get::<Option<NaiveDate>, _>("air_date")
-            .ok()
-            .flatten(),
+        year: year_from_date(row.air_date),
+        poster_iid: row.primary_thumbnail_image_id,
+        overview: row.overview,
+        runtime_seconds: row.runtime.map(|m| m.saturating_mul(60)),
+        release_date: row.air_date,
     }))
 }
 
@@ -677,65 +592,110 @@ async fn upsert_context_row(
         &canonical_json(metadata),
     ]);
 
-    let conflict_clause = match user_id {
-        Some(_) =>
-            "ON CONFLICT (library_id, user_id, media_type, media_id, context_kind)
-                WHERE user_id IS NOT NULL",
-        None =>
-            "ON CONFLICT (library_id, media_type, media_id, context_kind)
-                WHERE user_id IS NULL",
-    };
-    let sql = format!(
-        r#"
-        INSERT INTO intelligence_media_context (
-            library_id, user_id, media_id, media_type, context_kind, status,
-            title, sort_title, summary, excerpt, release_date, runtime_seconds,
-            source_system, source_revision, source_updated_at, content_hash, metadata
+    let changed = if user_id.is_some() {
+        sqlx::query!(
+            r#"
+            INSERT INTO intelligence_media_context (
+                library_id, user_id, media_id, media_type, context_kind, status,
+                title, sort_title, summary, excerpt, release_date, runtime_seconds,
+                source_system, source_revision, source_updated_at, content_hash, metadata
+            )
+            VALUES ($1, $2, $3, ($4::text)::media_type, $5, 'active', $6, $7, $8, $9, $10, $11,
+                    'ferrex', $12, now(), $13, $14::jsonb)
+            ON CONFLICT (library_id, user_id, media_type, media_id, context_kind)
+                WHERE user_id IS NOT NULL
+            DO UPDATE SET
+                status = 'active',
+                title = EXCLUDED.title,
+                sort_title = EXCLUDED.sort_title,
+                summary = EXCLUDED.summary,
+                excerpt = EXCLUDED.excerpt,
+                release_date = EXCLUDED.release_date,
+                runtime_seconds = EXCLUDED.runtime_seconds,
+                source_revision = EXCLUDED.source_revision,
+                source_updated_at = now(),
+                content_hash = EXCLUDED.content_hash,
+                metadata = EXCLUDED.metadata,
+                invalidated_at = NULL,
+                invalidation_reason = NULL,
+                updated_at = now()
+            WHERE intelligence_media_context.status <> 'active'
+               OR intelligence_media_context.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+               OR intelligence_media_context.invalidated_at IS NOT NULL
+               OR intelligence_media_context.invalidation_reason IS NOT NULL
+            RETURNING id
+            "#,
+            library_id.0,
+            user_id,
+            media_id,
+            media_type,
+            context_kind,
+            title,
+            sort_title,
+            summary,
+            excerpt,
+            row.release_date,
+            row.runtime_seconds,
+            source_revision,
+            hash,
+            metadata
         )
-        VALUES ($1, $2, $3, $4::media_type, $5, 'active', $6, $7, $8, $9, $10, $11,
-                'ferrex', $12, now(), $13, $14::jsonb)
-        {conflict_clause}
-        DO UPDATE SET
-            status = 'active',
-            title = EXCLUDED.title,
-            sort_title = EXCLUDED.sort_title,
-            summary = EXCLUDED.summary,
-            excerpt = EXCLUDED.excerpt,
-            release_date = EXCLUDED.release_date,
-            runtime_seconds = EXCLUDED.runtime_seconds,
-            source_revision = EXCLUDED.source_revision,
-            source_updated_at = now(),
-            content_hash = EXCLUDED.content_hash,
-            metadata = EXCLUDED.metadata,
-            invalidated_at = NULL,
-            invalidation_reason = NULL,
-            updated_at = now()
-        WHERE intelligence_media_context.status <> 'active'
-           OR intelligence_media_context.content_hash IS DISTINCT FROM EXCLUDED.content_hash
-           OR intelligence_media_context.invalidated_at IS NOT NULL
-           OR intelligence_media_context.invalidation_reason IS NOT NULL
-        RETURNING id
-        "#,
-    );
-    let changed = sqlx::query(&sql)
-        .bind(library_id.0)
-        .bind(user_id)
-        .bind(media_id)
-        .bind(media_type)
-        .bind(context_kind)
-        .bind(&title)
-        .bind(&sort_title)
-        .bind(&summary)
-        .bind(&excerpt)
-        .bind(row.release_date)
-        .bind(row.runtime_seconds)
-        .bind(source_revision)
-        .bind(&hash)
-        .bind(metadata)
         .fetch_optional(pool)
         .await
-        .map_err(|e| internal_err(format!("failed to upsert context: {e}")))?
-        .is_some();
+        .map(|row| row.is_some())
+    } else {
+        sqlx::query!(
+            r#"
+            INSERT INTO intelligence_media_context (
+                library_id, user_id, media_id, media_type, context_kind, status,
+                title, sort_title, summary, excerpt, release_date, runtime_seconds,
+                source_system, source_revision, source_updated_at, content_hash, metadata
+            )
+            VALUES ($1, $2, $3, ($4::text)::media_type, $5, 'active', $6, $7, $8, $9, $10, $11,
+                    'ferrex', $12, now(), $13, $14::jsonb)
+            ON CONFLICT (library_id, media_type, media_id, context_kind)
+                WHERE user_id IS NULL
+            DO UPDATE SET
+                status = 'active',
+                title = EXCLUDED.title,
+                sort_title = EXCLUDED.sort_title,
+                summary = EXCLUDED.summary,
+                excerpt = EXCLUDED.excerpt,
+                release_date = EXCLUDED.release_date,
+                runtime_seconds = EXCLUDED.runtime_seconds,
+                source_revision = EXCLUDED.source_revision,
+                source_updated_at = now(),
+                content_hash = EXCLUDED.content_hash,
+                metadata = EXCLUDED.metadata,
+                invalidated_at = NULL,
+                invalidation_reason = NULL,
+                updated_at = now()
+            WHERE intelligence_media_context.status <> 'active'
+               OR intelligence_media_context.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+               OR intelligence_media_context.invalidated_at IS NOT NULL
+               OR intelligence_media_context.invalidation_reason IS NOT NULL
+            RETURNING id
+            "#,
+            library_id.0,
+            user_id,
+            media_id,
+            media_type,
+            context_kind,
+            title,
+            sort_title,
+            summary,
+            excerpt,
+            row.release_date,
+            row.runtime_seconds,
+            source_revision,
+            hash,
+            metadata
+        )
+        .fetch_optional(pool)
+        .await
+        .map(|row| row.is_some())
+    }
+    .map_err(|e| internal_err(format!("failed to upsert context: {e}")))?;
     Ok(changed)
 }
 
@@ -770,61 +730,102 @@ async fn upsert_search_row(
         &canonical_json(metadata),
     ]);
 
-    let conflict_clause = match user_id {
-        Some(_) =>
-            "ON CONFLICT (library_id, user_id, media_type, media_id, document_kind)
-                WHERE user_id IS NOT NULL",
-        None =>
-            "ON CONFLICT (library_id, media_type, media_id, document_kind)
-                WHERE user_id IS NULL",
-    };
-    let sql = format!(
-        r#"
-        INSERT INTO intelligence_search_documents (
-            library_id, user_id, media_id, media_type, document_kind, status,
-            title, summary, search_excerpt, search_text, language,
-            source_system, source_revision, source_updated_at, content_hash, metadata
+    let changed = if user_id.is_some() {
+        sqlx::query!(
+            r#"
+            INSERT INTO intelligence_search_documents (
+                library_id, user_id, media_id, media_type, document_kind, status,
+                title, summary, search_excerpt, search_text, language,
+                source_system, source_revision, source_updated_at, content_hash, metadata
+            )
+            VALUES ($1, $2, $3, ($4::text)::media_type, $5, 'active', $6, $7, $8, $9, 'simple',
+                    'ferrex', $10, now(), $11, $12::jsonb)
+            ON CONFLICT (library_id, user_id, media_type, media_id, document_kind)
+                WHERE user_id IS NOT NULL
+            DO UPDATE SET
+                status = 'active',
+                title = EXCLUDED.title,
+                summary = EXCLUDED.summary,
+                search_excerpt = EXCLUDED.search_excerpt,
+                search_text = EXCLUDED.search_text,
+                source_revision = EXCLUDED.source_revision,
+                source_updated_at = now(),
+                content_hash = EXCLUDED.content_hash,
+                metadata = EXCLUDED.metadata,
+                invalidated_at = NULL,
+                invalidation_reason = NULL,
+                updated_at = now()
+            WHERE intelligence_search_documents.status <> 'active'
+               OR intelligence_search_documents.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+               OR intelligence_search_documents.invalidated_at IS NOT NULL
+               OR intelligence_search_documents.invalidation_reason IS NOT NULL
+            RETURNING id
+            "#,
+            library_id.0,
+            user_id,
+            media_id,
+            media_type,
+            document_kind,
+            title,
+            summary,
+            excerpt,
+            text,
+            source_revision,
+            hash,
+            metadata
         )
-        VALUES ($1, $2, $3, $4::media_type, $5, 'active', $6, $7, $8, $9, 'simple',
-                'ferrex', $10, now(), $11, $12::jsonb)
-        {conflict_clause}
-        DO UPDATE SET
-            status = 'active',
-            title = EXCLUDED.title,
-            summary = EXCLUDED.summary,
-            search_excerpt = EXCLUDED.search_excerpt,
-            search_text = EXCLUDED.search_text,
-            source_revision = EXCLUDED.source_revision,
-            source_updated_at = now(),
-            content_hash = EXCLUDED.content_hash,
-            metadata = EXCLUDED.metadata,
-            invalidated_at = NULL,
-            invalidation_reason = NULL,
-            updated_at = now()
-        WHERE intelligence_search_documents.status <> 'active'
-           OR intelligence_search_documents.content_hash IS DISTINCT FROM EXCLUDED.content_hash
-           OR intelligence_search_documents.invalidated_at IS NOT NULL
-           OR intelligence_search_documents.invalidation_reason IS NOT NULL
-        RETURNING id
-        "#,
-    );
-    let changed = sqlx::query(&sql)
-        .bind(library_id.0)
-        .bind(user_id)
-        .bind(media_id)
-        .bind(media_type)
-        .bind(document_kind)
-        .bind(&title)
-        .bind(&summary)
-        .bind(&excerpt)
-        .bind(&text)
-        .bind(source_revision)
-        .bind(&hash)
-        .bind(metadata)
         .fetch_optional(pool)
         .await
-        .map_err(|e| internal_err(format!("failed to upsert search doc: {e}")))?
-        .is_some();
+        .map(|row| row.is_some())
+    } else {
+        sqlx::query!(
+            r#"
+            INSERT INTO intelligence_search_documents (
+                library_id, user_id, media_id, media_type, document_kind, status,
+                title, summary, search_excerpt, search_text, language,
+                source_system, source_revision, source_updated_at, content_hash, metadata
+            )
+            VALUES ($1, $2, $3, ($4::text)::media_type, $5, 'active', $6, $7, $8, $9, 'simple',
+                    'ferrex', $10, now(), $11, $12::jsonb)
+            ON CONFLICT (library_id, media_type, media_id, document_kind)
+                WHERE user_id IS NULL
+            DO UPDATE SET
+                status = 'active',
+                title = EXCLUDED.title,
+                summary = EXCLUDED.summary,
+                search_excerpt = EXCLUDED.search_excerpt,
+                search_text = EXCLUDED.search_text,
+                source_revision = EXCLUDED.source_revision,
+                source_updated_at = now(),
+                content_hash = EXCLUDED.content_hash,
+                metadata = EXCLUDED.metadata,
+                invalidated_at = NULL,
+                invalidation_reason = NULL,
+                updated_at = now()
+            WHERE intelligence_search_documents.status <> 'active'
+               OR intelligence_search_documents.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+               OR intelligence_search_documents.invalidated_at IS NOT NULL
+               OR intelligence_search_documents.invalidation_reason IS NOT NULL
+            RETURNING id
+            "#,
+            library_id.0,
+            user_id,
+            media_id,
+            media_type,
+            document_kind,
+            title,
+            summary,
+            excerpt,
+            text,
+            source_revision,
+            hash,
+            metadata
+        )
+        .fetch_optional(pool)
+        .await
+        .map(|row| row.is_some())
+    }
+    .map_err(|e| internal_err(format!("failed to upsert search doc: {e}")))?;
     Ok(changed)
 }
 
@@ -844,9 +845,10 @@ async fn load_available_movies(
     pool: &PgPool,
     library_id: LibraryId,
 ) -> Result<Vec<MovieRefreshRow>> {
-    let rows = sqlx::query(
+    sqlx::query_as!(
+        MovieRefreshRow,
         r#"
-        SELECT mr.id AS media_id, mr.title,
+        SELECT mr.id AS "media_id!", mr.title AS "title!",
                mm.overview, mm.release_date, mm.runtime,
                mm.vote_average, mm.primary_certification
         FROM movie_references mr
@@ -857,41 +859,11 @@ async fn load_available_movies(
         WHERE mr.library_id = $1
         ORDER BY mr.title, mr.id
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_all(pool)
     .await
-    .map_err(|e| internal_err(format!("failed to load movies: {e}")))?;
-
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.push(MovieRefreshRow {
-            media_id: row
-                .try_get("media_id")
-                .map_err(|e| internal_err(format!("decode media_id: {e}")))?,
-            title: row
-                .try_get("title")
-                .map_err(|e| internal_err(format!("decode title: {e}")))?,
-            overview: row
-                .try_get::<Option<String>, _>("overview")
-                .ok()
-                .flatten(),
-            release_date: row
-                .try_get::<Option<NaiveDate>, _>("release_date")
-                .ok()
-                .flatten(),
-            runtime: row.try_get::<Option<i32>, _>("runtime").ok().flatten(),
-            vote_average: row
-                .try_get::<Option<f32>, _>("vote_average")
-                .ok()
-                .flatten(),
-            primary_certification: row
-                .try_get::<Option<String>, _>("primary_certification")
-                .ok()
-                .flatten(),
-        });
-    }
-    Ok(out)
+    .map_err(|e| internal_err(format!("failed to load movies: {e}")))
 }
 
 /// Available-episode rows for global read-model refresh.
@@ -912,10 +884,11 @@ async fn load_available_episodes(
     pool: &PgPool,
     library_id: LibraryId,
 ) -> Result<Vec<EpisodeRefreshRow>> {
-    let rows = sqlx::query(
+    sqlx::query_as!(
+        EpisodeRefreshRow,
         r#"
-        SELECT er.id AS media_id, er.series_id, er.season_id,
-               er.season_number, er.episode_number,
+        SELECT er.id AS "media_id!", er.series_id AS "series_id!", er.season_id AS "season_id!",
+               er.season_number AS "season_number!", er.episode_number AS "episode_number!",
                em.name AS title, em.overview, em.air_date, em.runtime
         FROM episode_references er
         JOIN series s ON er.series_id = s.id AND s.library_id = $1
@@ -925,43 +898,11 @@ async fn load_available_episodes(
         LEFT JOIN episode_metadata em ON em.episode_id = er.id
         ORDER BY er.series_id, er.season_number, er.episode_number, er.id
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_all(pool)
     .await
-    .map_err(|e| internal_err(format!("failed to load episodes: {e}")))?;
-
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.push(EpisodeRefreshRow {
-            media_id: row
-                .try_get("media_id")
-                .map_err(|e| internal_err(format!("decode media_id: {e}")))?,
-            series_id: row
-                .try_get("series_id")
-                .map_err(|e| internal_err(format!("decode series_id: {e}")))?,
-            season_id: row
-                .try_get("season_id")
-                .map_err(|e| internal_err(format!("decode season_id: {e}")))?,
-            season_number: row.try_get("season_number").map_err(|e| {
-                internal_err(format!("decode season_number: {e}"))
-            })?,
-            episode_number: row.try_get("episode_number").map_err(|e| {
-                internal_err(format!("decode episode_number: {e}"))
-            })?,
-            title: row.try_get::<Option<String>, _>("title").ok().flatten(),
-            overview: row
-                .try_get::<Option<String>, _>("overview")
-                .ok()
-                .flatten(),
-            air_date: row
-                .try_get::<Option<NaiveDate>, _>("air_date")
-                .ok()
-                .flatten(),
-            runtime: row.try_get::<Option<i32>, _>("runtime").ok().flatten(),
-        });
-    }
-    Ok(out)
+    .map_err(|e| internal_err(format!("failed to load episodes: {e}")))
 }
 
 async fn upsert_movie_read_model(
@@ -1134,40 +1075,27 @@ async fn upsert_series_read_model(
     let media_id = MediaID::Series(SeriesID(series_id));
     let genres = fetch_genres(pool, &media_id).await?;
     let people = fetch_people(pool, &media_id).await?;
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
-        SELECT s.title, sm.overview, sm.first_air_date,
-               sm.primary_poster_image_id, sm.primary_content_rating,
+        SELECT s.title AS "title!", sm.overview, sm.first_air_date,
+               sm.primary_poster_image_id AS "primary_poster_image_id?", sm.primary_content_rating,
                sm.vote_average
         FROM series s
         LEFT JOIN series_metadata sm ON sm.series_id = s.id
         WHERE s.id = $1
         "#,
+        series_id
     )
-    .bind(series_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load series: {e}")))?;
     let Some(row) = row else { return Ok(false) };
-    let title: String = row
-        .try_get("title")
-        .map_err(|e| internal_err(format!("decode series title: {e}")))?;
-    let overview: Option<String> =
-        row.try_get::<Option<String>, _>("overview").ok().flatten();
-    let first_air_date: Option<NaiveDate> = row
-        .try_get::<Option<NaiveDate>, _>("first_air_date")
-        .ok()
-        .flatten();
-    let poster: Option<Uuid> = row
-        .try_get::<Option<Uuid>, _>("primary_poster_image_id")
-        .ok()
-        .flatten();
-    let content_rating: Option<String> = row
-        .try_get::<Option<String>, _>("primary_content_rating")
-        .ok()
-        .flatten();
-    let vote_average: Option<f32> =
-        row.try_get::<Option<f32>, _>("vote_average").ok().flatten();
+    let title = row.title;
+    let overview = row.overview;
+    let first_air_date = row.first_air_date;
+    let poster = row.primary_poster_image_id;
+    let content_rating = row.primary_content_rating;
+    let vote_average = row.vote_average;
 
     let media_row = MediaRefRow {
         media_id: MediaID::Series(SeriesID(series_id)),
@@ -1227,37 +1155,26 @@ async fn upsert_season_read_model(
     season_id: Uuid,
     source_revision: i64,
 ) -> Result<bool> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
-        SELECT sr.season_number, sm.name, sm.overview, sm.air_date,
-               sm.primary_poster_image_id, sm.runtime
+        SELECT sr.season_number AS "season_number!", sm.name, sm.overview, sm.air_date,
+               sm.primary_poster_image_id AS "primary_poster_image_id?", sm.runtime
         FROM season_references sr
         LEFT JOIN season_metadata sm ON sm.season_id = sr.id
         WHERE sr.id = $1
         "#,
+        season_id
     )
-    .bind(season_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load season: {e}")))?;
     let Some(row) = row else { return Ok(false) };
-    let season_number: i16 = row
-        .try_get("season_number")
-        .map_err(|e| internal_err(format!("decode season_number: {e}")))?;
-    let name: Option<String> =
-        row.try_get::<Option<String>, _>("name").ok().flatten();
-    let overview: Option<String> =
-        row.try_get::<Option<String>, _>("overview").ok().flatten();
-    let air_date: Option<NaiveDate> = row
-        .try_get::<Option<NaiveDate>, _>("air_date")
-        .ok()
-        .flatten();
-    let poster: Option<Uuid> = row
-        .try_get::<Option<Uuid>, _>("primary_poster_image_id")
-        .ok()
-        .flatten();
-    let runtime: Option<i32> =
-        row.try_get::<Option<i32>, _>("runtime").ok().flatten();
+    let season_number = row.season_number;
+    let name = row.name;
+    let overview = row.overview;
+    let air_date = row.air_date;
+    let poster = row.primary_poster_image_id;
+    let runtime = row.runtime;
 
     let title = name.unwrap_or_else(|| format!("Season {}", season_number));
     let media_row = MediaRefRow {
@@ -1314,7 +1231,7 @@ struct WatchProgressRow {
     duration: f32,
     last_watched: i64,
     title: String,
-    library_id: LibraryId,
+    library_id: Uuid,
 }
 
 async fn load_user_watch_progress(
@@ -1322,12 +1239,14 @@ async fn load_user_watch_progress(
     library_id: LibraryId,
     user_id: Uuid,
 ) -> Result<Vec<WatchProgressRow>> {
-    let rows = sqlx::query(
+    sqlx::query_as!(
+        WatchProgressRow,
         r#"
-        SELECT uwp.media_uuid, uwp.media_type, uwp.position, uwp.duration,
-               uwp.last_watched, COALESCE(m.title, e.title, s.title, sm.name,
-                                          uwp.media_uuid::text) AS title,
-               COALESCE(m.library_id, s.library_id, sr.library_id, e.library_id) AS library_id
+        SELECT uwp.media_uuid AS "media_uuid!", uwp.media_type AS "media_type!",
+               uwp.position AS "position!", uwp.duration AS "duration!",
+               uwp.last_watched AS "last_watched!", COALESCE(m.title, e.title, s.title, sm.name,
+                                          uwp.media_uuid::text) AS "title!",
+               COALESCE(m.library_id, s.library_id, sr.library_id, e.library_id) AS "library_id!"
         FROM user_watch_progress uwp
         LEFT JOIN movie_references m
             ON uwp.media_uuid = m.id AND uwp.media_type = 0
@@ -1380,42 +1299,12 @@ async fn load_user_watch_progress(
           )
         ORDER BY uwp.last_watched DESC, uwp.media_uuid
         "#,
+        user_id,
+        library_id.0
     )
-    .bind(user_id)
-    .bind(library_id.0)
     .fetch_all(pool)
     .await
-    .map_err(|e| internal_err(format!("failed to load watch progress: {e}")))?;
-
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        let library_uuid: Option<Uuid> =
-            row.try_get::<Option<Uuid>, _>("library_id").ok().flatten();
-        let resolved_library_id =
-            LibraryId(library_uuid.unwrap_or(library_id.0));
-        out.push(WatchProgressRow {
-            media_uuid: row
-                .try_get("media_uuid")
-                .map_err(|e| internal_err(format!("decode media_uuid: {e}")))?,
-            media_type: row
-                .try_get("media_type")
-                .map_err(|e| internal_err(format!("decode media_type: {e}")))?,
-            position: row
-                .try_get("position")
-                .map_err(|e| internal_err(format!("decode position: {e}")))?,
-            duration: row
-                .try_get("duration")
-                .map_err(|e| internal_err(format!("decode duration: {e}")))?,
-            last_watched: row.try_get("last_watched").map_err(|e| {
-                internal_err(format!("decode last_watched: {e}"))
-            })?,
-            title: row
-                .try_get("title")
-                .map_err(|e| internal_err(format!("decode title: {e}")))?,
-            library_id: resolved_library_id,
-        });
-    }
-    Ok(out)
+    .map_err(|e| internal_err(format!("failed to load watch progress: {e}")))
 }
 
 fn media_id_from_watch(uuid: Uuid, media_type: i16) -> Option<MediaID> {
@@ -1449,9 +1338,9 @@ async fn active_artifact_ids_for_media(
     user_id: Option<Uuid>,
     limit: u16,
 ) -> Result<Vec<Uuid>> {
-    let rows = sqlx::query(
+    sqlx::query_scalar!(
         r#"
-        SELECT id FROM intelligence_artifacts
+        SELECT id AS "id!" FROM intelligence_artifacts
         WHERE media_id = $1
           AND status = 'active'
           AND invalidated_at IS NULL
@@ -1459,30 +1348,21 @@ async fn active_artifact_ids_for_media(
         ORDER BY updated_at DESC, id
         LIMIT $3
         "#,
+        media_id.as_uuid(),
+        user_id,
+        i64::from(limit)
     )
-    .bind(media_id.as_uuid())
-    .bind(user_id)
-    .bind(i64::from(limit))
     .fetch_all(pool)
     .await
-    .map_err(|e| internal_err(format!("failed to load artifact ids: {e}")))?;
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.push(
-            row.try_get::<Uuid, _>("id").map_err(|e| {
-                internal_err(format!("decode artifact id: {e}"))
-            })?,
-        );
-    }
-    Ok(out)
+    .map_err(|e| internal_err(format!("failed to load artifact ids: {e}")))
 }
 
 /// Resolve a library name.
 async fn library_name(pool: &PgPool, library_id: LibraryId) -> Result<String> {
-    let row = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM libraries WHERE id = $1",
+    let row = sqlx::query_scalar!(
+        r#"SELECT name AS "name!" FROM libraries WHERE id = $1"#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("failed to load library name: {e}")))?;
@@ -1518,7 +1398,7 @@ async fn invalidate_read_model_rows_for_media(
     let media_type = media_type_str(&media_id);
     let reason = truncate_chars(reason, 512);
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE intelligence_media_context
         SET status = 'invalidated',
@@ -1529,28 +1409,28 @@ async fn invalidate_read_model_rows_for_media(
             updated_at = now()
         WHERE library_id = $2
           AND media_id = $3
-          AND media_type = $4::media_type
+          AND media_type = ($4::text)::media_type
           AND (
               $5::text = 'all'
               OR ($5::text = 'global' AND user_id IS NULL)
               OR ($5::text = 'user' AND user_id = $6)
           )
         "#,
+        &reason,
+        library_id.0,
+        media_id.as_uuid(),
+        media_type,
+        scope_mode,
+        scope_user_id,
+        source_revision
     )
-    .bind(&reason)
-    .bind(library_id.0)
-    .bind(media_id.as_uuid())
-    .bind(media_type)
-    .bind(scope_mode)
-    .bind(scope_user_id)
-    .bind(source_revision)
     .execute(pool)
     .await
     .map_err(|e| {
         internal_err(format!("failed to invalidate media context rows: {e}"))
     })?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE intelligence_search_documents
         SET status = 'invalidated',
@@ -1561,21 +1441,21 @@ async fn invalidate_read_model_rows_for_media(
             updated_at = now()
         WHERE library_id = $2
           AND media_id = $3
-          AND media_type = $4::media_type
+          AND media_type = ($4::text)::media_type
           AND (
               $5::text = 'all'
               OR ($5::text = 'global' AND user_id IS NULL)
               OR ($5::text = 'user' AND user_id = $6)
           )
         "#,
+        &reason,
+        library_id.0,
+        media_id.as_uuid(),
+        media_type,
+        scope_mode,
+        scope_user_id,
+        source_revision
     )
-    .bind(&reason)
-    .bind(library_id.0)
-    .bind(media_id.as_uuid())
-    .bind(media_type)
-    .bind(scope_mode)
-    .bind(scope_user_id)
-    .bind(source_revision)
     .execute(pool)
     .await
     .map_err(|e| {
@@ -1594,7 +1474,7 @@ async fn dependent_artifact_ids_for_media(
     let (scope_mode, scope_user_id) = scope.bind_values();
     let media_type = media_type_str(&media_id);
 
-    let rows = sqlx::query_scalar::<_, Uuid>(
+    let rows = sqlx::query_scalar!(
         r#"
         WITH RECURSIVE
         media_context_rows AS (
@@ -1602,7 +1482,7 @@ async fn dependent_artifact_ids_for_media(
             FROM intelligence_media_context
             WHERE library_id = $1
               AND media_id = $2
-              AND media_type = $3::media_type
+              AND media_type = ($3::text)::media_type
               AND (
                   $4::text = 'all'
                   OR ($4::text = 'global' AND user_id IS NULL)
@@ -1614,7 +1494,7 @@ async fn dependent_artifact_ids_for_media(
             FROM intelligence_search_documents
             WHERE library_id = $1
               AND media_id = $2
-              AND media_type = $3::media_type
+              AND media_type = ($3::text)::media_type
               AND (
                   $4::text = 'all'
                   OR ($4::text = 'global' AND user_id IS NULL)
@@ -1626,7 +1506,7 @@ async fn dependent_artifact_ids_for_media(
             FROM intelligence_artifacts ia
             WHERE ia.library_id = $1
               AND ia.media_id = $2
-              AND ia.media_type = $3::media_type
+              AND ia.media_type = ($3::text)::media_type
               AND ia.status IN ('draft', 'active', 'stale')
               AND (
                   $4::text = 'all'
@@ -1649,7 +1529,7 @@ async fn dependent_artifact_ids_for_media(
                       src.source_kind = 'media'
                       AND src.source_library_id = $1
                       AND src.source_media_id = $2
-                      AND src.source_media_type = $3::media_type
+                      AND src.source_media_type = ($3::text)::media_type
                   )
                   OR src.source_media_context_id IN (SELECT id FROM media_context_rows)
                   OR src.source_search_document_id IN (SELECT id FROM search_document_rows)
@@ -1667,14 +1547,14 @@ async fn dependent_artifact_ids_for_media(
                   OR ($4::text = 'user' AND ia.user_id = $5)
               )
         )
-        SELECT artifact_id FROM dependent_artifacts
+        SELECT artifact_id AS "artifact_id!" FROM dependent_artifacts
         "#,
+        library_id.0,
+        media_id.as_uuid(),
+        media_type,
+        scope_mode,
+        scope_user_id
     )
-    .bind(library_id.0)
-    .bind(media_id.as_uuid())
-    .bind(media_type)
-    .bind(scope_mode)
-    .bind(scope_user_id)
     .fetch_all(pool)
     .await
     .map_err(|e| {
@@ -1699,7 +1579,7 @@ async fn invalidate_artifacts_for_media(
     }
 
     let reason = truncate_chars(reason, 512);
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE intelligence_artifacts
         SET status = 'invalidated',
@@ -1709,16 +1589,16 @@ async fn invalidate_artifacts_for_media(
         WHERE id = ANY($2)
           AND status IN ('draft', 'active', 'stale')
         "#,
+        &reason,
+        &artifact_ids
     )
-    .bind(&reason)
-    .bind(&artifact_ids)
     .execute(pool)
     .await
     .map_err(|e| {
         internal_err(format!("failed to invalidate artifacts: {e}"))
     })?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE intelligence_artifact_sources
         SET status = 'invalidated',
@@ -1728,9 +1608,9 @@ async fn invalidate_artifacts_for_media(
         WHERE artifact_id = ANY($2)
           AND status <> 'invalidated'
         "#,
+        &reason,
+        &artifact_ids
     )
-    .bind(&reason)
-    .bind(&artifact_ids)
     .execute(pool)
     .await
     .map_err(|e| {
@@ -1803,9 +1683,10 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     entry.position as i64,
                     entry.duration as i64
                 );
+                let entry_library_id = LibraryId(entry.library_id);
                 let media_row = MediaRefRow {
                     media_id,
-                    library_id: entry.library_id,
+                    library_id: entry_library_id,
                     title: entry.title.clone(),
                     year: None,
                     poster_iid: None,
@@ -1821,7 +1702,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 });
                 let mut changed = upsert_context_row(
                     pool,
-                    entry.library_id,
+                    entry_library_id,
                     Some(uid),
                     &media_row,
                     "watch_state",
@@ -1833,7 +1714,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 .await?;
                 changed |= upsert_search_row(
                     pool,
-                    entry.library_id,
+                    entry_library_id,
                     Some(uid),
                     &media_row,
                     "watch_state",
@@ -1847,7 +1728,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 if changed {
                     invalidate_artifacts_for_media(
                         pool,
-                        entry.library_id,
+                        entry_library_id,
                         media_row.media_id,
                         InvalidationScope::User(uid),
                         "watch_state_changed",
@@ -1980,9 +1861,10 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         let source_revision = current_source_revision(pool).await?;
         match media_id {
             MediaID::Movie(id) => {
-                let row = sqlx::query(
+                let movie = sqlx::query_as!(
+                    MovieRefreshRow,
                     r#"
-                    SELECT mr.id AS media_id, mr.title,
+                    SELECT mr.id AS "media_id!", mr.title AS "title!",
                            mm.overview, mm.release_date, mm.runtime,
                            mm.vote_average, mm.primary_certification
                     FROM movie_references mr
@@ -1992,15 +1874,15 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     LEFT JOIN movie_metadata mm ON mm.movie_id = mr.id
                     WHERE mr.id = $1 AND mr.library_id = $2
                     "#,
+                    id.0,
+                    library_id.0
                 )
-                .bind(id.0)
-                .bind(library_id.0)
                 .fetch_optional(pool)
                 .await
                 .map_err(|e| {
                     internal_err(format!("failed to load movie: {e}"))
                 })?;
-                let Some(row) = row else {
+                let Some(movie) = movie else {
                     invalidate_catalog_change_for_media(
                         pool,
                         library_id,
@@ -2009,34 +1891,6 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     )
                     .await?;
                     return Ok(());
-                };
-                let movie = MovieRefreshRow {
-                    media_id: row.try_get("media_id").map_err(|e| {
-                        internal_err(format!("decode media_id: {e}"))
-                    })?,
-                    title: row.try_get("title").map_err(|e| {
-                        internal_err(format!("decode title: {e}"))
-                    })?,
-                    overview: row
-                        .try_get::<Option<String>, _>("overview")
-                        .ok()
-                        .flatten(),
-                    release_date: row
-                        .try_get::<Option<NaiveDate>, _>("release_date")
-                        .ok()
-                        .flatten(),
-                    runtime: row
-                        .try_get::<Option<i32>, _>("runtime")
-                        .ok()
-                        .flatten(),
-                    vote_average: row
-                        .try_get::<Option<f32>, _>("vote_average")
-                        .ok()
-                        .flatten(),
-                    primary_certification: row
-                        .try_get::<Option<String>, _>("primary_certification")
-                        .ok()
-                        .flatten(),
                 };
                 let changed = upsert_movie_read_model(
                     pool,
@@ -2058,10 +1912,11 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 }
             }
             MediaID::Episode(id) => {
-                let row = sqlx::query(
+                let ep = sqlx::query_as!(
+                    EpisodeRefreshRow,
                     r#"
-                    SELECT er.id AS media_id, er.series_id, er.season_id,
-                           er.season_number, er.episode_number,
+                    SELECT er.id AS "media_id!", er.series_id AS "series_id!", er.season_id AS "season_id!",
+                           er.season_number AS "season_number!", er.episode_number AS "episode_number!",
                            em.name AS title, em.overview, em.air_date, em.runtime
                     FROM episode_references er
                     JOIN series s ON er.series_id = s.id AND s.library_id = $2
@@ -2071,13 +1926,13 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     LEFT JOIN episode_metadata em ON em.episode_id = er.id
                     WHERE er.id = $1
                     "#,
+                    id.0,
+                    library_id.0
                 )
-                .bind(id.0)
-                .bind(library_id.0)
                 .fetch_optional(pool)
                 .await
                 .map_err(|e| internal_err(format!("failed to load episode: {e}")))?;
-                let Some(row) = row else {
+                let Some(ep) = ep else {
                     invalidate_catalog_change_for_media(
                         pool,
                         library_id,
@@ -2086,39 +1941,6 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     )
                     .await?;
                     return Ok(());
-                };
-                let ep = EpisodeRefreshRow {
-                    media_id: row.try_get("media_id").map_err(|e| {
-                        internal_err(format!("decode media_id: {e}"))
-                    })?,
-                    series_id: row.try_get("series_id").map_err(|e| {
-                        internal_err(format!("decode series_id: {e}"))
-                    })?,
-                    season_id: row.try_get("season_id").map_err(|e| {
-                        internal_err(format!("decode season_id: {e}"))
-                    })?,
-                    season_number: row.try_get("season_number").map_err(
-                        |e| internal_err(format!("decode season_number: {e}")),
-                    )?,
-                    episode_number: row.try_get("episode_number").map_err(
-                        |e| internal_err(format!("decode episode_number: {e}")),
-                    )?,
-                    title: row
-                        .try_get::<Option<String>, _>("title")
-                        .ok()
-                        .flatten(),
-                    overview: row
-                        .try_get::<Option<String>, _>("overview")
-                        .ok()
-                        .flatten(),
-                    air_date: row
-                        .try_get::<Option<NaiveDate>, _>("air_date")
-                        .ok()
-                        .flatten(),
-                    runtime: row
-                        .try_get::<Option<i32>, _>("runtime")
-                        .ok()
-                        .flatten(),
                 };
                 let episode_changed = upsert_episode_read_model(
                     pool,
@@ -2175,7 +1997,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 }
             }
             MediaID::Season(id) => {
-                let has_available_episode = sqlx::query_scalar::<_, bool>(
+                let has_available_episode = sqlx::query_scalar!(
                     r#"
                     SELECT EXISTS (
                         SELECT 1 FROM episode_references er
@@ -2184,11 +2006,11 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                             AND mf.is_available = TRUE
                             AND mf.tombstoned_at IS NULL
                         WHERE er.season_id = $1
-                    )
+                    ) AS "exists!"
                     "#,
+                    id.0,
+                    library_id.0
                 )
-                .bind(id.0)
-                .bind(library_id.0)
                 .fetch_one(pool)
                 .await
                 .map_err(|e| {
@@ -2223,28 +2045,22 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 }
             }
             MediaID::Series(id) => {
-                let ep_ids = sqlx::query(
+                let ids = sqlx::query_scalar!(
                     r#"
-                    SELECT er.id FROM episode_references er
+                    SELECT er.id AS "id!" FROM episode_references er
                     JOIN series s ON er.series_id = s.id AND s.library_id = $2
                     JOIN media_files mf ON er.file_id = mf.id
                         AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL
                     WHERE er.series_id = $1
                     "#,
+                    id.0,
+                    library_id.0
                 )
-                .bind(id.0)
-                .bind(library_id.0)
                 .fetch_all(pool)
                 .await
                 .map_err(|e| {
                     internal_err(format!("failed to load series episodes: {e}"))
                 })?;
-                let mut ids = Vec::with_capacity(ep_ids.len());
-                for row in ep_ids {
-                    ids.push(row.try_get::<Uuid, _>("id").map_err(|e| {
-                        internal_err(format!("decode episode id: {e}"))
-                    })?);
-                }
                 if ids.is_empty() {
                     invalidate_catalog_change_for_media(
                         pool,
@@ -2346,21 +2162,14 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         // Resolve target library ids, ordered deterministically by id, with
         // cursor pagination.
         let library_ids: Vec<Uuid> = if request.library_ids.is_empty() {
-            sqlx::query(
-                "SELECT id FROM libraries WHERE enabled = TRUE ORDER BY id",
+            sqlx::query_scalar!(
+                r#"SELECT id AS "id!" FROM libraries WHERE enabled = TRUE ORDER BY id"#
             )
             .fetch_all(pool)
             .await
             .map_err(|e| {
                 internal_err(format!("failed to load libraries: {e}"))
             })?
-            .into_iter()
-            .map(|r| {
-                r.try_get::<Uuid, _>("id").map_err(|e| {
-                    internal_err(format!("decode library id: {e}"))
-                })
-            })
-            .collect::<Result<_>>()?
         } else {
             let mut ids: Vec<Uuid> =
                 request.library_ids.iter().map(|l| l.0).collect();
@@ -2523,7 +2332,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
 
         // Lexical FTS matches ordered by rank, then title trigram similarity for
         // fuzzy title hits not already captured. The union is deduped by media id.
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
             WITH fts AS (
                 SELECT sd.media_id, sd.media_type::text AS media_type,
@@ -2549,22 +2358,23 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                   AND (sd.user_id IS NULL OR sd.user_id = $4)
                   AND sd.title %> $1
             )
-            SELECT media_id, media_type, library_id, title, summary, search_excerpt, max(rank) AS rank
+            SELECT media_id AS "media_id!", media_type AS "media_type!", library_id AS "library_id!",
+                   title AS "title!", summary, search_excerpt, max(rank)::real AS "rank?"
             FROM (
                 SELECT * FROM fts
                 UNION ALL
                 SELECT * FROM trgm
             ) combined
             GROUP BY media_id, media_type, library_id, title, summary, search_excerpt
-            ORDER BY rank DESC, title ASC, media_id ASC
+            ORDER BY max(rank) DESC, title ASC, media_id ASC
             LIMIT $5
             "#,
+            query,
+            &library_ids,
+            &media_kinds,
+            user_id,
+            fetch_limit
         )
-        .bind(query)
-        .bind(&library_ids)
-        .bind(&media_kinds)
-        .bind(user_id)
-        .bind(fetch_limit)
         .fetch_all(pool)
         .await
         .map_err(|e| internal_err(format!("candidate search failed: {e}")))?;
@@ -2572,26 +2382,13 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         let has_more = (rows.len() as i64) > limit;
         let mut candidates = Vec::with_capacity(rows.len().min(limit as usize));
         for row in rows.into_iter().take(limit as usize) {
-            let media_uuid: Uuid = row
-                .try_get("media_id")
-                .map_err(|e| internal_err(format!("decode media_id: {e}")))?;
-            let media_type: String = row
-                .try_get("media_type")
-                .map_err(|e| internal_err(format!("decode media_type: {e}")))?;
-            let library_id: Uuid = row
-                .try_get("library_id")
-                .map_err(|e| internal_err(format!("decode library_id: {e}")))?;
-            let title: String = row
-                .try_get("title")
-                .map_err(|e| internal_err(format!("decode title: {e}")))?;
-            let summary: Option<String> =
-                row.try_get::<Option<String>, _>("summary").ok().flatten();
-            let excerpt: Option<String> = row
-                .try_get::<Option<String>, _>("search_excerpt")
-                .ok()
-                .flatten();
-            let rank: Option<f32> =
-                row.try_get::<Option<f32>, _>("rank").ok().flatten();
+            let media_uuid = row.media_id;
+            let media_type = row.media_type;
+            let library_id = row.library_id;
+            let title = row.title;
+            let summary = row.summary;
+            let excerpt = row.search_excerpt;
+            let rank = row.rank;
 
             let media_id = media_id_from_parts(&media_type, media_uuid);
             let media_ref_row = fetch_media_ref_row(
@@ -2901,11 +2698,12 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             .map(|k| artifact_kind_to_db(*k).map(str::to_string))
             .collect::<Result<_>>()?;
 
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            ArtifactSummaryRow,
             r#"
-            SELECT id, artifact_kind::text AS artifact_kind, scope::text AS scope,
-                   library_id, user_id, media_id, media_type::text AS media_type,
-                   title, summary, created_at, updated_at
+            SELECT id AS "id!", artifact_kind::text AS "artifact_kind!",
+                   library_id, media_id, media_type::text AS media_type,
+                   title AS "title!", summary, created_at AS "created_at!", updated_at AS "updated_at!"
             FROM intelligence_artifacts
             WHERE status = 'active'
               AND invalidated_at IS NULL
@@ -2917,13 +2715,13 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             ORDER BY updated_at DESC, id
             LIMIT $6
             "#,
+            &artifact_ids,
+            &media_ids,
+            &library_ids,
+            &kinds,
+            user_id,
+            fetch_limit
         )
-        .bind(&artifact_ids)
-        .bind(&media_ids)
-        .bind(&library_ids)
-        .bind(&kinds)
-        .bind(user_id)
-        .bind(fetch_limit)
         .fetch_all(pool)
         .await
         .map_err(|e| internal_err(format!("artifact search failed: {e}")))?;
@@ -2954,20 +2752,21 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         user_id: Option<Uuid>,
     ) -> Result<Option<IntelligenceArtifactSummary>> {
         let pool = self.pool();
-        let row = sqlx::query(
+        let row = sqlx::query_as!(
+            ArtifactSummaryRow,
             r#"
-            SELECT id, artifact_kind::text AS artifact_kind, scope::text AS scope,
-                   library_id, user_id, media_id, media_type::text AS media_type,
-                   title, summary, created_at, updated_at
+            SELECT id AS "id!", artifact_kind::text AS "artifact_kind!",
+                   library_id, media_id, media_type::text AS media_type,
+                   title AS "title!", summary, created_at AS "created_at!", updated_at AS "updated_at!"
             FROM intelligence_artifacts
             WHERE id = $1
               AND status = 'active'
               AND invalidated_at IS NULL
               AND (user_id IS NULL OR user_id = $2)
             "#,
+            artifact_id,
+            user_id
         )
-        .bind(artifact_id)
-        .bind(user_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| internal_err(format!("get_artifact failed: {e}")))?;
@@ -3022,7 +2821,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
 
         let artifact_id = match upsert.artifact_id {
             Some(id) => {
-                let result = sqlx::query(
+                let result = sqlx::query!(
                     r#"
                     UPDATE intelligence_artifacts
                     SET artifact_kind = $2::varchar,
@@ -3030,7 +2829,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                         library_id = $4,
                         user_id = $5,
                         media_id = $6,
-                        media_type = $7::media_type,
+                        media_type = ($7::text)::media_type,
                         run_id = $8,
                         title = $9,
                         summary = $10,
@@ -3047,22 +2846,22 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     WHERE id = $1
                       AND (($5::uuid IS NULL AND user_id IS NULL) OR user_id = $5)
                     "#,
+                    id,
+                    kind_db,
+                    scope_db,
+                    upsert.library_id.map(|l| l.0),
+                    user_id,
+                    media_id,
+                    media_type,
+                    upsert.run_id,
+                    &title,
+                    summary.as_deref(),
+                    excerpt.as_deref(),
+                    &upsert.content,
+                    &upsert.metadata,
+                    upsert.source_revision,
+                    &hash
                 )
-                .bind(id)
-                .bind(kind_db)
-                .bind(scope_db)
-                .bind(upsert.library_id.map(|l| l.0))
-                .bind(user_id)
-                .bind(media_id)
-                .bind(media_type)
-                .bind(upsert.run_id)
-                .bind(&title)
-                .bind(&summary)
-                .bind(&excerpt)
-                .bind(&upsert.content)
-                .bind(&upsert.metadata)
-                .bind(upsert.source_revision)
-                .bind(&hash)
                 .execute(pool)
                 .await
                 .map_err(|e| {
@@ -3078,7 +2877,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             }
             None => {
                 let new_id = Uuid::now_v7();
-                sqlx::query(
+                sqlx::query!(
                     r#"
                     INSERT INTO intelligence_artifacts (
                         id, artifact_kind, scope, status, library_id, user_id,
@@ -3086,27 +2885,27 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                         title, summary, excerpt, content, metadata,
                         source_system, source_revision, source_updated_at, content_hash
                     )
-                    VALUES ($1, $2::varchar, $3::varchar, 'active', $4, $5, $6, $7::media_type,
+                    VALUES ($1, $2::varchar, $3::varchar, 'active', $4, $5, $6, ($7::text)::media_type,
                             $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb,
                             'ferrex', $15, now(), $16)
                     "#,
+                    new_id,
+                    kind_db,
+                    scope_db,
+                    upsert.library_id.map(|l| l.0),
+                    user_id,
+                    media_id,
+                    media_type,
+                    upsert.run_id,
+                    upsert.supersedes_artifact_id,
+                    &title,
+                    summary.as_deref(),
+                    excerpt.as_deref(),
+                    &upsert.content,
+                    &upsert.metadata,
+                    upsert.source_revision,
+                    &hash
                 )
-                .bind(new_id)
-                .bind(kind_db)
-                .bind(scope_db)
-                .bind(upsert.library_id.map(|l| l.0))
-                .bind(user_id)
-                .bind(media_id)
-                .bind(media_type)
-                .bind(upsert.run_id)
-                .bind(upsert.supersedes_artifact_id)
-                .bind(&title)
-                .bind(&summary)
-                .bind(&excerpt)
-                .bind(&upsert.content)
-                .bind(&upsert.metadata)
-                .bind(upsert.source_revision)
-                .bind(&hash)
                 .execute(pool)
                 .await
                 .map_err(|e| internal_err(format!("insert artifact failed: {e}")))?;
@@ -3115,7 +2914,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                         &format!("superseded by artifact {new_id}"),
                         512,
                     );
-                    let result = sqlx::query(
+                    let result = sqlx::query!(
                         r#"
                         UPDATE intelligence_artifacts
                         SET status = 'superseded',
@@ -3125,10 +2924,10 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                         WHERE id = $1
                           AND (($2::uuid IS NULL AND user_id IS NULL) OR user_id = $2)
                         "#,
+                        superseded,
+                        user_id,
+                        &superseded_reason
                     )
-                    .bind(superseded)
-                    .bind(user_id)
-                    .bind(&superseded_reason)
                     .execute(pool)
                     .await
                     .map_err(|e| {
@@ -3154,7 +2953,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
     ) -> Result<()> {
         let pool = self.pool();
         let reason = truncate_chars(reason, 512);
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r#"
             UPDATE intelligence_artifacts
             SET status = 'invalidated',
@@ -3164,20 +2963,20 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             WHERE id = $2
               AND (($3::uuid IS NULL AND user_id IS NULL) OR user_id = $3)
             "#,
+            &reason,
+            artifact_id,
+            user_id
         )
-        .bind(&reason)
-        .bind(artifact_id)
-        .bind(user_id)
         .execute(pool)
         .await
         .map_err(|e| {
             internal_err(format!("invalidate artifact failed: {e}"))
         })?;
         if result.rows_affected() == 0 {
-            let exists: Option<(Uuid,)> = sqlx::query_as(
-                "SELECT id FROM intelligence_artifacts WHERE id = $1",
+            let exists = sqlx::query_scalar!(
+                r#"SELECT id AS "id!" FROM intelligence_artifacts WHERE id = $1"#,
+                artifact_id
             )
-            .bind(artifact_id)
             .fetch_optional(pool)
             .await
             .map_err(|e| {
@@ -3198,13 +2997,13 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
     async fn create_run(&self, create: IntelligenceRunCreate) -> Result<Uuid> {
         let pool = self.pool();
         if let Some(key) = &create.idempotency_key {
-            let existing = sqlx::query_scalar::<_, Uuid>(
+            let existing = sqlx::query_scalar!(
                 r#"
-                SELECT id FROM intelligence_runs
+                SELECT id AS "id!" FROM intelligence_runs
                 WHERE idempotency_key = $1
                 "#,
+                key
             )
-            .bind(key)
             .fetch_optional(pool)
             .await
             .map_err(|e| {
@@ -3219,29 +3018,29 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             None => (None, None),
         };
         let run_id = create.run_id.unwrap_or_else(Uuid::now_v7);
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO intelligence_runs (
                 id, run_kind, status, library_id, user_id, media_id, media_type,
                 idempotency_key, provider_name, model_name, request_hash,
                 prompt_excerpt, metadata
             )
-            VALUES ($1, $2::varchar, 'queued', $3, $4, $5, $6::media_type, $7, $8, $9, $10,
+            VALUES ($1, $2::varchar, 'queued', $3, $4, $5, ($6::text)::media_type, $7, $8, $9, $10,
                     $11, $12::jsonb)
             "#,
+            run_id,
+            create.run_kind.as_db_str(),
+            create.library_id.map(|l| l.0),
+            create.user_id,
+            media_id,
+            media_type,
+            create.idempotency_key.as_deref(),
+            create.provider_name.as_deref(),
+            create.model_name.as_deref(),
+            create.request_hash.as_deref(),
+            create.prompt_excerpt.as_deref(),
+            &create.metadata
         )
-        .bind(run_id)
-        .bind(create.run_kind.as_db_str())
-        .bind(create.library_id.map(|l| l.0))
-        .bind(create.user_id)
-        .bind(media_id)
-        .bind(media_type)
-        .bind(&create.idempotency_key)
-        .bind(&create.provider_name)
-        .bind(&create.model_name)
-        .bind(&create.request_hash)
-        .bind(&create.prompt_excerpt)
-        .bind(&create.metadata)
         .execute(pool)
         .await
         .map_err(|e| internal_err(format!("create run failed: {e}")))?;
@@ -3267,7 +3066,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             (_, other) => other,
         };
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE intelligence_runs
             SET status = COALESCE($2::varchar, status),
@@ -3281,16 +3080,16 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 updated_at = now()
             WHERE id = $1
             "#,
+            run_id,
+            status,
+            update.provider_name.as_deref(),
+            update.model_name.as_deref(),
+            update.result_summary.as_deref(),
+            update.error_excerpt.as_deref(),
+            started_at,
+            finished_at,
+            update.metadata.as_ref()
         )
-        .bind(run_id)
-        .bind(status)
-        .bind(&update.provider_name)
-        .bind(&update.model_name)
-        .bind(&update.result_summary)
-        .bind(&update.error_excerpt)
-        .bind(started_at)
-        .bind(finished_at)
-        .bind(update.metadata.as_ref())
         .execute(pool)
         .await
         .map_err(|e| internal_err(format!("update run failed: {e}")))?;
@@ -3310,12 +3109,12 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         let run_kind = filter.run_kind.map(|k| k.as_db_str().to_string());
         let status = filter.status.map(|s| s.as_db_str().to_string());
 
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT id, run_kind::text AS run_kind, status::text AS status,
+            SELECT id AS "id!", run_kind::text AS "run_kind!", status::text AS "status!",
                    library_id, user_id, media_id, media_type::text AS media_type,
-                   correlation_id, idempotency_key, model_name,
-                   started_at, finished_at, created_at, updated_at
+                   correlation_id AS "correlation_id!", idempotency_key, model_name,
+                   started_at, finished_at, created_at AS "created_at!", updated_at AS "updated_at!"
             FROM intelligence_runs
             WHERE ($1::uuid IS NULL OR library_id = $1)
               AND ($2::uuid IS NULL OR user_id = $2)
@@ -3324,82 +3123,42 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             ORDER BY created_at DESC, id
             LIMIT $5
             "#,
+            filter.library_id.map(|l| l.0),
+            filter.user_id,
+            run_kind.as_deref(),
+            status.as_deref(),
+            limit
         )
-        .bind(filter.library_id.map(|l| l.0))
-        .bind(filter.user_id)
-        .bind(&run_kind)
-        .bind(&status)
-        .bind(limit)
         .fetch_all(pool)
         .await
         .map_err(|e| internal_err(format!("list runs failed: {e}")))?;
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let media_id: Option<Uuid> = row
-                .try_get("media_id")
-                .map_err(|e| internal_err(format!("decode media_id: {e}")))?;
-            let media_type: Option<String> = row
-                .try_get::<Option<String>, _>("media_type")
-                .map_err(|e| internal_err(format!("decode media_type: {e}")))?;
-            let media = media_id
-                .zip(media_type)
+            let media = row
+                .media_id
+                .zip(row.media_type)
                 .map(|(id, t)| media_id_from_parts(&t, id));
             out.push(IntelligenceRunSummary {
-                run_id: row
-                    .try_get("id")
-                    .map_err(|e| internal_err(format!("decode run id: {e}")))?,
-                run_kind: run_kind_from_db(
-                    &row.try_get::<String, _>("run_kind").map_err(|e| {
-                        internal_err(format!("decode run_kind: {e}"))
-                    })?,
-                ),
-                status: match row
-                    .try_get::<String, _>("status")
-                    .map_err(|e| internal_err(format!("decode status: {e}")))?
-                    .as_str()
-                {
+                run_id: row.id,
+                run_kind: run_kind_from_db(&row.run_kind),
+                status: match row.status.as_str() {
                     "running" => RunStatusInternal::Running,
                     "succeeded" => RunStatusInternal::Succeeded,
                     "failed" => RunStatusInternal::Failed,
                     "cancelled" => RunStatusInternal::Cancelled,
                     _ => RunStatusInternal::Queued,
                 },
-                library_id: row
-                    .try_get::<Option<Uuid>, _>("library_id")
-                    .ok()
-                    .flatten()
-                    .map(LibraryId),
-                user_id: row
-                    .try_get::<Option<Uuid>, _>("user_id")
-                    .ok()
-                    .flatten(),
+                library_id: row.library_id.map(LibraryId),
+                user_id: row.user_id,
                 media_id: media,
-                correlation_id: row.try_get("correlation_id").map_err(|e| {
-                    internal_err(format!("decode correlation_id: {e}"))
-                })?,
-                idempotency_key: row
-                    .try_get::<Option<String>, _>("idempotency_key")
-                    .ok()
-                    .flatten(),
-                model_name: row
-                    .try_get::<Option<String>, _>("model_name")
-                    .ok()
-                    .flatten(),
-                started_at: row
-                    .try_get::<Option<DateTime<Utc>>, _>("started_at")
-                    .ok()
-                    .flatten(),
-                finished_at: row
-                    .try_get::<Option<DateTime<Utc>>, _>("finished_at")
-                    .ok()
-                    .flatten(),
-                created_at: row.try_get("created_at").map_err(|e| {
-                    internal_err(format!("decode created_at: {e}"))
-                })?,
-                updated_at: row.try_get("updated_at").map_err(|e| {
-                    internal_err(format!("decode updated_at: {e}"))
-                })?,
+                correlation_id: row.correlation_id,
+                idempotency_key: row.idempotency_key,
+                model_name: row.model_name,
+                started_at: row.started_at,
+                finished_at: row.finished_at,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
             });
         }
         Ok(out)
@@ -3424,19 +3183,19 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             MAX_INTELLIGENCE_ARTIFACT_LIMIT,
         );
 
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
-            SELECT id, run_kind::text AS run_kind, status::text AS status,
+            SELECT id AS "id!", run_kind::text AS "run_kind!", status::text AS "status!",
                    user_id, model_name, provider_name, prompt_excerpt,
                    result_summary, error_excerpt, started_at, finished_at,
-                   created_at, updated_at
+                   created_at AS "created_at!", updated_at AS "updated_at!"
             FROM intelligence_runs
             WHERE id = $1
               AND (user_id IS NULL OR user_id = $2)
             "#,
+            request.run_id,
+            user_id
         )
-        .bind(request.run_id)
-        .bind(user_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| internal_err(format!("run_audit failed: {e}")))?;
@@ -3444,27 +3203,23 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             MediaError::NotFound("intelligence run not found".to_string())
         })?;
 
-        let run_kind: String = row
-            .try_get("run_kind")
-            .map_err(|e| internal_err(format!("decode run_kind: {e}")))?;
-        let status: String = row
-            .try_get("status")
-            .map_err(|e| internal_err(format!("decode status: {e}")))?;
+        let run_kind = row.run_kind.clone();
+        let status = row.status.clone();
 
         // Tool calls for this run, bounded and ordered by sequence.
-        let tc_rows = sqlx::query(
+        let tc_rows = sqlx::query!(
             r#"
-            SELECT tc.id, tc.tool_name, tc.status::text AS status,
+            SELECT tc.id AS "id!", tc.tool_name AS "tool_name!", tc.status::text AS "status!",
                    tc.started_at, tc.finished_at, tc.error_excerpt,
-                   tc.arguments, tc.result
+                   tc.arguments AS "arguments!", tc.result
             FROM intelligence_tool_calls tc
             WHERE tc.run_id = $1
             ORDER BY tc.sequence, tc.id
             LIMIT $2
             "#,
+            request.run_id,
+            tool_call_fetch_limit
         )
-        .bind(request.run_id)
-        .bind(tool_call_fetch_limit)
         .fetch_all(pool)
         .await
         .map_err(|e| internal_err(format!("list tool calls failed: {e}")))?;
@@ -3473,34 +3228,18 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         let mut tool_calls =
             Vec::with_capacity(tc_rows.len().min(tool_call_limit as usize));
         for tc in tc_rows.into_iter().take(tool_call_limit as usize) {
-            let arguments: Value = tc
-                .try_get("arguments")
-                .map_err(|e| internal_err(format!("decode arguments: {e}")))?;
-            let result: Option<Value> =
-                tc.try_get::<Option<Value>, _>("result").ok().flatten();
-            let tool_name: String = tc
-                .try_get("tool_name")
-                .map_err(|e| internal_err(format!("decode tool_name: {e}")))?;
-            let tc_status: String = tc.try_get("status").map_err(|e| {
-                internal_err(format!("decode tool status: {e}"))
-            })?;
-            let started: Option<DateTime<Utc>> = tc
-                .try_get::<Option<DateTime<Utc>>, _>("started_at")
-                .ok()
-                .flatten();
-            let finished: Option<DateTime<Utc>> = tc
-                .try_get::<Option<DateTime<Utc>>, _>("finished_at")
-                .ok()
-                .flatten();
-            let error_excerpt: Option<String> = tc
-                .try_get::<Option<String>, _>("error_excerpt")
-                .ok()
-                .flatten();
+            let arguments = tc.arguments;
+            let result = tc.result;
+            let tool_name = tc.tool_name;
+            let tc_status = tc.status;
+            let started = tc.started_at;
+            let finished = tc.finished_at;
+            let error_excerpt = tc.error_excerpt;
 
             // Artifact ids produced by this tool call (via run linkage).
-            let artifact_ids = sqlx::query_scalar::<_, Uuid>(
+            let artifact_ids = sqlx::query_scalar!(
                 r#"
-                SELECT id FROM intelligence_artifacts
+                SELECT id AS "id!" FROM intelligence_artifacts
                 WHERE run_id = $1
                   AND status = 'active'
                   AND invalidated_at IS NULL
@@ -3508,18 +3247,16 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 ORDER BY updated_at DESC, id
                 LIMIT $3
                 "#,
+                request.run_id,
+                user_id,
+                i64::from(artifact_limit)
             )
-            .bind(request.run_id)
-            .bind(user_id)
-            .bind(i64::from(artifact_limit))
             .fetch_all(pool)
             .await
             .map_err(|e| internal_err(format!("load run artifacts: {e}")))?;
 
             tool_calls.push(IntelligenceToolCallAudit {
-                tool_call_id: tc.try_get("id").map_err(|e| {
-                    internal_err(format!("decode tool_call id: {e}"))
-                })?,
+                tool_call_id: tc.id,
                 name: tool_name,
                 status: tool_status_from_db(&tc_status),
                 started_at_epoch_seconds: started.map(|t| t.timestamp()),
@@ -3539,9 +3276,9 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             });
         }
 
-        let run_artifact_ids = sqlx::query_scalar::<_, Uuid>(
+        let run_artifact_ids = sqlx::query_scalar!(
             r#"
-            SELECT id FROM intelligence_artifacts
+            SELECT id AS "id!" FROM intelligence_artifacts
             WHERE run_id = $1
               AND status = 'active'
               AND invalidated_at IS NULL
@@ -3549,36 +3286,20 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             ORDER BY updated_at DESC, id
             LIMIT $3
             "#,
+            request.run_id,
+            user_id,
+            i64::from(artifact_limit)
         )
-        .bind(request.run_id)
-        .bind(user_id)
-        .bind(i64::from(artifact_limit))
         .fetch_all(pool)
         .await
         .map_err(|e| internal_err(format!("load run artifacts: {e}")))?;
 
-        let started: Option<DateTime<Utc>> = row
-            .try_get::<Option<DateTime<Utc>>, _>("started_at")
-            .ok()
-            .flatten();
-        let finished: Option<DateTime<Utc>> = row
-            .try_get::<Option<DateTime<Utc>>, _>("finished_at")
-            .ok()
-            .flatten();
-        let prompt_excerpt: Option<String> = row
-            .try_get::<Option<String>, _>("prompt_excerpt")
-            .ok()
-            .flatten();
-        let result_summary: Option<String> = row
-            .try_get::<Option<String>, _>("result_summary")
-            .ok()
-            .flatten();
-        let user_id_row: Option<Uuid> =
-            row.try_get::<Option<Uuid>, _>("user_id").ok().flatten();
-        let model_name: Option<String> = row
-            .try_get::<Option<String>, _>("model_name")
-            .ok()
-            .flatten();
+        let started = row.started_at;
+        let finished = row.finished_at;
+        let prompt_excerpt = row.prompt_excerpt.clone();
+        let result_summary = row.result_summary.clone();
+        let user_id_row = row.user_id;
+        let model_name = row.model_name.clone();
 
         let run = IntelligenceRunAudit {
             run_id: request.run_id,
@@ -3586,10 +3307,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             status: run_status_from_db(&status),
             requested_by_user_id: user_id_row,
             model: model_name,
-            queued_at_epoch_seconds: row
-                .try_get::<DateTime<Utc>, _>("created_at")
-                .ok()
-                .map(|t| t.timestamp()),
+            queued_at_epoch_seconds: Some(row.created_at.timestamp()),
             started_at_epoch_seconds: started.map(|t| t.timestamp()),
             completed_at_epoch_seconds: finished.map(|t| t.timestamp()),
             input_summary: prompt_excerpt
@@ -3620,7 +3338,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
     ) -> Result<Uuid> {
         let pool = self.pool();
         let id = create.tool_call_id.unwrap_or_else(Uuid::now_v7);
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO intelligence_tool_calls (
                 id, run_id, sequence, tool_kind, tool_name, status,
@@ -3628,15 +3346,15 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             )
             VALUES ($1, $2, $3, $4::varchar, $5, 'queued', $6, $7, $8::jsonb)
             "#,
+            id,
+            create.run_id,
+            create.sequence,
+            create.tool_kind.as_db_str(),
+            &create.tool_name,
+            create.idempotency_key.as_deref(),
+            create.input_hash.as_deref(),
+            &create.arguments
         )
-        .bind(id)
-        .bind(create.run_id)
-        .bind(create.sequence)
-        .bind(create.tool_kind.as_db_str())
-        .bind(&create.tool_name)
-        .bind(&create.idempotency_key)
-        .bind(&create.input_hash)
-        .bind(&create.arguments)
         .execute(pool)
         .await
         .map_err(|e| internal_err(format!("create tool call failed: {e}")))?;
@@ -3661,7 +3379,7 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
             (_, other) => other,
         };
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE intelligence_tool_calls
             SET status = COALESCE($2::varchar, status),
@@ -3673,14 +3391,14 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                 updated_at = now()
             WHERE id = $1
             "#,
+            tool_call_id,
+            status,
+            update.output_hash.as_deref(),
+            update.result.as_ref(),
+            update.error_excerpt.as_deref(),
+            started_at,
+            finished_at
         )
-        .bind(tool_call_id)
-        .bind(status)
-        .bind(&update.output_hash)
-        .bind(update.result.as_ref())
-        .bind(&update.error_excerpt)
-        .bind(started_at)
-        .bind(finished_at)
         .execute(pool)
         .await
         .map_err(|e| internal_err(format!("update tool call failed: {e}")))?;
@@ -3692,20 +3410,20 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         run_id: Uuid,
     ) -> Result<Vec<IntelligenceToolCallSummary>> {
         let pool = self.pool();
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT id, run_id, sequence, tool_kind::text AS tool_kind,
-                   tool_name, status::text AS status, idempotency_key,
+            SELECT id AS "id!", run_id AS "run_id!", sequence AS "sequence!", tool_kind::text AS "tool_kind!",
+                   tool_name AS "tool_name!", status::text AS "status!", idempotency_key,
                    input_hash, output_hash, started_at, finished_at,
-                   created_at, updated_at
+                   created_at AS "created_at!", updated_at AS "updated_at!"
             FROM intelligence_tool_calls
             WHERE run_id = $1
             ORDER BY sequence, id
             LIMIT $2
             "#,
+            run_id,
+            i64::from(DEFAULT_INTELLIGENCE_TOOL_CALL_LIMIT)
         )
-        .bind(run_id)
-        .bind(i64::from(DEFAULT_INTELLIGENCE_TOOL_CALL_LIMIT))
         .fetch_all(pool)
         .await
         .map_err(|e| internal_err(format!("list tool calls failed: {e}")))?;
@@ -3713,28 +3431,12 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
             out.push(IntelligenceToolCallSummary {
-                tool_call_id: row.try_get("id").map_err(|e| {
-                    internal_err(format!("decode tool_call id: {e}"))
-                })?,
-                run_id: row
-                    .try_get("run_id")
-                    .map_err(|e| internal_err(format!("decode run_id: {e}")))?,
-                sequence: row.try_get("sequence").map_err(|e| {
-                    internal_err(format!("decode sequence: {e}"))
-                })?,
-                tool_kind: tool_kind_from_db(
-                    &row.try_get::<String, _>("tool_kind").map_err(|e| {
-                        internal_err(format!("decode tool_kind: {e}"))
-                    })?,
-                ),
-                tool_name: row.try_get("tool_name").map_err(|e| {
-                    internal_err(format!("decode tool_name: {e}"))
-                })?,
-                status: match row
-                    .try_get::<String, _>("status")
-                    .map_err(|e| internal_err(format!("decode status: {e}")))?
-                    .as_str()
-                {
+                tool_call_id: row.id,
+                run_id: row.run_id,
+                sequence: row.sequence,
+                tool_kind: tool_kind_from_db(&row.tool_kind),
+                tool_name: row.tool_name,
+                status: match row.status.as_str() {
                     "running" => ToolStatusInternal::Running,
                     "succeeded" => ToolStatusInternal::Succeeded,
                     "failed" => ToolStatusInternal::Failed,
@@ -3742,32 +3444,13 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
                     "cancelled" => ToolStatusInternal::Cancelled,
                     _ => ToolStatusInternal::Queued,
                 },
-                idempotency_key: row
-                    .try_get::<Option<String>, _>("idempotency_key")
-                    .ok()
-                    .flatten(),
-                input_hash: row
-                    .try_get::<Option<String>, _>("input_hash")
-                    .ok()
-                    .flatten(),
-                output_hash: row
-                    .try_get::<Option<String>, _>("output_hash")
-                    .ok()
-                    .flatten(),
-                started_at: row
-                    .try_get::<Option<DateTime<Utc>>, _>("started_at")
-                    .ok()
-                    .flatten(),
-                finished_at: row
-                    .try_get::<Option<DateTime<Utc>>, _>("finished_at")
-                    .ok()
-                    .flatten(),
-                created_at: row.try_get("created_at").map_err(|e| {
-                    internal_err(format!("decode created_at: {e}"))
-                })?,
-                updated_at: row.try_get("updated_at").map_err(|e| {
-                    internal_err(format!("decode updated_at: {e}"))
-                })?,
+                idempotency_key: row.idempotency_key,
+                input_hash: row.input_hash,
+                output_hash: row.output_hash,
+                started_at: row.started_at,
+                finished_at: row.finished_at,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
             });
         }
         Ok(out)
@@ -3779,15 +3462,15 @@ impl IntelligenceRepository for PostgresIntelligenceRepository {
 // ---------------------------------------------------------------------------
 
 async fn current_source_revision(pool: &PgPool) -> Result<i64> {
-    let max_revision: i64 = sqlx::query_scalar::<_, i64>(
+    let max_revision = sqlx::query_scalar!(
         r#"
         SELECT GREATEST(
             (SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_media_context),
             (SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_search_documents),
             (SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_artifacts),
             (SELECT COALESCE(MAX(source_revision), 0) FROM intelligence_artifact_sources)
-        )
-        "#,
+        ) AS "max_revision!"
+        "#
     )
     .fetch_one(pool)
     .await
@@ -3810,57 +3493,57 @@ async fn library_counts(
     library_id: LibraryId,
     user_id: Option<Uuid>,
 ) -> Result<IntelligenceMediaCounts> {
-    let movies: i64 = sqlx::query_scalar::<_, i64>(
+    let movies = sqlx::query_scalar!(
         r#"
-        SELECT count(*)
+        SELECT count(*) AS "count!"
         FROM movie_references mr
         JOIN media_files mf ON mr.file_id = mf.id
             AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL
         WHERE mr.library_id = $1
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_one(pool)
     .await
     .map_err(|e| internal_err(format!("count movies: {e}")))?;
 
-    let series_eps: (i64, i64, i64) = sqlx::query_as::<_, (i64, i64, i64)>(
+    let series_eps = sqlx::query!(
         r#"
         SELECT
-          count(DISTINCT er.series_id)::bigint AS series,
-          count(DISTINCT er.season_id)::bigint AS seasons,
-          count(*)::bigint AS episodes
+          count(DISTINCT er.series_id)::bigint AS "series!",
+          count(DISTINCT er.season_id)::bigint AS "seasons!",
+          count(*)::bigint AS "episodes!"
         FROM episode_references er
         JOIN series s ON er.series_id = s.id AND s.library_id = $1
         JOIN media_files mf ON er.file_id = mf.id
             AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_one(pool)
     .await
     .map_err(|e| internal_err(format!("count tv: {e}")))?;
 
-    let artifacts: i64 = sqlx::query_scalar::<_, i64>(
+    let artifacts = sqlx::query_scalar!(
         r#"
-        SELECT count(*) FROM intelligence_artifacts
+        SELECT count(*) AS "count!" FROM intelligence_artifacts
         WHERE library_id = $1
           AND status = 'active'
           AND invalidated_at IS NULL
           AND (user_id IS NULL OR user_id = $2)
         "#,
+        library_id.0,
+        user_id
     )
-    .bind(library_id.0)
-    .bind(user_id)
     .fetch_one(pool)
     .await
     .map_err(|e| internal_err(format!("count artifacts: {e}")))?;
 
     Ok(IntelligenceMediaCounts {
         movies: movies as u64,
-        series: series_eps.0 as u64,
-        seasons: series_eps.1 as u64,
-        episodes: series_eps.2 as u64,
+        series: series_eps.series as u64,
+        seasons: series_eps.seasons as u64,
+        episodes: series_eps.episodes as u64,
         artifacts: artifacts as u64,
     })
 }
@@ -3905,9 +3588,9 @@ async fn genre_facet(
     library_id: LibraryId,
     limit: u16,
 ) -> Result<Option<IntelligenceFacetGroup>> {
-    let movie_rows = sqlx::query(
+    let movie_rows = sqlx::query!(
         r#"
-        SELECT g.name AS label, count(DISTINCT mr.id)::bigint AS cnt
+        SELECT g.name AS "label!", count(DISTINCT mr.id)::bigint AS "cnt!"
         FROM movie_references mr
         JOIN media_files mf ON mr.file_id = mf.id
             AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL
@@ -3915,15 +3598,15 @@ async fn genre_facet(
         WHERE mr.library_id = $1
         GROUP BY g.name
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_all(pool)
     .await
     .map_err(|e| internal_err(format!("movie genre facet: {e}")))?;
 
-    let series_rows = sqlx::query(
+    let series_rows = sqlx::query!(
         r#"
-        SELECT g.name AS label, count(DISTINCT sg.id)::bigint AS cnt
+        SELECT g.name AS "label!", count(DISTINCT sg.id)::bigint AS "cnt!"
         FROM series_genres g
         JOIN series sg ON sg.id = g.series_id AND sg.library_id = $1
         WHERE EXISTS (
@@ -3934,22 +3617,19 @@ async fn genre_facet(
         )
         GROUP BY g.name
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_all(pool)
     .await
     .map_err(|e| internal_err(format!("series genre facet: {e}")))?;
 
     let mut counts: std::collections::BTreeMap<String, i64> =
         std::collections::BTreeMap::new();
-    for row in movie_rows.iter().chain(series_rows.iter()) {
-        let label: String = row
-            .try_get("label")
-            .map_err(|e| internal_err(format!("decode genre label: {e}")))?;
-        let cnt: i64 = row
-            .try_get("cnt")
-            .map_err(|e| internal_err(format!("decode genre count: {e}")))?;
-        *counts.entry(label).or_insert(0) += cnt;
+    for row in &movie_rows {
+        *counts.entry(row.label.clone()).or_insert(0) += row.cnt;
+    }
+    for row in &series_rows {
+        *counts.entry(row.label.clone()).or_insert(0) += row.cnt;
     }
     if counts.is_empty() {
         return Ok(None);
@@ -3978,9 +3658,9 @@ async fn release_decade_facet(
     library_id: LibraryId,
     limit: u16,
 ) -> Result<Option<IntelligenceFacetGroup>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
-        SELECT decade, count(*)::bigint AS cnt FROM (
+        SELECT decade AS "decade!", count(*)::bigint AS "cnt!" FROM (
             SELECT (EXTRACT(year FROM mm.release_date)::int / 10 * 10) AS decade
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
@@ -4003,8 +3683,8 @@ async fn release_decade_facet(
         GROUP BY decade
         ORDER BY decade
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_all(pool)
     .await
     .map_err(|e| internal_err(format!("decade facet: {e}")))?;
@@ -4015,16 +3695,10 @@ async fn release_decade_facet(
         .into_iter()
         .take(limit as usize)
         .map(|row| {
-            let decade: i32 = row
-                .try_get("decade")
-                .map_err(|e| internal_err(format!("decode decade: {e}")))?;
-            let cnt: i64 = row.try_get("cnt").map_err(|e| {
-                internal_err(format!("decode decade count: {e}"))
-            })?;
             Ok::<_, MediaError>(IntelligenceFacetValue {
-                key: decade.to_string(),
-                label: format!("{}s", decade),
-                count: cnt as u64,
+                key: row.decade.to_string(),
+                label: format!("{}s", row.decade),
+                count: row.cnt as u64,
                 sample_media_ids: Vec::new(),
             })
         })
@@ -4041,9 +3715,9 @@ async fn content_rating_facet(
     library_id: LibraryId,
     limit: u16,
 ) -> Result<Option<IntelligenceFacetGroup>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
-        SELECT rating, count(*)::bigint AS cnt FROM (
+        SELECT rating AS "rating!", count(*)::bigint AS "cnt!" FROM (
             SELECT mm.primary_certification AS rating
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
@@ -4066,8 +3740,8 @@ async fn content_rating_facet(
         GROUP BY rating
         ORDER BY count(*) DESC, rating
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_all(pool)
     .await
     .map_err(|e| internal_err(format!("content rating facet: {e}")))?;
@@ -4078,16 +3752,10 @@ async fn content_rating_facet(
         .into_iter()
         .take(limit as usize)
         .map(|row| {
-            let rating: String = row
-                .try_get("rating")
-                .map_err(|e| internal_err(format!("decode rating: {e}")))?;
-            let cnt: i64 = row.try_get("cnt").map_err(|e| {
-                internal_err(format!("decode rating count: {e}"))
-            })?;
             Ok::<_, MediaError>(IntelligenceFacetValue {
-                key: rating.to_lowercase(),
-                label: rating,
-                count: cnt as u64,
+                key: row.rating.to_lowercase(),
+                label: row.rating,
+                count: row.cnt as u64,
                 sample_media_ids: Vec::new(),
             })
         })
@@ -4104,9 +3772,9 @@ async fn runtime_bucket_facet(
     library_id: LibraryId,
     limit: u16,
 ) -> Result<Option<IntelligenceFacetGroup>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
-        SELECT bucket, count(*)::bigint AS cnt FROM (
+        SELECT bucket AS "bucket!", count(*)::bigint AS "cnt!" FROM (
             SELECT CASE
                 WHEN mm.runtime < 60 THEN 'short'
                 WHEN mm.runtime < 120 THEN 'standard'
@@ -4123,8 +3791,8 @@ async fn runtime_bucket_facet(
         GROUP BY bucket
         ORDER BY bucket
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_all(pool)
     .await
     .map_err(|e| internal_err(format!("runtime facet: {e}")))?;
@@ -4135,16 +3803,10 @@ async fn runtime_bucket_facet(
     let mut values: Vec<IntelligenceFacetValue> = rows
         .into_iter()
         .map(|row| {
-            let bucket: String = row
-                .try_get("bucket")
-                .map_err(|e| internal_err(format!("decode bucket: {e}")))?;
-            let cnt: i64 = row.try_get("cnt").map_err(|e| {
-                internal_err(format!("decode bucket count: {e}"))
-            })?;
             Ok::<_, MediaError>(IntelligenceFacetValue {
-                key: bucket.clone(),
-                label: bucket.to_title_case(),
-                count: cnt as u64,
+                key: row.bucket.clone(),
+                label: row.bucket.to_title_case(),
+                count: row.cnt as u64,
                 sample_media_ids: Vec::new(),
             })
         })
@@ -4166,12 +3828,12 @@ async fn watch_state_facet(
     user_id: Uuid,
     limit: u16,
 ) -> Result<Option<IntelligenceFacetGroup>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
         SELECT
-          count(*) FILTER (WHERE uwp.position / NULLIF(uwp.duration, 0) >= 0.95)::bigint AS completed,
-          count(*) FILTER (WHERE uwp.position / NULLIF(uwp.duration, 0) > 0 AND uwp.position / NULLIF(uwp.duration, 0) < 0.95)::bigint AS in_progress,
-          count(*) FILTER (WHERE uwp.position = 0)::bigint AS started
+          count(*) FILTER (WHERE uwp.position / NULLIF(uwp.duration, 0) >= 0.95)::bigint AS "completed!",
+          count(*) FILTER (WHERE uwp.position / NULLIF(uwp.duration, 0) > 0 AND uwp.position / NULLIF(uwp.duration, 0) < 0.95)::bigint AS "in_progress!",
+          count(*) FILTER (WHERE uwp.position = 0)::bigint AS "started!"
         FROM user_watch_progress uwp
         WHERE uwp.user_id = $1
           AND (
@@ -4208,16 +3870,16 @@ async fn watch_state_facet(
             ))
           )
         "#,
+        user_id,
+        library_id.0
     )
-    .bind(user_id)
-    .bind(library_id.0)
     .fetch_optional(pool)
     .await
     .map_err(|e| internal_err(format!("watch state facet: {e}")))?;
     let Some(row) = rows else { return Ok(None) };
-    let completed: i64 = row.try_get("completed").unwrap_or(0);
-    let in_progress: i64 = row.try_get("in_progress").unwrap_or(0);
-    let started: i64 = row.try_get("started").unwrap_or(0);
+    let completed = row.completed;
+    let in_progress = row.in_progress;
+    let started = row.started;
     if completed + in_progress + started == 0 {
         return Ok(None);
     }
@@ -4256,9 +3918,9 @@ async fn active_artifact_ids_for_library(
     user_id: Option<Uuid>,
     limit: u16,
 ) -> Result<Vec<Uuid>> {
-    let rows = sqlx::query(
+    sqlx::query_scalar!(
         r#"
-        SELECT id FROM intelligence_artifacts
+        SELECT id AS "id!" FROM intelligence_artifacts
         WHERE library_id = $1
           AND status = 'active'
           AND invalidated_at IS NULL
@@ -4266,22 +3928,13 @@ async fn active_artifact_ids_for_library(
         ORDER BY updated_at DESC, id
         LIMIT $3
         "#,
+        library_id.0,
+        user_id,
+        i64::from(limit)
     )
-    .bind(library_id.0)
-    .bind(user_id)
-    .bind(i64::from(limit))
     .fetch_all(pool)
     .await
-    .map_err(|e| internal_err(format!("library artifact ids: {e}")))?;
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.push(
-            row.try_get::<Uuid, _>("id").map_err(|e| {
-                internal_err(format!("decode artifact id: {e}"))
-            })?,
-        );
-    }
-    Ok(out)
+    .map_err(|e| internal_err(format!("library artifact ids: {e}")))
 }
 
 fn merge_facet_group(
@@ -4386,39 +4039,30 @@ async fn related_items_bounded(
         if let Some(series_id) =
             resolve_series_id(pool, &media_row.media_id).await?
         {
-            let rows = sqlx::query(
+            let rows = sqlx::query!(
                 r#"
-            SELECT er.id, er.season_number, er.episode_number, em.name AS title
+            SELECT er.id AS "id!", er.season_number AS "season_number!", er.episode_number AS "episode_number!", em.name AS title
             FROM episode_references er
             LEFT JOIN episode_metadata em ON em.episode_id = er.id
             WHERE er.series_id = $1 AND er.id <> $2
             ORDER BY er.season_number, er.episode_number, er.id
             LIMIT $3
             "#,
+                series_id,
+                media_row.media_id.as_uuid(),
+                limit
             )
-            .bind(series_id)
-            .bind(media_row.media_id.as_uuid())
-            .bind(limit)
             .fetch_all(pool)
             .await
             .map_err(|e| internal_err(format!("same-series relatives: {e}")))?;
             for row in rows {
-                let id: Uuid = row.try_get("id").map_err(|e| {
-                    internal_err(format!("decode relative id: {e}"))
-                })?;
+                let id = row.id;
                 if !seen.insert(id) {
                     continue;
                 }
-                let season_number: i16 =
-                    row.try_get("season_number").map_err(|e| {
-                        internal_err(format!("decode season_number: {e}"))
-                    })?;
-                let episode_number: i16 =
-                    row.try_get("episode_number").map_err(|e| {
-                        internal_err(format!("decode episode_number: {e}"))
-                    })?;
-                let title: Option<String> =
-                    row.try_get::<Option<String>, _>("title").ok().flatten();
+                let season_number = row.season_number;
+                let episode_number = row.episode_number;
+                let title = row.title;
                 let media_id = MediaID::Episode(EpisodeID(id));
                 let artifact_ids =
                     active_artifact_ids_for_media(pool, &media_id, user_id, 4)
@@ -4466,9 +4110,9 @@ async fn related_items_bounded(
     ) && (out.len() as i64) < limit
         && !genres.is_empty()
     {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT DISTINCT mr.id, mr.title, mm.release_date, mm.primary_poster_image_id
+            SELECT DISTINCT mr.id AS "id!", mr.title AS "title!", mm.release_date, mm.primary_poster_image_id AS "primary_poster_image_id?"
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
                 AND mf.is_available = TRUE AND mf.tombstoned_at IS NULL
@@ -4478,32 +4122,22 @@ async fn related_items_bounded(
             ORDER BY mr.title, mr.id
             LIMIT $4
             "#,
+            genres,
+            media_row.library_id.0,
+            media_row.media_id.as_uuid(),
+            limit - out.len() as i64
         )
-        .bind(genres)
-        .bind(media_row.library_id.0)
-        .bind(media_row.media_id.as_uuid())
-        .bind(limit - out.len() as i64)
         .fetch_all(pool)
         .await
         .map_err(|e| internal_err(format!("similar-genre relatives: {e}")))?;
         for row in rows {
-            let id: Uuid = row.try_get("id").map_err(|e| {
-                internal_err(format!("decode relative id: {e}"))
-            })?;
+            let id = row.id;
             if !seen.insert(id) {
                 continue;
             }
-            let title: String = row
-                .try_get("title")
-                .map_err(|e| internal_err(format!("decode title: {e}")))?;
-            let release_date: Option<NaiveDate> = row
-                .try_get::<Option<NaiveDate>, _>("release_date")
-                .ok()
-                .flatten();
-            let poster: Option<Uuid> = row
-                .try_get::<Option<Uuid>, _>("primary_poster_image_id")
-                .ok()
-                .flatten();
+            let title = row.title;
+            let release_date = row.release_date;
+            let poster = row.primary_poster_image_id;
             let media_id = MediaID::Movie(MovieID(id));
             let artifact_ids =
                 active_artifact_ids_for_media(pool, &media_id, user_id, 4)
@@ -4549,17 +4183,17 @@ async fn resolve_series_id(
     media_id: &MediaID,
 ) -> Result<Option<Uuid>> {
     match media_id {
-        MediaID::Episode(id) => sqlx::query_scalar::<_, Uuid>(
-            "SELECT series_id FROM episode_references WHERE id = $1",
+        MediaID::Episode(id) => sqlx::query_scalar!(
+            r#"SELECT series_id AS "series_id!" FROM episode_references WHERE id = $1"#,
+            id.0
         )
-        .bind(id.0)
         .fetch_optional(pool)
         .await
         .map_err(|e| internal_err(format!("resolve episode series: {e}"))),
-        MediaID::Season(id) => sqlx::query_scalar::<_, Uuid>(
-            "SELECT series_id FROM season_references WHERE id = $1",
+        MediaID::Season(id) => sqlx::query_scalar!(
+            r#"SELECT series_id AS "series_id!" FROM season_references WHERE id = $1"#,
+            id.0
         )
-        .bind(id.0)
         .fetch_optional(pool)
         .await
         .map_err(|e| internal_err(format!("resolve season series: {e}"))),
@@ -4567,37 +4201,34 @@ async fn resolve_series_id(
     }
 }
 
+#[derive(Debug, Clone)]
+struct ArtifactSummaryRow {
+    id: Uuid,
+    artifact_kind: String,
+    library_id: Option<Uuid>,
+    media_id: Option<Uuid>,
+    media_type: Option<String>,
+    title: String,
+    summary: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
 /// Build an artifact summary from a database row, fetching the media ref.
 async fn artifact_summary_from_row(
     pool: &PgPool,
-    row: &sqlx::postgres::PgRow,
+    row: &ArtifactSummaryRow,
     summary_max_chars: u16,
 ) -> Result<IntelligenceArtifactSummary> {
-    let artifact_id: Uuid = row
-        .try_get("id")
-        .map_err(|e| internal_err(format!("decode artifact id: {e}")))?;
-    let kind_str: String = row
-        .try_get("artifact_kind")
-        .map_err(|e| internal_err(format!("decode artifact_kind: {e}")))?;
-    let media_id: Option<Uuid> =
-        row.try_get::<Option<Uuid>, _>("media_id").ok().flatten();
-    let media_type: Option<String> = row
-        .try_get::<Option<String>, _>("media_type")
-        .ok()
-        .flatten();
-    let title: String = row
-        .try_get("title")
-        .map_err(|e| internal_err(format!("decode artifact title: {e}")))?;
-    let summary: Option<String> =
-        row.try_get::<Option<String>, _>("summary").ok().flatten();
-    let created_at: DateTime<Utc> = row
-        .try_get("created_at")
-        .map_err(|e| internal_err(format!("decode created_at: {e}")))?;
-    let updated_at: DateTime<Utc> = row
-        .try_get("updated_at")
-        .map_err(|e| internal_err(format!("decode updated_at: {e}")))?;
-    let library_id: Option<Uuid> =
-        row.try_get::<Option<Uuid>, _>("library_id").ok().flatten();
+    let artifact_id = row.id;
+    let kind_str = row.artifact_kind.clone();
+    let media_id = row.media_id;
+    let media_type = row.media_type.clone();
+    let title = row.title.clone();
+    let summary = row.summary.clone();
+    let created_at = row.created_at;
+    let updated_at = row.updated_at;
+    let library_id = row.library_id;
 
     let media = match media_id.zip(media_type) {
         Some((id, t)) => {
@@ -4611,29 +4242,23 @@ async fn artifact_summary_from_row(
     };
 
     // Provenance sources for this artifact.
-    let source_rows = sqlx::query(
+    let source_rows = sqlx::query!(
         r#"
-        SELECT source_kind::text AS source_kind, source_run_id, source_tool_call_id
+        SELECT source_kind::text AS "source_kind!", source_run_id, source_tool_call_id
         FROM intelligence_artifact_sources
         WHERE artifact_id = $1 AND status = 'active'
         ORDER BY source_ordinal
         "#,
+        artifact_id
     )
-    .bind(artifact_id)
     .fetch_all(pool)
     .await
     .map_err(|e| internal_err(format!("load artifact sources: {e}")))?;
     let mut provenance = Vec::new();
     for s in source_rows {
-        let source_kind: String = s
-            .try_get("source_kind")
-            .map_err(|e| internal_err(format!("decode source_kind: {e}")))?;
-        let source_run_id: Option<Uuid> =
-            s.try_get::<Option<Uuid>, _>("source_run_id").ok().flatten();
-        let source_tool_call_id: Option<Uuid> = s
-            .try_get::<Option<Uuid>, _>("source_tool_call_id")
-            .ok()
-            .flatten();
+        let source_kind = s.source_kind;
+        let source_run_id = s.source_run_id;
+        let source_tool_call_id = s.source_tool_call_id;
         let source = match source_kind.as_str() {
             "tool_call" => IntelligenceGroundingSource::ToolCall,
             "artifact" | "manual" => {
@@ -4672,25 +4297,26 @@ async fn artifact_summaries_for_media(
     limit: u16,
     summary_max_chars: u16,
 ) -> Result<Vec<IntelligenceArtifactSummary>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query_as!(
+        ArtifactSummaryRow,
         r#"
-        SELECT id, artifact_kind::text AS artifact_kind, scope::text AS scope,
-               library_id, user_id, media_id, media_type::text AS media_type,
-               title, summary, created_at, updated_at
+        SELECT id AS "id!", artifact_kind::text AS "artifact_kind!",
+               library_id, media_id, media_type::text AS media_type,
+               title AS "title!", summary, created_at AS "created_at!", updated_at AS "updated_at!"
         FROM intelligence_artifacts
         WHERE media_id = $1
-          AND media_type = $2::media_type
+          AND media_type = ($2::text)::media_type
           AND status = 'active'
           AND invalidated_at IS NULL
           AND (user_id IS NULL OR user_id = $3)
         ORDER BY updated_at DESC, id
         LIMIT $4
         "#,
+        media_id.as_uuid(),
+        media_type_str(media_id),
+        user_id,
+        i64::from(limit)
     )
-    .bind(media_id.as_uuid())
-    .bind(media_type_str(media_id))
-    .bind(user_id)
-    .bind(i64::from(limit))
     .fetch_all(pool)
     .await
     .map_err(|e| internal_err(format!("artifact summaries for media: {e}")))?;

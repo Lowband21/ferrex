@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT tc.id AS \"id!\", tc.tool_name AS \"tool_name!\", tc.status::text AS \"status!\",\n                   tc.started_at, tc.finished_at, tc.error_excerpt,\n                   tc.arguments AS \"arguments!\", tc.result\n            FROM intelligence_tool_calls tc\n            WHERE tc.run_id = $1\n            ORDER BY tc.sequence, tc.id\n            LIMIT $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tool_name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "error_excerpt",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "arguments!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "result",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "c17f5ab27f554b62bf4eca33fcc5530f4567b21f186fc3d8e96fd6e92f16a83d"
+}
