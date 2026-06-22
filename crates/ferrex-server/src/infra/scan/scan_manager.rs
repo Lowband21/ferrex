@@ -1,16 +1,15 @@
-use ferrex_model::{MediaID, SubjectKey};
+use ferrex_model::SubjectKey;
 
 use ferrex_core::{
     api::types::{
         ScanLifecycleStatus as ApiScanLifecycleStatus, ScanRunMode,
-        ScanSnapshotDto, ScanStartDisposition, SeriesBundleResponse,
+        ScanSnapshotDto, ScanStartDisposition,
     },
     application::unit_of_work::AppUnitOfWork,
     domain::scan::{
         actors::{
             FileSystemEvent, FileSystemEventKind, FolderScanOutcome,
-            LibraryRootsId,
-            index::{IndexingChange, IndexingOutcome},
+            LibraryRootsId, index::IndexingOutcome,
         },
         orchestration::{
             JobEvent, LibraryActorCommand, LibraryScanRun,
@@ -21,17 +20,15 @@ use ferrex_core::{
             series::{SeriesBundleFinalization, SeriesBundleTracker},
         },
     },
-    error::MediaError,
-    player_prelude::MediaIDLike,
     types::{
-        LibraryId, Media, MediaEvent, ScanEventMetadata,
-        ScanPathReasonCategory, ScanPathReasonDetail, ScanProgressEvent,
-        ScanStageLatencySummary, events::ScanSseEventType,
+        LibraryId, MediaEvent, ScanPathReasonCategory, ScanPathReasonDetail,
+        ScanProgressEvent, ScanStageLatencySummary, events::ScanSseEventType,
     },
 };
 
 use crate::infra::{
     orchestration::ScanOrchestrator,
+    scan::catalog_event_projection::CatalogEventProjection,
     scan::media_event_bus::{MediaEventBus, MediaEventFrame},
     scan::movie_batch_notifier::MovieBatchFinalizationNotifiers,
 };
@@ -39,8 +36,6 @@ use crate::infra::{
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
-
 use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt,
@@ -54,7 +49,7 @@ use tokio::{
     time::interval,
 };
 
-use tracing::{error, info, instrument, warn};
+use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 const EVENT_VERSION: &str = "2";
@@ -176,6 +171,7 @@ struct ScanControlPlaneInner {
     orchestrator: Arc<ScanOrchestrator>,
     progress: ScanRunProgressTracker,
     media_bus: Arc<MediaEventBus>,
+    catalog_events: CatalogEventProjection,
 }
 
 impl ScanControlPlane {
@@ -199,10 +195,15 @@ impl ScanControlPlane {
             MEDIA_EVENT_HISTORY_CAPACITY,
             MEDIA_EVENT_BROADCAST_CAPACITY,
         ));
+        let catalog_events = CatalogEventProjection::new(
+            unit_of_work.clone(),
+            Arc::clone(&media_bus),
+        );
         let progress = ScanRunProgressTracker::new(
             Arc::clone(&unit_of_work),
             Arc::clone(&orchestrator),
             Arc::clone(&media_bus),
+            catalog_events.clone(),
             quiescence,
         );
 
@@ -212,6 +213,7 @@ impl ScanControlPlane {
                 orchestrator,
                 progress,
                 media_bus,
+                catalog_events,
             }),
         }
     }
@@ -227,7 +229,7 @@ impl ScanControlPlane {
     }
 
     pub fn publish_media_event(&self, event: MediaEvent) {
-        self.inner.media_bus.publish(event);
+        self.inner.catalog_events.publish_event(event);
     }
 
     pub fn media_event_history_since_sequence(
@@ -533,6 +535,7 @@ struct ScanRunProgressTrackerInner {
     active_by_run_key: RwLock<HashMap<String, Arc<ScanRun>>>,
     archive: ScanRunProgressArchive,
     media_bus: Arc<MediaEventBus>,
+    catalog_events: CatalogEventProjection,
     aggregator: ScanRunAggregator,
     movie_batch_notifiers: MovieBatchFinalizationNotifiers,
 }
@@ -603,13 +606,13 @@ impl ScanRunProgressTracker {
         unit_of_work: Arc<AppUnitOfWork>,
         orchestrator: Arc<ScanOrchestrator>,
         media_bus: Arc<MediaEventBus>,
+        catalog_events: CatalogEventProjection,
         quiescence: Duration,
     ) -> Self {
         let aggregator = ScanRunAggregator::new(
             Arc::clone(&orchestrator),
             quiescence,
-            Arc::clone(&media_bus),
-            Arc::clone(&unit_of_work),
+            catalog_events.clone(),
         );
 
         Self {
@@ -620,6 +623,7 @@ impl ScanRunProgressTracker {
                 active_by_run_key: RwLock::new(HashMap::new()),
                 archive: ScanRunProgressArchive::new(),
                 media_bus,
+                catalog_events,
                 aggregator,
                 movie_batch_notifiers: MovieBatchFinalizationNotifiers::new(),
             }),
@@ -782,7 +786,7 @@ impl ScanRunProgressTrackerInner {
             .on_run_started(
                 run.library_id(),
                 Arc::clone(&self.unit_of_work),
-                Arc::clone(&self.media_bus),
+                self.catalog_events.clone(),
             )
             .await;
 
@@ -2013,7 +2017,11 @@ impl ScanRun {
             None
         };
         self.maybe_log_summary(&event, &payload).await;
-        self.emit_media_event(event, payload, error);
+        if let Some(inner) = self.inner.upgrade() {
+            inner
+                .catalog_events
+                .publish_scan_progress_event(event, payload, error);
+        }
     }
 
     fn progress_pct(completed: u64, dead: u64, total: u64) -> u8 {
@@ -2211,55 +2219,6 @@ impl ScanRun {
         }
 
         warn!(scan = %self.scan_id, status = ?terminal, "finalized scan run");
-    }
-
-    fn emit_media_event(
-        &self,
-        event: ScanEventKind,
-        payload: ScanProgressEvent,
-        error: Option<String>,
-    ) {
-        if let Some(inner) = self.inner.upgrade() {
-            let message = match event {
-                ScanEventKind::Started => MediaEvent::ScanStarted {
-                    scan_id: payload.scan_id,
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-                ScanEventKind::Progress => MediaEvent::ScanProgress {
-                    scan_id: payload.scan_id,
-                    progress: payload.clone(),
-                },
-                ScanEventKind::Quiescing => MediaEvent::ScanProgress {
-                    scan_id: payload.scan_id,
-                    progress: payload.clone(),
-                },
-                ScanEventKind::Completed => MediaEvent::ScanCompleted {
-                    scan_id: payload.scan_id,
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-                ScanEventKind::Failed => MediaEvent::ScanFailed {
-                    scan_id: payload.scan_id,
-                    error: error.unwrap_or_else(|| "scan_failed".to_string()),
-                    metadata: ScanEventMetadata {
-                        version: payload.version.clone(),
-                        correlation_id: payload.correlation_id,
-                        idempotency_key: payload.idempotency_key.clone(),
-                        library_id: payload.library_id,
-                    },
-                },
-            };
-            inner.media_bus.publish(message);
-        }
     }
 }
 
@@ -3619,9 +3578,7 @@ struct ScanRunAggregatorInner {
     runs: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     quiescence_chrono: ChronoDuration,
     stall_timeout: ChronoDuration,
-    media_bus: Arc<MediaEventBus>,
-    unit_of_work: Arc<AppUnitOfWork>,
-    seen_media: Mutex<HashSet<Uuid>>,
+    catalog_events: CatalogEventProjection,
     series_bundles: Mutex<HashMap<LibraryId, SeriesBundleTrackerEntry>>,
 }
 
@@ -3650,8 +3607,7 @@ impl ScanRunAggregator {
     fn new(
         orchestrator: Arc<ScanOrchestrator>,
         quiescence: Duration,
-        media_bus: Arc<MediaEventBus>,
-        unit_of_work: Arc<AppUnitOfWork>,
+        catalog_events: CatalogEventProjection,
     ) -> Self {
         let chrono_window = ChronoDuration::from_std(quiescence)
             .unwrap_or_else(|_| ChronoDuration::seconds(3));
@@ -3665,9 +3621,7 @@ impl ScanRunAggregator {
             runs: RwLock::new(HashMap::new()),
             quiescence_chrono: chrono_window,
             stall_timeout: stall_window,
-            media_bus,
-            unit_of_work,
-            seen_media: Mutex::new(HashSet::new()),
+            catalog_events,
             series_bundles: Mutex::new(HashMap::new()),
         });
 
@@ -3954,7 +3908,10 @@ impl ScanRunAggregatorInner {
             }
             ScanEvent::Indexed(outcome) => {
                 let outcome = *outcome;
-                let result = self.handle_indexed_outcome(outcome.clone()).await;
+                let result = self
+                    .catalog_events
+                    .publish_indexed_outcome(outcome.clone())
+                    .await;
                 let ok = result.is_ok();
 
                 // Attribute index outcome to any active runs for this library
@@ -4061,23 +4018,17 @@ impl ScanRunAggregatorInner {
         };
 
         for finalization in candidates {
-            if !self
-                .confirm_series_bundle_ready(
+            let receivers = self.catalog_events.receiver_count();
+            let Some(frame) = self
+                .catalog_events
+                .publish_series_bundle_finalized(
                     finalization.library_id,
                     finalization.series_id,
                 )
                 .await
-            {
+            else {
                 continue;
-            }
-
-            let event = MediaEvent::SeriesBundleFinalized {
-                library_id: finalization.library_id,
-                series_id: finalization.series_id,
             };
-
-            let receivers = self.media_bus.receiver_count();
-            let frame = self.media_bus.publish(event);
 
             let mut guard = self.series_bundles.lock().await;
             if let Some(entry) = guard.get_mut(&library_id) {
@@ -4092,224 +4043,6 @@ impl ScanRunAggregatorInner {
                 sequence = frame.sequence,
                 "published series bundle finalization"
             );
-        }
-    }
-
-    async fn confirm_series_bundle_ready(
-        &self,
-        library_id: LibraryId,
-        series_id: ferrex_core::types::SeriesID,
-    ) -> bool {
-        let uow = &self.unit_of_work;
-
-        let (series, seasons, episodes) = tokio::join!(
-            uow.media_refs.get_series_reference(&series_id),
-            uow.media_refs.get_series_seasons(&series_id),
-            uow.media_refs.get_series_episodes(&series_id),
-        );
-
-        let mut series = match series {
-            Ok(series) if series.library_id == library_id => series,
-            Ok(_) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    "series bundle finalization library mismatch"
-                );
-                return false;
-            }
-            Err(err) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = %err,
-                    "series bundle finalization failed to hydrate series"
-                );
-                return false;
-            }
-        };
-
-        let seasons = match seasons {
-            Ok(seasons) => seasons,
-            Err(err) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = %err,
-                    "series bundle finalization failed to hydrate seasons"
-                );
-                return false;
-            }
-        };
-
-        let episodes = match episodes {
-            Ok(episodes) => episodes,
-            Err(err) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = %err,
-                    "series bundle finalization failed to hydrate episodes"
-                );
-                return false;
-            }
-        };
-
-        // Ensure the server-side versioning record is up to date at the point
-        // we consider a series bundle "finalized".
-        //
-        // This keeps the version monotonic only when the serialized bundle
-        // payload changes, which is what the player-side cache invalidation
-        // relies on.
-        series.details.available_seasons = Some(seasons.len() as u16);
-        series.details.available_episodes = Some(episodes.len() as u16);
-
-        let response = SeriesBundleResponse {
-            library_id,
-            series_id,
-            series,
-            seasons,
-            episodes,
-        };
-
-        let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&response) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                warn!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = ?err,
-                    "series bundle finalization failed to serialize bundle response"
-                );
-                return false;
-            }
-        };
-
-        let digest = sha2::Sha256::digest(bytes.as_slice());
-        let hash = u64::from_be_bytes(
-            digest[..8]
-                .try_into()
-                .expect("sha256 digest must be at least 8 bytes"),
-        );
-
-        match uow
-            .media_refs
-            .upsert_series_bundle_hash(&library_id, &series_id, hash)
-            .await
-        {
-            Ok(()) => true,
-            Err(err) => {
-                error!(
-                    library = %library_id,
-                    series_id = %series_id,
-                    error = %err,
-                    "failed to upsert series bundle hash during finalization"
-                );
-                false
-            }
-        }
-    }
-
-    async fn handle_indexed_outcome(
-        &self,
-        outcome: IndexingOutcome,
-    ) -> Result<(), String> {
-        let mut media = outcome.media.clone();
-
-        if media.is_none() {
-            media = self.load_media(outcome.media_id).await;
-        }
-
-        let media = match media {
-            Some(media) => media,
-            None => {
-                return Err(format!(
-                    "missing media reference for library {} path {}",
-                    outcome.library_id, outcome.path_norm
-                ));
-            }
-        };
-
-        let mut seen = self.seen_media.lock().await;
-        let first_seen = seen.insert(outcome.media_id.to_uuid());
-        drop(seen);
-
-        let change = match outcome.change {
-            IndexingChange::Created if first_seen => IndexingChange::Created,
-            _ => IndexingChange::Updated,
-        };
-
-        let event = match (media, change) {
-            (Media::Movie(movie), IndexingChange::Created) => {
-                MediaEvent::MovieAdded { movie: *movie }
-            }
-            (Media::Movie(movie), IndexingChange::Updated) => {
-                MediaEvent::MovieUpdated { movie: *movie }
-            }
-            (Media::Series(series), IndexingChange::Created) => {
-                MediaEvent::SeriesAdded { series: *series }
-            }
-            (Media::Series(series), IndexingChange::Updated) => {
-                MediaEvent::SeriesUpdated { series: *series }
-            }
-            (_, _) => return Ok(()),
-        };
-
-        let _ = self.media_bus.publish(event);
-
-        Ok(())
-    }
-
-    async fn load_media(&self, mid: MediaID) -> Option<Media> {
-        let media_refs = &self.unit_of_work.media_refs;
-
-        match mid {
-            MediaID::Movie(movie_id) => {
-                match media_refs.get_movie_reference(&movie_id).await {
-                    Ok(movie) => Some(Media::Movie(Box::new(movie))),
-                    Err(MediaError::NotFound(_)) => None,
-                    Err(err) => {
-                        warn!("failed to hydrate movie reference {mid}: {err}");
-                        None
-                    }
-                }
-            }
-            MediaID::Series(series_id) => {
-                match media_refs.get_series_reference(&series_id).await {
-                    Ok(series) => Some(Media::Series(Box::new(series))),
-                    Err(MediaError::NotFound(_)) => None,
-                    Err(err) => {
-                        warn!(
-                            "failed to hydrate series reference {mid}: {err}"
-                        );
-                        None
-                    }
-                }
-            }
-            MediaID::Season(season_id) => {
-                match media_refs.get_season_reference(&season_id).await {
-                    Ok(season) => Some(Media::Season(Box::new(season))),
-                    Err(MediaError::NotFound(_)) => None,
-                    Err(err) => {
-                        warn!(
-                            "failed to hydrate season reference {mid}: {err}"
-                        );
-                        None
-                    }
-                }
-            }
-            MediaID::Episode(episode_id) => {
-                match media_refs.get_episode_reference(&episode_id).await {
-                    Ok(episode) => Some(Media::Episode(Box::new(episode))),
-                    Err(MediaError::NotFound(_)) => None,
-                    Err(err) => {
-                        warn!(
-                            "failed to hydrate episode reference {mid}: {err}"
-                        );
-                        None
-                    }
-                }
-            }
         }
     }
 
