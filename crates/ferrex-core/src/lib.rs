@@ -117,3 +117,95 @@ pub mod application;
 
 /// Curated re-exports for player- and client-facing consumers.
 pub mod player_prelude;
+
+#[cfg(test)]
+mod collection_schema_migration_tests {
+    const COLLECTION_SCHEMA_MIGRATION: &str =
+        include_str!("../migrations/011_collection_schema.sql");
+
+    fn normalized_migration() -> String {
+        COLLECTION_SCHEMA_MIGRATION.to_ascii_lowercase()
+    }
+
+    #[test]
+    fn collection_schema_migration_declares_required_tables() {
+        let migration = normalized_migration();
+
+        for table in [
+            "collection_definitions",
+            "collection_manual_memberships",
+            "collection_dynamic_rules",
+            "collection_materializations",
+            "collection_materialized_items",
+            "collection_shelf_placements",
+            "collection_sources",
+            "collection_source_memberships",
+        ] {
+            assert!(
+                migration
+                    .contains(&format!("create table if not exists {table}")),
+                "missing table declaration for {table}"
+            );
+        }
+    }
+
+    #[test]
+    fn collection_schema_enforces_membership_constraints() {
+        let migration = normalized_migration();
+
+        for required_fragment in [
+            "uq_collection_manual_memberships_media",
+            "uq_collection_manual_memberships_position",
+            "collection_manual_memberships_media_type_check",
+            "uq_collection_materializations_key",
+            "collection_materializations_state_metadata_check",
+            "uq_collection_materialized_items_position",
+            "idx_collection_materialized_items_visible",
+            "uq_collection_shelf_placements_collection",
+            "uq_collection_shelf_placements_position",
+            "idx_collection_shelf_placements_ordered",
+        ] {
+            assert!(
+                migration.contains(required_fragment),
+                "missing migration constraint/index fragment {required_fragment}"
+            );
+        }
+    }
+
+    #[test]
+    fn collection_schema_keeps_memberships_non_cascading() {
+        let migration = normalized_migration();
+        let manual_membership = migration
+            .split("create table if not exists collection_manual_memberships")
+            .nth(1)
+            .and_then(|tail| tail.split("create unique index").next())
+            .expect("manual membership table block present");
+        let materialized_items = migration
+            .split("create table if not exists collection_materialized_items")
+            .nth(1)
+            .and_then(|tail| tail.split("create unique index").next())
+            .expect("materialized item table block present");
+
+        for table_block in [manual_membership, materialized_items] {
+            assert!(!table_block.contains("references media_files"));
+            assert!(!table_block.contains("references movie_references"));
+            assert!(!table_block.contains("references series"));
+            assert!(!table_block.contains("references season_references"));
+            assert!(!table_block.contains("references episode_references"));
+        }
+    }
+
+    #[test]
+    fn collection_schema_migration_preserves_legacy_tmdb_memberships() {
+        let migration = normalized_migration();
+
+        assert!(
+            migration.contains("comment on table movie_collection_membership")
+        );
+        assert!(!migration.contains("drop table movie_collection_membership"));
+        assert!(!migration.contains("delete from movie_collection_membership"));
+        assert!(
+            !migration.contains("truncate table movie_collection_membership")
+        );
+    }
+}
