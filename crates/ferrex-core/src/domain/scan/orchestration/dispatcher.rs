@@ -15,7 +15,7 @@ use crate::domain::scan::actors::{
     messages::FolderScanOutcome,
 };
 use crate::domain::scan::orchestration::{
-    context::{FolderScanContext, SeriesLink, SeriesRef},
+    context::FolderScanContext,
     correlation::CorrelationCache,
     delta::{
         FolderDeltaRepository, NoopFolderDeltaRepository,
@@ -33,8 +33,11 @@ use crate::domain::scan::orchestration::{
     lease::JobLease,
     queue::QueueService,
     scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
-    series::SeriesResolverPort,
-    series_state::{SeriesScanStateRepository, SeriesScanStatus},
+    series::{
+        EpisodeDependencyDecision, SeriesCoordinator, SeriesDependencyReleaser,
+        SeriesResolverPort,
+    },
+    series_state::SeriesScanStateRepository,
 };
 use crate::error::{MediaError, Result};
 
@@ -152,13 +155,15 @@ where
         let follow_ups =
             FollowUpEnqueuer::new(queue, events.clone(), correlations);
         let deltas = Arc::new(NoopFolderDeltaRepository);
+        let series_coordinator =
+            Arc::new(SeriesCoordinator::new(series_states, series_resolver));
 
         Self {
             folder_flow: FolderScanFlow::new(
                 events.clone(),
                 cursors,
                 actors.clone(),
-                series_states.clone(),
+                series_coordinator.clone(),
                 deltas,
                 planner,
                 follow_ups.clone(),
@@ -166,8 +171,7 @@ where
             media_pipeline_flow: MediaPipelineFlow::new(
                 events,
                 actors,
-                series_states,
-                series_resolver,
+                series_coordinator,
                 planner,
                 follow_ups,
             ),
@@ -335,6 +339,25 @@ where
 
 }
 
+#[async_trait]
+impl<Q, E> SeriesDependencyReleaser for FollowUpEnqueuer<Q, E>
+where
+    Q: QueueService + Send + Sync + 'static,
+    E: ScanEventBus + Send + Sync + 'static,
+{
+    async fn release_series_root_dependency(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+        series_root_path: &crate::domain::scan::orchestration::context::SeriesRootPath,
+    ) -> Result<()> {
+        self.release_dependency(
+            library_id,
+            &DependencyKey::series_root(series_root_path),
+        )
+        .await
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct FollowUpPlanner;
 
@@ -434,8 +457,8 @@ impl FollowUpPlanner {
         job: &MediaAnalyzeJob,
         analyzed: &MediaAnalyzed,
         hierarchy: &crate::domain::scan::orchestration::context::EpisodeScanHierarchy,
+        dependency_key: DependencyKey,
     ) -> EnqueueRequest {
-        let series_root = hierarchy.series_root_path.clone();
         let match_job = EpisodeMatchJob {
             library_id: job.library_id,
             media_id: analyzed.media_id,
@@ -449,7 +472,7 @@ impl FollowUpPlanner {
         let priority =
             priority_for_reason(&job.scan_reason).elevate(JobPriority::P0);
         EnqueueRequest::new(priority, JobPayload::EpisodeMatch(match_job))
-            .with_dependency(DependencyKey::series_root(&series_root))
+            .with_dependency(dependency_key)
     }
 
     fn index_for_ready(
@@ -521,7 +544,7 @@ where
     events: Arc<E>,
     cursors: Arc<C>,
     actors: DispatcherActors,
-    series_states: Arc<Box<dyn SeriesScanStateRepository>>,
+    series_coordinator: Arc<SeriesCoordinator>,
     deltas: Arc<dyn FolderDeltaRepository>,
     planner: FollowUpPlanner,
     follow_ups: FollowUpEnqueuer<Q, E>,
@@ -538,7 +561,7 @@ where
             .field("events", &type_name::<E>())
             .field("cursors", &type_name::<C>())
             .field("actors", &self.actors)
-            .field("series_states", &"SeriesScanStateRepository")
+            .field("series_coordinator", &self.series_coordinator)
             .field("deltas", &"FolderDeltaRepository")
             .field("planner", &self.planner)
             .field("follow_ups", &self.follow_ups)
@@ -556,7 +579,7 @@ where
         events: Arc<E>,
         cursors: Arc<C>,
         actors: DispatcherActors,
-        series_states: Arc<Box<dyn SeriesScanStateRepository>>,
+        series_coordinator: Arc<SeriesCoordinator>,
         deltas: Arc<dyn FolderDeltaRepository>,
         planner: FollowUpPlanner,
         follow_ups: FollowUpEnqueuer<Q, E>,
@@ -565,7 +588,7 @@ where
             events,
             cursors,
             actors,
-            series_states,
+            series_coordinator,
             deltas,
             planner,
             follow_ups,
@@ -915,20 +938,20 @@ where
                     series_ctx.series_root_path.as_str().to_string()
                 });
 
-                let state = match self
-                    .series_states
-                    .mark_discovered(
+                let discovery = match self
+                    .series_coordinator
+                    .record_root_discovery(
                         series_ctx.library_id,
                         series_ctx.series_root_path.clone(),
                         None,
                     )
                     .await
                 {
-                    Ok(state) => state,
+                    Ok(discovery) => discovery,
                     Err(err) => return classify_media_error(err),
                 };
 
-                if !matches!(state.status, SeriesScanStatus::Resolved) {
+                if discovery.should_enqueue_resolution() {
                     let req = self.planner.series_resolve_for_folder(
                         series_ctx,
                         folder_name,
@@ -1074,8 +1097,7 @@ where
 {
     events: Arc<E>,
     actors: DispatcherActors,
-    series_states: Arc<Box<dyn SeriesScanStateRepository>>,
-    series_resolver: Arc<dyn SeriesResolverPort>,
+    series_coordinator: Arc<SeriesCoordinator>,
     planner: FollowUpPlanner,
     follow_ups: FollowUpEnqueuer<Q, E>,
 }
@@ -1089,8 +1111,7 @@ where
         f.debug_struct("MediaPipelineFlow")
             .field("events", &type_name::<E>())
             .field("actors", &self.actors)
-            .field("series_states", &"SeriesScanStateRepository")
-            .field("series_resolver", &"SeriesResolverPort")
+            .field("series_coordinator", &self.series_coordinator)
             .field("planner", &self.planner)
             .field("follow_ups", &self.follow_ups)
             .finish()
@@ -1105,16 +1126,14 @@ where
     fn new(
         events: Arc<E>,
         actors: DispatcherActors,
-        series_states: Arc<Box<dyn SeriesScanStateRepository>>,
-        series_resolver: Arc<dyn SeriesResolverPort>,
+        series_coordinator: Arc<SeriesCoordinator>,
         planner: FollowUpPlanner,
         follow_ups: FollowUpEnqueuer<Q, E>,
     ) -> Self {
         Self {
             events,
             actors,
-            series_states,
-            series_resolver,
+            series_coordinator,
             planner,
             follow_ups,
         }
@@ -1174,55 +1193,37 @@ where
             };
 
             if episode_hierarchy.series_id().is_none() {
-                let series_root = episode_hierarchy.series_root_path.clone();
-                let hint = episode_hierarchy.series_hint().cloned();
-                if let Err(err) = self
-                    .series_states
-                    .mark_discovered(job.library_id, series_root.clone(), hint)
+                let decision = match self
+                    .series_coordinator
+                    .prepare_episode_dependency(
+                        job.library_id,
+                        episode_hierarchy,
+                    )
                     .await
                 {
-                    return classify_media_error(err);
-                }
-
-                let state = match self
-                    .series_resolver
-                    .get_state(job.library_id, &series_root)
-                    .await
-                {
-                    Ok(state) => state,
+                    Ok(decision) => decision,
                     Err(err) => return classify_media_error(err),
                 };
 
-                if let Some(state) = state
-                    && let Some(series_id) = state.series_id
-                    && matches!(state.status, SeriesScanStatus::Resolved)
-                {
-                    let mut hierarchy = episode_hierarchy.clone();
-                    hierarchy.series = SeriesLink::Resolved(SeriesRef {
-                        id: series_id,
-                        slug: state
-                            .hint
-                            .as_ref()
-                            .and_then(|hint| hint.slug.clone()),
-                        title: state
-                            .hint
-                            .as_ref()
-                            .map(|hint| hint.title.clone()),
-                    });
-
-                    let req =
-                        self.planner.metadata_after_resolved_episode_analysis(
-                            job, &analyzed, hierarchy,
+                match decision {
+                    EpisodeDependencyDecision::Ready(hierarchy) => {
+                        let req = self
+                            .planner
+                            .metadata_after_resolved_episode_analysis(
+                                job, &analyzed, hierarchy,
+                            );
+                        return self.follow_ups.enqueue(req).await;
+                    }
+                    EpisodeDependencyDecision::Deferred { dependency_key } => {
+                        let req = self.planner.episode_match_after_analysis(
+                            job,
+                            &analyzed,
+                            episode_hierarchy,
+                            dependency_key,
                         );
-                    return self.follow_ups.enqueue(req).await;
+                        return self.follow_ups.enqueue(req).await;
+                    }
                 }
-
-                let req = self.planner.episode_match_after_analysis(
-                    job,
-                    &analyzed,
-                    episode_hierarchy,
-                );
-                return self.follow_ups.enqueue(req).await;
             }
         }
 
@@ -1234,24 +1235,22 @@ where
         &self,
         job: &SeriesResolveJob,
     ) -> DispatchStatus {
-        let resolution = match self.series_resolver.resolve(job).await {
+        let resolution = match self.series_coordinator.resolve_series(job).await
+        {
             Ok(result) => result,
             Err(err) => {
                 let status = classify_media_error(err);
                 if let DispatchStatus::DeadLetter { error } = &status {
                     let _ = self
-                        .series_resolver
-                        .mark_failed(
-                            job.library_id,
-                            job.series_root_path.clone(),
-                            error.clone(),
-                        )
+                        .series_coordinator
+                        .record_resolution_failure(job, error.clone())
                         .await;
                     if let Err(err) = self
-                        .follow_ups
-                        .release_dependency(
+                        .series_coordinator
+                        .release_blocked_episode_dependencies(
+                            &self.follow_ups,
                             job.library_id,
-                            &DependencyKey::series_root(&job.series_root_path),
+                            &job.series_root_path,
                         )
                         .await
                     {
@@ -1279,10 +1278,11 @@ where
         }
 
         if let Err(err) = self
-            .follow_ups
-            .release_dependency(
+            .series_coordinator
+            .release_blocked_episode_dependencies(
+                &self.follow_ups,
                 job.library_id,
-                &DependencyKey::series_root(&job.series_root_path),
+                &job.series_root_path,
             )
             .await
         {
@@ -1422,40 +1422,14 @@ where
         &self,
         job: &EpisodeMatchJob,
     ) -> DispatchStatus {
-        let series_root = job.hierarchy.series_root_path.clone();
-
-        let state = match self
-            .series_resolver
-            .get_state(job.library_id, &series_root)
+        let hierarchy = match self
+            .series_coordinator
+            .resolve_episode_dependency(job.library_id, &job.hierarchy)
             .await
         {
-            Ok(state) => state,
+            Ok(hierarchy) => hierarchy,
             Err(err) => return classify_media_error(err),
         };
-
-        let Some(state) = state else {
-            return DispatchStatus::DeadLetter {
-                error: "episode match missing series state".into(),
-            };
-        };
-
-        let Some(series_id) = state.series_id else {
-            return DispatchStatus::DeadLetter {
-                error: "episode match missing resolved series id".into(),
-            };
-        };
-        if !matches!(state.status, SeriesScanStatus::Resolved) {
-            return DispatchStatus::DeadLetter {
-                error: "episode match executed before series resolved".into(),
-            };
-        }
-
-        let mut hierarchy = job.hierarchy.clone();
-        hierarchy.series = SeriesLink::Resolved(SeriesRef {
-            id: series_id,
-            slug: state.hint.as_ref().and_then(|hint| hint.slug.clone()),
-            title: state.hint.as_ref().map(|hint| hint.title.clone()),
-        });
 
         let req = self.planner.metadata_after_episode_match(job, hierarchy);
         self.follow_ups.enqueue(req).await
@@ -1494,7 +1468,7 @@ mod tests {
     use crate::domain::scan::orchestration::context::{
         EpisodeHint, EpisodeLink, EpisodeScanHierarchy, SeasonFolderPath,
         SeasonFolderScanContext, SeasonLink, SeriesFolderScanContext,
-        SeriesLink, SeriesRootPath, SeriesScanHierarchy,
+        SeriesLink, SeriesRef, SeriesRootPath, SeriesScanHierarchy,
     };
     use crate::domain::scan::orchestration::events::{
         JobEvent, JobEventPayload,
@@ -1505,7 +1479,7 @@ mod tests {
     use crate::domain::scan::orchestration::runtime::InProcJobEventBus;
     use crate::domain::scan::orchestration::series::SeriesResolution;
     use crate::domain::scan::orchestration::series_state::{
-        InMemorySeriesScanStateRepository, SeriesScanState,
+        InMemorySeriesScanStateRepository, SeriesScanState, SeriesScanStatus,
     };
     use crate::domain::scan::orchestration::{
         job::*,

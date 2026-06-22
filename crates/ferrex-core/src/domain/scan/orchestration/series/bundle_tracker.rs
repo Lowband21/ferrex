@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use ferrex_core::{
+use crate::{
     domain::scan::{
-        AnalyzeScanHierarchy,
         actors::index::IndexingOutcome,
         actors::{FolderScanSummary, MediaFileDiscovered},
         orchestration::context::{
@@ -10,7 +9,7 @@ use ferrex_core::{
             SeriesRootPath,
         },
         orchestration::events::{JobEvent, JobEventPayload},
-        orchestration::job::JobKind,
+        orchestration::job::{AnalyzeScanHierarchy, JobKind},
     },
     types::{LibraryId, SeriesID},
 };
@@ -438,14 +437,14 @@ impl EpisodeFilePathNorm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
-    use ferrex_core::domain::scan::actors::{FolderScanOutcome, MediaKindHint};
-    use ferrex_core::domain::scan::orchestration::ScanReason;
-    use ferrex_core::domain::scan::orchestration::context::{
+    use crate::domain::scan::actors::{FolderScanOutcome, MediaKindHint};
+    use crate::domain::scan::orchestration::ScanReason;
+    use crate::domain::scan::orchestration::context::{
         EpisodeLink, EpisodeScanHierarchy, FolderScanContext, ScanNodeKind,
         SeasonFolderScanContext, SeasonScanHierarchy, SeriesFolderScanContext,
     };
-    use ferrex_core::domain::scan::orchestration::job::MediaFingerprint;
+    use crate::domain::scan::orchestration::job::MediaFingerprint;
+    use chrono::Utc;
     use ferrex_model::{LibraryId as ModelLibraryId, VideoMediaType};
     use uuid::Uuid;
 
@@ -490,17 +489,21 @@ mod tests {
             node: ScanNodeKind::EpisodeFile,
             hierarchy: AnalyzeScanHierarchy::Episode(EpisodeScanHierarchy {
                 series_root_path: series_root.clone(),
-                series: SeriesLink::Hint(ferrex_core::domain::scan::orchestration::context::SeriesHint {
-                    title: "Example".into(),
-                    slug: None,
-                    year: None,
-                    region: None,
-                }),
+                series: SeriesLink::Hint(
+                    crate::domain::scan::orchestration::context::SeriesHint {
+                        title: "Example".into(),
+                        slug: None,
+                        year: None,
+                        region: None,
+                    },
+                ),
                 season: SeasonLink::Number(1),
-                episode: EpisodeLink::Hint(ferrex_core::domain::scan::orchestration::context::EpisodeHint {
-                    number: 1,
-                    title: None,
-                }),
+                episode: EpisodeLink::Hint(
+                    crate::domain::scan::orchestration::context::EpisodeHint {
+                        number: 1,
+                        title: None,
+                    },
+                ),
             }),
             context: FolderScanContext::Season(season_ctx.clone()),
             scan_reason: ScanReason::BulkSeed,
@@ -534,22 +537,26 @@ mod tests {
             media_id: MediaID::Episode(episode_id),
             hierarchy: AnalyzeScanHierarchy::Episode(EpisodeScanHierarchy {
                 series_root_path: series_root.clone(),
-                series: SeriesLink::Resolved(ferrex_core::domain::scan::orchestration::context::SeriesRef {
-                    id: series_id,
-                    slug: None,
-                    title: Some("Example".into()),
-                }),
+                series: SeriesLink::Resolved(
+                    crate::domain::scan::orchestration::context::SeriesRef {
+                        id: series_id,
+                        slug: None,
+                        title: Some("Example".into()),
+                    },
+                ),
                 season: SeasonLink::Number(1),
-                episode: EpisodeLink::Resolved(ferrex_core::domain::scan::orchestration::context::EpisodeRef {
-                    id: episode_id,
-                    number: Some(1),
-                    title: None,
-                }),
+                episode: EpisodeLink::Resolved(
+                    crate::domain::scan::orchestration::context::EpisodeRef {
+                        id: episode_id,
+                        number: Some(1),
+                        title: None,
+                    },
+                ),
             }),
             indexed_at: Utc::now(),
             upserted: true,
             media: None,
-            change: ferrex_core::domain::scan::actors::index::IndexingChange::Created,
+            change: crate::domain::scan::actors::index::IndexingChange::Created,
         };
         tracker.observe_indexed(&indexed);
 
@@ -557,11 +564,13 @@ mod tests {
         tracker.observe_indexed(&IndexingOutcome {
             library_id: ModelLibraryId(library_id.0),
             path_norm: "/demo/Shows/Example/Season 1".into(),
-            media_id: MediaID::Season(ferrex_model::SeasonID(Uuid::from_u128(9))),
+            media_id: MediaID::Season(ferrex_model::SeasonID(Uuid::from_u128(
+                9,
+            ))),
             hierarchy: AnalyzeScanHierarchy::Season(SeasonScanHierarchy {
                 series_root_path: series_root.clone(),
                 series: SeriesLink::Resolved(
-                    ferrex_core::domain::scan::orchestration::context::SeriesRef {
+                    crate::domain::scan::orchestration::context::SeriesRef {
                         id: series_id,
                         slug: None,
                         title: Some("Example".into()),
@@ -572,8 +581,7 @@ mod tests {
             indexed_at: Utc::now(),
             upserted: true,
             media: None,
-            change:
-                ferrex_core::domain::scan::actors::index::IndexingChange::Created,
+            change: crate::domain::scan::actors::index::IndexingChange::Created,
         });
 
         let finalized = tracker.finalization_candidates();
@@ -584,6 +592,111 @@ mod tests {
         tracker.mark_finalized(&series_root);
 
         // Only yields once once marked.
+        assert!(tracker.finalization_candidates().is_empty());
+    }
+
+    #[test]
+    fn terminal_episode_failure_can_complete_bundle_after_root_and_season() {
+        let library_id = LibraryId(Uuid::from_u128(10));
+        let series_id = SeriesID(Uuid::from_u128(11));
+        let series_root =
+            SeriesRootPath::try_new("/demo/Shows/Terminal").unwrap();
+        let (season_folder, season_number) =
+            SeasonFolderPath::try_new_under_series_root(
+                &series_root,
+                "/demo/Shows/Terminal/Season 1",
+            )
+            .unwrap();
+        let series_ctx = SeriesFolderScanContext {
+            library_id,
+            series_root_path: series_root.clone(),
+        };
+        let season_ctx = SeasonFolderScanContext {
+            library_id,
+            series_root_path: series_root.clone(),
+            season_folder_path: season_folder,
+            season_number,
+        };
+        let episode_path = "/demo/Shows/Terminal/Season 1/S01E01.mkv";
+        let mut tracker = SeriesBundleTracker::default();
+
+        tracker.observe_folder_discovered(&FolderScanContext::Series(
+            series_ctx.clone(),
+        ));
+        tracker.observe_folder_discovered(&FolderScanContext::Season(
+            season_ctx.clone(),
+        ));
+        assert!(tracker.finalization_candidates().is_empty());
+
+        tracker.observe_job_event(&JobEvent::from_job(
+            None,
+            library_id,
+            "episode:index".into(),
+            Some(ferrex_model::SubjectKey::path(episode_path).unwrap()),
+            JobEventPayload::Enqueued {
+                job_id: crate::domain::scan::orchestration::job::JobId::new(),
+                kind: crate::domain::scan::orchestration::job::JobKind::IndexUpsert,
+                priority: crate::domain::scan::orchestration::job::JobPriority::P0,
+            },
+        ));
+        tracker.observe_folder_scan_completed(&FolderScanSummary {
+            context: FolderScanContext::Series(series_ctx),
+            discovered_files: 0,
+            enqueued_subfolders: 1,
+            listing_hash: "root".into(),
+            outcome: FolderScanOutcome::Changed,
+            completed_at: Utc::now(),
+        });
+        tracker.observe_folder_scan_completed(&FolderScanSummary {
+            context: FolderScanContext::Season(season_ctx.clone()),
+            discovered_files: 1,
+            enqueued_subfolders: 0,
+            listing_hash: "season".into(),
+            outcome: FolderScanOutcome::Changed,
+            completed_at: Utc::now(),
+        });
+        assert!(tracker.finalization_candidates().is_empty());
+
+        tracker.observe_indexed(&IndexingOutcome {
+            library_id: ModelLibraryId(library_id.0),
+            path_norm: "/demo/Shows/Terminal/Season 1".into(),
+            media_id: MediaID::Season(ferrex_model::SeasonID(Uuid::from_u128(
+                12,
+            ))),
+            hierarchy: AnalyzeScanHierarchy::Season(SeasonScanHierarchy {
+                series_root_path: series_root.clone(),
+                series: SeriesLink::Resolved(
+                    crate::domain::scan::orchestration::context::SeriesRef {
+                        id: series_id,
+                        slug: Some("terminal".into()),
+                        title: Some("Terminal".into()),
+                    },
+                ),
+                season: SeasonLink::Number(1),
+            }),
+            indexed_at: Utc::now(),
+            upserted: true,
+            media: None,
+            change: crate::domain::scan::actors::index::IndexingChange::Created,
+        });
+        assert!(tracker.finalization_candidates().is_empty());
+
+        tracker.observe_job_event(&JobEvent::from_job(
+            None,
+            library_id,
+            "episode:index".into(),
+            Some(ferrex_model::SubjectKey::path(episode_path).unwrap()),
+            JobEventPayload::DeadLettered {
+                job_id: crate::domain::scan::orchestration::job::JobId::new(),
+                kind: crate::domain::scan::orchestration::job::JobKind::IndexUpsert,
+                priority: crate::domain::scan::orchestration::job::JobPriority::P0,
+            },
+        ));
+
+        let finalized = tracker.finalization_candidates();
+        assert_eq!(finalized.len(), 1);
+        assert_eq!(finalized[0].series_id, series_id);
+        tracker.mark_finalized(&series_root);
         assert!(tracker.finalization_candidates().is_empty());
     }
 }

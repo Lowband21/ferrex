@@ -42,6 +42,9 @@ pub use runtime::*;
 pub use scan_cursor::*;
 pub use scan_run::*;
 pub use scheduler::*;
+pub use series::bundle_tracker::{
+    SeriesBundleFinalization, SeriesBundleTracker,
+};
 pub use series::*;
 pub use series_state::*;
 pub use work_planning::*;

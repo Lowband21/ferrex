@@ -18,6 +18,7 @@ use ferrex_core::{
             events::{JobEventPayload, ScanEvent, ScanSeedSummary},
             job::{JobId, JobKind},
             scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
+            series::{SeriesBundleFinalization, SeriesBundleTracker},
         },
     },
     error::MediaError,
@@ -33,9 +34,6 @@ use crate::infra::{
     orchestration::ScanOrchestrator,
     scan::media_event_bus::{MediaEventBus, MediaEventFrame},
     scan::movie_batch_notifier::MovieBatchFinalizationNotifiers,
-    scan::series_bundle_tracker::{
-        SeriesBundleFinalization, SeriesBundleTracker,
-    },
 };
 
 use axum::http::StatusCode;
