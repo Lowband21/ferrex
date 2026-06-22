@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use chrono::Utc;
 use ferrex_model::VideoMediaType;
 use tracing::{Instrument, debug, debug_span, warn};
-use uuid::Uuid;
 
 use crate::database::repository_ports::intelligence::IntelligenceRepository;
 use crate::domain::scan::actors::image_fetch::ImageFetchActor;
@@ -25,14 +24,13 @@ use crate::domain::scan::orchestration::{
         fingerprints_equivalent, reconcile_direct_media,
         removed_child_prefixes,
     },
-    events::{
-        JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key,
-    },
+    enqueuer::PipelineEnqueuer,
+    events::{ScanEvent, ScanEventBus},
     job::{
         AnalyzeScanHierarchy, DependencyKey, EnqueueRequest, EpisodeMatchJob,
-        FolderScanJob, ImageFetchJob, IndexUpsertJob, JobHandle, JobPayload,
-        JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
-        ScanReason, SeriesResolveJob,
+        FolderScanJob, ImageFetchJob, IndexUpsertJob, JobPayload, JobPriority,
+        MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob, ScanReason,
+        SeriesResolveJob,
     },
     lease::JobLease,
     queue::QueueService,
@@ -40,7 +38,7 @@ use crate::domain::scan::orchestration::{
     series::SeriesResolverPort,
     series_state::{SeriesScanStateRepository, SeriesScanStatus},
 };
-use crate::error::{MediaError, Result};
+use crate::error::MediaError;
 
 async fn path_exists(path: &str) -> bool {
     tokio::fs::try_exists(path).await.unwrap_or(false)
@@ -119,11 +117,10 @@ where
     E: ScanEventBus + Send + Sync + 'static,
     C: ScanCursorRepository + Send + Sync + 'static,
 {
-    queue: Arc<Q>,
+    enqueuer: PipelineEnqueuer<Q, E>,
     events: Arc<E>,
     cursors: Arc<C>,
     actors: DispatcherActors,
-    correlations: CorrelationCache,
     series_states: Arc<Box<dyn SeriesScanStateRepository>>,
     series_resolver: Arc<dyn SeriesResolverPort>,
     deltas: Arc<dyn FolderDeltaRepository>,
@@ -139,10 +136,10 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DefaultJobDispatcher")
             .field("queue", &type_name::<Q>())
+            .field("enqueuer", &self.enqueuer)
             .field("events", &type_name::<E>())
             .field("cursors", &type_name::<C>())
             .field("actors", &self.actors)
-            .field("correlations", &self.correlations)
             .field("series_states", &"SeriesScanStateRepository")
             .field("series_resolver", &"SeriesResolverPort")
             .field("deltas", &"FolderDeltaRepository")
@@ -166,12 +163,17 @@ where
         actors: DispatcherActors,
         correlations: CorrelationCache,
     ) -> Self {
+        let enqueuer = PipelineEnqueuer::new(
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            correlations,
+        );
+
         Self {
-            queue,
+            enqueuer,
             events,
             cursors,
             actors,
-            correlations,
             series_states,
             series_resolver,
             deltas: Arc::new(NoopFolderDeltaRepository),
@@ -297,69 +299,12 @@ where
         }
     }
 
-    async fn publish_enqueue_event(
-        &self,
-        handle: &JobHandle,
-        payload: &JobPayload,
-        correlation_hint: Option<Uuid>,
-    ) -> Result<()> {
-        let path_key = stable_path_key(payload);
-
-        if handle.accepted {
-            let event = JobEvent::from_handle(
-                handle,
-                correlation_hint,
-                JobEventPayload::Enqueued {
-                    job_id: handle.job_id,
-                    kind: handle.kind,
-                    priority: handle.priority,
-                },
-                path_key,
-            );
-            self.correlations
-                .remember(handle.job_id, event.meta.correlation_id)
-                .await;
-            self.events.publish(event).await
-        } else if let Some(existing) = handle.merged_into {
-            let existing_correlation = self.correlations.fetch(&existing).await;
-            let event = JobEvent::from_handle(
-                handle,
-                existing_correlation.or(correlation_hint),
-                JobEventPayload::Merged {
-                    existing_job_id: existing,
-                    merged_job_id: handle.job_id,
-                    kind: handle.kind,
-                    priority: handle.priority,
-                },
-                path_key,
-            );
-            self.correlations
-                .remember_if_absent(handle.job_id, event.meta.correlation_id)
-                .await;
-            self.events.publish(event).await
-        } else {
-            Ok(())
-        }
-    }
-
     async fn enqueue_follow_up(
         &self,
         request: EnqueueRequest,
     ) -> DispatchStatus {
-        let correlation_hint = request.correlation_id;
-
-        match self.queue.enqueue(request.clone()).await {
-            Ok(handle) => match self
-                .publish_enqueue_event(
-                    &handle,
-                    &request.payload,
-                    correlation_hint,
-                )
-                .await
-            {
-                Ok(()) => DispatchStatus::Success,
-                Err(err) => self.handle_media_error(err),
-            },
+        match self.enqueuer.enqueue(request).await {
+            Ok(_) => DispatchStatus::Success,
             Err(err) => self.handle_media_error(err),
         }
     }
@@ -368,30 +313,8 @@ where
         &self,
         requests: Vec<EnqueueRequest>,
     ) -> DispatchStatus {
-        if requests.is_empty() {
-            return DispatchStatus::Success;
-        }
-
-        let cloned_requests = requests.clone();
-
-        match self.queue.enqueue_many(cloned_requests).await {
-            Ok(handles) => {
-                for (handle, request) in
-                    handles.into_iter().zip(requests.into_iter())
-                {
-                    if let Err(err) = self
-                        .publish_enqueue_event(
-                            &handle,
-                            &request.payload,
-                            request.correlation_id,
-                        )
-                        .await
-                    {
-                        return self.handle_media_error(err);
-                    }
-                }
-                DispatchStatus::Success
-            }
+        match self.enqueuer.enqueue_many(requests).await {
+            Ok(_) => DispatchStatus::Success,
             Err(err) => self.handle_media_error(err),
         }
     }
@@ -1084,7 +1007,7 @@ where
                         )
                         .await;
                     if let Err(err) = self
-                        .queue
+                        .enqueuer
                         .release_dependency(
                             job.library_id,
                             &DependencyKey::series_root(&job.series_root_path),
@@ -1115,7 +1038,7 @@ where
         }
 
         if let Err(err) = self
-            .queue
+            .enqueuer
             .release_dependency(
                 job.library_id,
                 &DependencyKey::series_root(&job.series_root_path),
@@ -1409,6 +1332,9 @@ mod tests {
         SeasonFolderScanContext, SeasonLink, SeriesFolderScanContext,
         SeriesLink, SeriesRootPath, SeriesScanHierarchy,
     };
+    use crate::domain::scan::orchestration::events::{
+        JobEvent, JobEventPayload,
+    };
     use crate::domain::scan::orchestration::persistence::{
         PostgresCursorRepository, PostgresQueueService,
     };
@@ -1421,6 +1347,7 @@ mod tests {
         job::*,
         lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
     };
+    use crate::error::Result;
     use crate::types::ids::{LibraryId, SeriesID};
     use crate::types::library::LibraryType;
     use ferrex_model::{MediaID, VideoMediaType};
@@ -1898,7 +1825,7 @@ mod tests {
         Arc<PostgresCursorRepository>,
         CorrelationCache,
     ) {
-        let queue = Arc::new(
+        let queue_service = Arc::new(
             PostgresQueueService::new(pool.clone())
                 .await
                 .expect("queue init"),
@@ -2000,7 +1927,7 @@ mod tests {
 
         (
             DefaultJobDispatcher::new(
-                Arc::clone(&queue),
+                Arc::clone(&queue_service),
                 Arc::clone(&events),
                 Arc::clone(&cursors),
                 Arc::clone(&series_states),
@@ -2008,7 +1935,7 @@ mod tests {
                 actors,
                 correlations.clone(),
             ),
-            queue,
+            queue_service,
             events,
             cursors,
             correlations,

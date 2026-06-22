@@ -34,6 +34,7 @@ use ferrex_core::domain::scan::orchestration::{
     config::OrchestratorConfig,
     correlation::CorrelationCache,
     dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
+    enqueuer::PipelineEnqueuer,
     events::{
         JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
         stable_path_key,
@@ -446,74 +447,13 @@ impl ScanOrchestrator {
     }
 
     pub async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
-        let queue = self.runtime.queue();
-        let events = self.runtime.events();
-
-        let path_key = stable_path_key(&request.payload);
-        let library_id = request.payload.library_id();
-        let idempotency_key = request.dedupe_key().to_string();
-        let priority = request.priority;
-        let correlation_hint = request.correlation_id;
-
-        let handle = queue.enqueue(request).await?;
-
-        let correlation_for_event = if handle.accepted {
-            correlation_hint
-        } else if let Some(existing) = handle.merged_into {
-            self.correlations
-                .fetch(&existing)
-                .await
-                .or(correlation_hint)
-        } else {
-            correlation_hint
-        };
-
-        let payload = if handle.accepted {
-            JobEventPayload::Enqueued {
-                job_id: handle.job_id,
-                kind: handle.kind,
-                priority,
-            }
-        } else if let Some(existing_job_id) = handle.merged_into {
-            JobEventPayload::Merged {
-                existing_job_id,
-                merged_job_id: handle.job_id,
-                kind: handle.kind,
-                priority,
-            }
-        } else {
-            JobEventPayload::Enqueued {
-                job_id: handle.job_id,
-                kind: handle.kind,
-                priority,
-            }
-        };
-
-        let event = JobEvent::from_job(
-            correlation_for_event,
-            library_id,
-            idempotency_key,
-            path_key,
-            payload,
+        let enqueuer = PipelineEnqueuer::new(
+            self.runtime.queue(),
+            self.runtime.events(),
+            self.correlations.clone(),
         );
 
-        if handle.accepted {
-            self.correlations
-                .remember(handle.job_id, event.meta.correlation_id)
-                .await;
-        } else {
-            self.correlations
-                .remember_if_absent(handle.job_id, event.meta.correlation_id)
-                .await;
-        }
-
-        events.publish(event).await.map_err(|err| {
-            MediaError::Internal(format!(
-                "failed to publish enqueue event: {err}"
-            ))
-        })?;
-
-        Ok(handle)
+        enqueuer.enqueue(request).await
     }
 
     #[instrument(skip(self), level = "debug", err)]
