@@ -547,6 +547,7 @@ pub struct IntelligenceCandidateSearchResponse {
 pub enum IntelligenceArtifactKind {
     Summary,
     EmbeddingChunk,
+    TranscriptSource,
     TranscriptSegment,
     UserNote,
     GeneratedAnswer,
@@ -641,6 +642,87 @@ pub struct IntelligenceArtifactSourceEdge {
 
 fn is_zero_i64(value: &i64) -> bool {
     *value == 0
+}
+
+/// Transcript source classes exposed by timed-text repository and search DTOs.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum TimedTextSourceKind {
+    Embedded,
+    Sidecar,
+    Manual,
+    Generated,
+}
+
+impl TimedTextSourceKind {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            TimedTextSourceKind::Embedded => "embedded",
+            TimedTextSourceKind::Sidecar => "sidecar",
+            TimedTextSourceKind::Manual => "manual",
+            TimedTextSourceKind::Generated => "generated",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Self {
+        match value {
+            "sidecar" => TimedTextSourceKind::Sidecar,
+            "manual" => TimedTextSourceKind::Manual,
+            "generated" => TimedTextSourceKind::Generated,
+            _ => TimedTextSourceKind::Embedded,
+        }
+    }
+}
+
+/// Bounded timestamped transcript snippet returned by timed-text search.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimedTextSnippet {
+    pub media: IntelligenceMediaRef,
+    pub source_id: Uuid,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub segment_ids: Vec<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<Uuid>,
+    pub source_kind: TimedTextSourceKind,
+    pub language_code: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub snippet: IntelligenceSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+}
+
+/// Request for bounded timed-text snippet search.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimedTextSnippetSearchRequest {
+    pub query: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub library_ids: Vec<LibraryId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media_ids: Vec<MediaID>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media_kinds: Vec<IntelligenceMediaKind>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub language_codes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_kinds: Vec<TimedTextSourceKind>,
+    #[serde(default)]
+    pub pagination: IntelligencePagination,
+    #[serde(default)]
+    pub caps: IntelligenceCaps,
+    #[serde(default)]
+    pub include_artifacts: bool,
+}
+
+/// Response for bounded timed-text snippet search.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimedTextSnippetSearchResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub snippets: Vec<TimedTextSnippet>,
+    #[serde(default)]
+    pub page: IntelligencePageInfo,
+    #[serde(default)]
+    pub caps: IntelligenceCaps,
 }
 
 /// Bounded artifact summary. The raw artifact body remains out-of-band.

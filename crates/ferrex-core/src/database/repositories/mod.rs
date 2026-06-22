@@ -15,6 +15,7 @@ pub mod rbac;
 pub mod security_settings;
 pub mod setup_claims;
 pub mod sync_sessions;
+pub mod transcripts;
 pub mod users;
 pub mod watch_metrics;
 pub mod watch_status;
