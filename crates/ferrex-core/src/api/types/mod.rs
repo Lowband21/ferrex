@@ -3,6 +3,7 @@
 //! specialized namespaces instead of the entire API layer.
 
 pub mod admin;
+mod collection_rule_validation;
 pub mod collections;
 pub mod demo;
 pub mod discovery;
