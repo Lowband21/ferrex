@@ -5,7 +5,6 @@
 //! follow-up automation using the same runtime that production nodes execute.
 
 use std::{
-    collections::HashMap,
     fmt,
     sync::{
         Arc, Mutex as StdMutex,
@@ -23,12 +22,10 @@ use ferrex_core::domain::scan::actors::{
     LibraryActorConfig, LibraryRootsId, NoopActorObserver,
     analyze::{DefaultMediaAnalyzeActor, MediaAnalyzeActor},
     folder::{FolderScanActor, ScannerFileFilterPolicy},
+    image_fetch::{DefaultImageFetchActor, ImageFetchActor},
+    index::{DefaultIndexerActor, IndexerActor},
+    metadata::MetadataActor,
 };
-use ferrex_core::domain::scan::image_fetch::{
-    DefaultImageFetchActor, ImageFetchActor,
-};
-use ferrex_core::domain::scan::index::{DefaultIndexerActor, IndexerActor};
-use ferrex_core::domain::scan::metadata::MetadataActor;
 use ferrex_core::domain::scan::orchestration::{
     budget::InMemoryBudget,
     config::OrchestratorConfig,
@@ -39,14 +36,13 @@ use ferrex_core::domain::scan::orchestration::{
         JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
         stable_path_key,
     },
-    job::{EnqueueRequest, JobHandle, JobKind, JobPriority},
+    job::{EnqueueRequest, JobHandle, JobKind},
     lease::{DequeueRequest, JobLease},
     queue::QueueService,
     runtime::{
         InProcJobEventBus, LibraryActorHandle, LibraryCommandExecutor,
         OrchestratorRuntime, OrchestratorRuntimeBuilder,
     },
-    scheduler::ReadyCountEntry,
     series::{
         DefaultSeriesResolver, SeriesMetadataProvider, SeriesResolverPort,
     },
@@ -413,7 +409,6 @@ impl ScanOrchestrator {
     }
 
     pub async fn start(self: &Arc<Self>) -> Result<()> {
-        self.prime_ready_jobs().await?;
         self.runtime.start().await?;
         self.start_maintenance_scheduler().await;
         Ok(())
@@ -454,60 +449,6 @@ impl ScanOrchestrator {
         );
 
         enqueuer.enqueue(request).await
-    }
-
-    #[instrument(skip(self), level = "debug", err)]
-    async fn prime_ready_jobs(&self) -> Result<()> {
-        let queue = self.runtime.queue();
-        let scheduler = self.runtime.scheduler();
-
-        let persistent_counts = queue.ready_counts_grouped().await?;
-        if persistent_counts.is_empty() {
-            debug!("no ready jobs found during scheduler prime");
-            return Ok(());
-        }
-
-        let mut totals: HashMap<(LibraryId, JobPriority), usize> =
-            HashMap::new();
-        let mut ready_total = 0usize;
-
-        for bucket in persistent_counts.iter() {
-            if bucket.ready == 0 {
-                continue;
-            }
-
-            ready_total += bucket.ready;
-            totals
-                .entry((bucket.library_id, bucket.priority))
-                .and_modify(|count| *count += bucket.ready)
-                .or_insert(bucket.ready);
-        }
-
-        if totals.is_empty() {
-            debug!("no ready jobs to apply after filtering zero-count buckets");
-            return Ok(());
-        }
-
-        let bucket_total = totals.len();
-        let ready_entries: Vec<ReadyCountEntry> = totals
-            .into_iter()
-            .map(|((library_id, priority), count)| ReadyCountEntry {
-                library_id,
-                priority,
-                count,
-            })
-            .collect();
-
-        scheduler.record_ready_bulk(ready_entries).await;
-
-        info!(
-            ready_total,
-            bucket_total,
-            persistent_buckets = persistent_counts.len(),
-            "primed scheduler ready counts from persistence"
-        );
-
-        Ok(())
     }
 
     pub async fn dequeue(

@@ -18,20 +18,28 @@ use axum::{
 use chrono::Utc;
 use ferrex_core::{
     api::types::ScanRunMode,
+    application::unit_of_work::AppUnitOfWork,
+    database::PostgresDatabase,
     domain::scan::{
         actors::folder::{
             DefaultFolderScanActor, FolderListingPlan, FolderScanActor,
+            ScannerFileFilterPolicy,
         },
         orchestration::{
             FolderScanJob, LibraryActorConfig, ScanReason,
+            budget::InMemoryBudget,
+            config::OrchestratorConfig,
             context::{
                 FolderScanContext, MovieFolderScanContext, MovieRootPath,
             },
+            job::{EnqueueRequest, JobPayload, JobPriority},
+            persistence::{PostgresCursorRepository, PostgresQueueService},
             scan_cursor::{
                 ScanCursor, ScanCursorId, ScanCursorRepository, normalize_path,
             },
         },
     },
+    infra::{image_service::ImageService, providers::TmdbApiProvider},
     types::{LibraryId, LibraryReference, LibraryType},
 };
 use ferrex_server::{
@@ -39,6 +47,7 @@ use ferrex_server::{
         ProgressQuery, build_scan_progress_stream, latest_progress_handler,
     },
     infra::{
+        orchestration::ScanOrchestrator,
         scan::scan_manager::ScanLifecycleStatus, startup::NoopStartupHooks,
     },
 };
@@ -205,6 +214,104 @@ async fn persisted_cursor_unchanged_scan_completes_and_replays_terminal_progress
     assert!(sse_text.contains("\"status\":\"completed\""));
     assert!(sse_text.contains("\"known_unchanged_items\":"));
     assert!(!sse_text.contains("dead_lettered_items"));
+
+    orchestrator.shutdown().await?;
+    pool.close().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn orchestrator_start_primes_persisted_ready_jobs_once() -> Result<()> {
+    let db = TempPostgres::start().await?;
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&db.database_url)
+        .await
+        .context("connect to temporary postgres")?;
+    ferrex_core::MIGRATOR
+        .run(&pool)
+        .await
+        .context("migrate temporary postgres")?;
+
+    let media_root = TempDir::new().context("create media root")?;
+    let root = media_root.path().to_path_buf();
+    let movie_folder = root.join("Primed Movie");
+    tokio::fs::create_dir_all(&movie_folder).await?;
+
+    let library_id = LibraryId(Uuid::now_v7());
+    let root_norm = normalize_path(&root)?;
+    seed_movie_library(&pool, library_id, &root_norm).await?;
+
+    let cache_dir = TempDir::new().context("create image cache root")?;
+    let image_cache_dir = cache_dir.path().join("images");
+    tokio::fs::create_dir_all(&image_cache_dir).await?;
+
+    let postgres = Arc::new(PostgresDatabase::from_pool(pool.clone()));
+    let unit_of_work =
+        Arc::new(AppUnitOfWork::from_postgres(Arc::clone(&postgres)).map_err(
+            |err| anyhow::anyhow!("failed to build unit of work: {err}"),
+        )?);
+    let image_service = Arc::new(ImageService::new(
+        unit_of_work.media_files_read.clone(),
+        unit_of_work.images.clone(),
+        image_cache_dir,
+    ));
+    let queue = Arc::new(PostgresQueueService::new(pool.clone()).await?);
+    let cursors = Arc::new(PostgresCursorRepository::new(pool.clone()));
+
+    let mut config = OrchestratorConfig::default();
+    config.queue.max_parallel_scans = 0;
+    config.queue.max_parallel_series_resolve = 0;
+    config.queue.max_parallel_analyses = 0;
+    config.queue.max_parallel_metadata = 0;
+    config.queue.max_parallel_index = 0;
+    config.queue.max_parallel_image_fetch = 0;
+    config.maintenance.enabled = false;
+
+    let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+    let orchestrator = Arc::new(ScanOrchestrator::new(
+        config,
+        Arc::new(TmdbApiProvider::new()),
+        image_service,
+        unit_of_work,
+        queue,
+        cursors,
+        budget,
+        ScannerFileFilterPolicy::default(),
+    )?);
+
+    let request = EnqueueRequest::new(
+        JobPriority::P1,
+        JobPayload::FolderScan(folder_scan_job(
+            library_id,
+            &root,
+            &movie_folder,
+        )?),
+    );
+    let handle = orchestrator.enqueue(request).await?;
+    assert!(handle.accepted, "test setup should persist one ready job");
+
+    orchestrator.start().await?;
+
+    let scheduler = orchestrator.runtime().scheduler();
+    let reservation = scheduler
+        .reserve()
+        .await
+        .expect("persisted ready job should be scheduled after startup");
+    assert_eq!(reservation.library_id, library_id);
+    assert_eq!(reservation.priority, JobPriority::P1);
+
+    let confirmed = scheduler
+        .confirm(reservation.id)
+        .await
+        .expect("reserved job should be confirmable");
+    assert_eq!(confirmed.library_id, library_id);
+    scheduler.record_completed(library_id).await;
+
+    assert!(
+        scheduler.reserve().await.is_none(),
+        "startup must prime persisted ready jobs once, without phantom reservations"
+    );
 
     orchestrator.shutdown().await?;
     pool.close().await;

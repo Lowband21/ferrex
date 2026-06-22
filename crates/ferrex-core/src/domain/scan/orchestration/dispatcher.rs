@@ -1,9 +1,6 @@
 use std::{any::type_name, fmt, path::PathBuf, sync::Arc};
 
-use async_trait::async_trait;
-use chrono::Utc;
-use ferrex_model::VideoMediaType;
-use tracing::{Instrument, debug, debug_span, warn};
+use crate::database::repository_ports::intelligence::IntelligenceRepository;
 use crate::domain::scan::actors::image_fetch::ImageFetchActor;
 use crate::domain::scan::actors::index::{IndexCommand, IndexerActor};
 use crate::domain::scan::actors::metadata::{
@@ -26,9 +23,9 @@ use crate::domain::scan::orchestration::{
     events::{ScanEvent, ScanEventBus},
     job::{
         AnalyzeScanHierarchy, DependencyKey, EnqueueRequest, EpisodeMatchJob,
-        FolderScanJob, ImageFetchJob, IndexUpsertJob, JobPayload,
-        JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
-        ScanReason, SeriesResolveJob,
+        FolderScanJob, ImageFetchJob, IndexUpsertJob, JobPayload, JobPriority,
+        MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob, ScanReason,
+        SeriesResolveJob,
     },
     lease::JobLease,
     queue::QueueService,
@@ -40,6 +37,10 @@ use crate::domain::scan::orchestration::{
     series_state::SeriesScanStateRepository,
 };
 use crate::error::{MediaError, Result};
+use async_trait::async_trait;
+use chrono::Utc;
+use ferrex_model::{MediaID, VideoMediaType};
+use tracing::{Instrument, debug, debug_span, warn};
 
 async fn path_exists(path: &str) -> bool {
     tokio::fs::try_exists(path).await.unwrap_or(false)
@@ -183,6 +184,19 @@ where
         deltas: Arc<dyn FolderDeltaRepository>,
     ) -> Self {
         self.folder_flow = self.folder_flow.with_delta_repository(deltas);
+        self
+    }
+
+    pub fn with_intelligence_repository(
+        mut self,
+        intelligence: Arc<dyn IntelligenceRepository>,
+    ) -> Self {
+        self.folder_flow = self
+            .folder_flow
+            .with_intelligence_repository(Arc::clone(&intelligence));
+        self.media_pipeline_flow = self
+            .media_pipeline_flow
+            .with_intelligence_repository(intelligence);
         self
     }
 }
@@ -336,7 +350,6 @@ where
             .await
             .map(|_| ())
     }
-
 }
 
 #[async_trait]
@@ -546,6 +559,7 @@ where
     actors: DispatcherActors,
     series_coordinator: Arc<SeriesCoordinator>,
     deltas: Arc<dyn FolderDeltaRepository>,
+    intelligence: Option<Arc<dyn IntelligenceRepository>>,
     planner: FollowUpPlanner,
     follow_ups: FollowUpEnqueuer<Q, E>,
 }
@@ -563,6 +577,7 @@ where
             .field("actors", &self.actors)
             .field("series_coordinator", &self.series_coordinator)
             .field("deltas", &"FolderDeltaRepository")
+            .field("intelligence", &self.intelligence.is_some())
             .field("planner", &self.planner)
             .field("follow_ups", &self.follow_ups)
             .finish()
@@ -590,6 +605,7 @@ where
             actors,
             series_coordinator,
             deltas,
+            intelligence: None,
             planner,
             follow_ups,
         }
@@ -603,6 +619,28 @@ where
         self
     }
 
+    fn with_intelligence_repository(
+        mut self,
+        intelligence: Arc<dyn IntelligenceRepository>,
+    ) -> Self {
+        self.intelligence = Some(intelligence);
+        self
+    }
+
+    async fn invalidate_intelligence_catalog_change(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+        media_id: MediaID,
+        reason: &str,
+    ) -> Result<()> {
+        if let Some(intelligence) = &self.intelligence {
+            intelligence
+                .invalidate_media_catalog_change(library_id, media_id, reason)
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn cleanup_deleted_prefixes(
         &self,
         library_id: crate::types::ids::LibraryId,
@@ -613,12 +651,31 @@ where
             return DispatchStatus::Success;
         }
 
+        let affected_media = match self
+            .deltas
+            .list_media_by_prefixes(library_id, prefixes.clone())
+            .await
+        {
+            Ok(media) => media,
+            Err(err) => return classify_media_error(err),
+        };
+
         if let Err(err) = self
             .deltas
             .mark_unavailable_by_prefixes(library_id, prefixes.clone(), reason)
             .await
         {
             return classify_media_error(err);
+        }
+        for media_id in affected_media {
+            if let Err(err) = self
+                .invalidate_intelligence_catalog_change(
+                    library_id, media_id, reason,
+                )
+                .await
+            {
+                return classify_media_error(err);
+            }
         }
         if let Err(err) = self
             .deltas
@@ -727,6 +784,15 @@ where
                 )
                 .await
                 .map_err(classify_media_error)?;
+            for removed in &delta.removals {
+                self.invalidate_intelligence_catalog_change(
+                    library_id,
+                    removed.media_id,
+                    "folder_delta_file_missing",
+                )
+                .await
+                .map_err(classify_media_error)?;
+            }
         }
 
         let known_cursor_paths = self
@@ -1098,6 +1164,7 @@ where
     events: Arc<E>,
     actors: DispatcherActors,
     series_coordinator: Arc<SeriesCoordinator>,
+    intelligence: Option<Arc<dyn IntelligenceRepository>>,
     planner: FollowUpPlanner,
     follow_ups: FollowUpEnqueuer<Q, E>,
 }
@@ -1112,6 +1179,7 @@ where
             .field("events", &type_name::<E>())
             .field("actors", &self.actors)
             .field("series_coordinator", &self.series_coordinator)
+            .field("intelligence", &self.intelligence.is_some())
             .field("planner", &self.planner)
             .field("follow_ups", &self.follow_ups)
             .finish()
@@ -1134,9 +1202,31 @@ where
             events,
             actors,
             series_coordinator,
+            intelligence: None,
             planner,
             follow_ups,
         }
+    }
+
+    fn with_intelligence_repository(
+        mut self,
+        intelligence: Arc<dyn IntelligenceRepository>,
+    ) -> Self {
+        self.intelligence = Some(intelligence);
+        self
+    }
+
+    async fn refresh_intelligence_read_model(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+        media_id: MediaID,
+    ) -> Result<()> {
+        if let Some(intelligence) = &self.intelligence {
+            intelligence
+                .refresh_media_read_model(library_id, media_id, None)
+                .await?;
+        }
+        Ok(())
     }
 
     async fn dispatch(&self, payload: &JobPayload) -> DispatchStatus {
@@ -1401,6 +1491,13 @@ where
         };
 
         if let Err(err) = self
+            .refresh_intelligence_read_model(job.library_id, job.media_id)
+            .await
+        {
+            return classify_media_error(err);
+        }
+
+        if let Err(err) = self
             .events
             .publish_scan_event(ScanEvent::Indexed(Box::new(outcome)))
             .await
@@ -1493,7 +1590,9 @@ mod tests {
     use std::collections::HashMap;
     use tokio::sync::Mutex;
     use tokio::time::Duration;
-        const FIXTURE_LIB_A: LibraryId =
+    use uuid::Uuid;
+
+    const FIXTURE_LIB_A: LibraryId =
         LibraryId(Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
     static DB_TEST_LOCK: Mutex<()> = Mutex::const_new(());
     // const FIXTURE_LIB_B: LibraryId =

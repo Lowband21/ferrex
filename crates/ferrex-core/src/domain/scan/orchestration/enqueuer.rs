@@ -17,10 +17,18 @@ use crate::{
 
 /// Publishes queue enqueue outcomes as durable scan pipeline events and keeps
 /// the in-process correlation cache aligned with the emitted event metadata.
-#[derive(Clone)]
 pub struct JobPublisher<P: ?Sized> {
     events: Arc<P>,
     correlations: CorrelationCache,
+}
+
+impl<P: ?Sized> Clone for JobPublisher<P> {
+    fn clone(&self) -> Self {
+        Self {
+            events: Arc::clone(&self.events),
+            correlations: self.correlations.clone(),
+        }
+    }
 }
 
 impl<P: ?Sized> fmt::Debug for JobPublisher<P> {
@@ -155,10 +163,18 @@ where
 /// boundary interprets the returned handle, records enqueue correlation, derives
 /// stable metadata keys from the original request, and publishes the matching
 /// `JobEvent` frame for every production enqueue path.
-#[derive(Clone)]
 pub struct PipelineEnqueuer<Q: ?Sized, P: ?Sized> {
     queue: Arc<Q>,
     publisher: JobPublisher<P>,
+}
+
+impl<Q: ?Sized, P: ?Sized> Clone for PipelineEnqueuer<Q, P> {
+    fn clone(&self) -> Self {
+        Self {
+            queue: Arc::clone(&self.queue),
+            publisher: self.publisher.clone(),
+        }
+    }
 }
 
 impl<Q: ?Sized, P: ?Sized> fmt::Debug for PipelineEnqueuer<Q, P> {

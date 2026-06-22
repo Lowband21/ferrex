@@ -26,12 +26,14 @@ use ferrex_core::{
     },
 };
 
-use crate::infra::{
-    orchestration::ScanOrchestrator,
-    scan::catalog_event_projection::CatalogEventProjection,
-    scan::media_event_bus::{MediaEventBus, MediaEventFrame},
-    scan::movie_batch_notifier::MovieBatchFinalizationNotifiers,
+pub use super::media_event_bus::MediaEventFrame;
+
+use super::{
+    catalog_event_projection::CatalogEventProjection,
+    media_event_bus::MediaEventBus,
+    movie_batch_notifier::MovieBatchFinalizationNotifiers,
 };
+use crate::infra::orchestration::ScanOrchestrator;
 
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -202,7 +204,6 @@ impl ScanControlPlane {
         let progress = ScanRunProgressTracker::new(
             Arc::clone(&unit_of_work),
             Arc::clone(&orchestrator),
-            Arc::clone(&media_bus),
             catalog_events.clone(),
             quiescence,
         );
@@ -534,7 +535,6 @@ struct ScanRunProgressTrackerInner {
     active_by_scan_id: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     active_by_run_key: RwLock<HashMap<String, Arc<ScanRun>>>,
     archive: ScanRunProgressArchive,
-    media_bus: Arc<MediaEventBus>,
     catalog_events: CatalogEventProjection,
     aggregator: ScanRunAggregator,
     movie_batch_notifiers: MovieBatchFinalizationNotifiers,
@@ -605,7 +605,6 @@ impl ScanRunProgressTracker {
     fn new(
         unit_of_work: Arc<AppUnitOfWork>,
         orchestrator: Arc<ScanOrchestrator>,
-        media_bus: Arc<MediaEventBus>,
         catalog_events: CatalogEventProjection,
         quiescence: Duration,
     ) -> Self {
@@ -622,7 +621,6 @@ impl ScanRunProgressTracker {
                 active_by_scan_id: RwLock::new(HashMap::new()),
                 active_by_run_key: RwLock::new(HashMap::new()),
                 archive: ScanRunProgressArchive::new(),
-                media_bus,
                 catalog_events,
                 aggregator,
                 movie_batch_notifiers: MovieBatchFinalizationNotifiers::new(),

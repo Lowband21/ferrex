@@ -59,7 +59,7 @@ use crate::domain::scan::orchestration::context::{
 };
 use crate::domain::scan::{
     AnalyzeScanHierarchy, MediaFingerprint,
-    analyze::MediaAnalyzed,
+    actors::analyze::MediaAnalyzed,
     orchestration::{
         job::{ImageFetchJob, ImageFetchPriority, ScanReason},
         series::{

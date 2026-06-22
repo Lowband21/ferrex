@@ -14,11 +14,7 @@ use ferrex_server::{
         app_context::AppContext,
         app_state::AppState,
         cache::{MovieBatchesCache, SeriesBundlesCache},
-        config::{
-            AuthConfig, CacheConfig, Config, ConfigMetadata, CorsConfig,
-            DatabaseConfig, FfmpegConfig, HstsSettings, MediaConfig,
-            ScannerConfig, SecurityConfig, ServerConfig,
-        },
+        config::{ConfigLoader, ScannerConfig},
         orchestration::ScanOrchestrator,
         scan::scan_manager::ScanControlPlane,
         startup::StartupHooks,
@@ -96,56 +92,53 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
     std::fs::create_dir_all(&image_cache_dir)
         .context("failed to create image cache directory")?;
 
-    let mut config = Config {
-        server: ServerConfig {
-            host: "127.0.0.1".into(),
-            port: 0,
-        },
-        database: DatabaseConfig { primary_url: None },
-        redis: None,
-        media: MediaConfig { root: None },
-        cache: CacheConfig {
-            root: cache_root.clone(),
-            images: image_cache_dir.clone(),
-            transcode: transcode_cache_dir.clone(),
-            thumbnails: thumbnail_cache_dir.clone(),
-        },
-        ffmpeg: FfmpegConfig {
-            ffmpeg_path: "ffmpeg".into(),
-            ffprobe_path: "ffprobe".into(),
-        },
-        cors: CorsConfig {
-            allowed_origins: vec![],
-            allowed_methods: vec!["GET".into(), "POST".into()],
-            allowed_headers: vec!["authorization".into()],
-            allow_credentials: false,
-        },
-        security: SecurityConfig {
-            enforce_https: false,
-            trust_proxy_headers: false,
-            hsts: HstsSettings {
-                max_age: 31_536_000,
-                include_subdomains: false,
-                preload: false,
-            },
-        },
-        dev_mode: true,
-        auth: AuthConfig {
-            password_pepper: "test-pepper".into(),
-            token_key: "test-token-key".into(),
-            setup_token: None,
-        },
-        scanner: ScannerConfig::default(),
-        rate_limiter: None,
-        metadata: ConfigMetadata::default(),
-    };
+    let env_file = tempdir.path().join("test.env");
+    std::fs::write(
+        &env_file,
+        format!(
+            "DEV_MODE=true\n\
+             SERVER_HOST=127.0.0.1\n\
+             SERVER_PORT=0\n\
+             CACHE_DIR={}\n\
+             IMAGE_CACHE_DIR={}\n\
+             TRANSCODE_CACHE_DIR={}\n\
+             THUMBNAIL_CACHE_DIR={}\n\
+             FFMPEG_PATH=ffmpeg\n\
+             FFPROBE_PATH=ffprobe\n\
+             CORS_ALLOWED_ORIGINS=\n\
+             CORS_ALLOWED_METHODS=GET,POST\n\
+             CORS_ALLOWED_HEADERS=authorization\n\
+             CORS_ALLOW_CREDENTIALS=false\n\
+             ENFORCE_HTTPS=false\n\
+             TRUST_PROXY_HEADERS=false\n\
+             HSTS_MAX_AGE=31536000\n\
+             HSTS_INCLUDE_SUBDOMAINS=false\n\
+             HSTS_PRELOAD=false\n\
+             AUTH_PASSWORD_PEPPER=test-pepper\n\
+             AUTH_TOKEN_KEY=test-token-key\n",
+            cache_root.display(),
+            image_cache_dir.display(),
+            transcode_cache_dir.display(),
+            thumbnail_cache_dir.display(),
+        ),
+    )
+    .context("failed to write test config env file")?;
 
-    config
-        .ensure_directories()
-        .context("failed to prepare cache directories for test config")?;
-    config
-        .normalize_paths()
-        .context("failed to canonicalize cache directories for test config")?;
+    let mut config = ConfigLoader::new()
+        .with_path(&env_file)
+        .load()
+        .context("failed to load test config")?
+        .config;
+    config.database.primary_url = None;
+    config.redis = None;
+    config.media.root = None;
+    config.cors.allowed_origins.clear();
+    config.cors.allowed_methods = vec!["GET".into(), "POST".into()];
+    config.cors.allowed_headers = vec!["authorization".into()];
+    config.cors.allow_credentials = false;
+    config.auth.setup_token = None;
+    config.scanner = ScannerConfig::default();
+    config.rate_limiter = None;
 
     let postgres = Arc::new(PostgresDatabase::from_pool(pool.clone()));
     let unit_of_work = Arc::new(
