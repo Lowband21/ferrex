@@ -15,6 +15,7 @@ use std::{
 };
 
 use ferrex_model::{LibraryId, MediaID};
+use regex::{Captures, Regex};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -31,7 +32,7 @@ use crate::{
     database::repository_ports::transcripts::{
         TranscriptSegmentUpsert, TranscriptSourceUpsert,
     },
-    error::Result,
+    error::{MediaError, Result},
 };
 
 const DEFAULT_LANGUAGE: &str = "und";
@@ -168,13 +169,179 @@ pub trait TimedTextRedactor: Send + Sync {
     fn redact(&self, normalized_text: &str) -> String;
 }
 
-/// Default redactor used when no product-specific redaction policy is supplied.
+/// Redactor that intentionally leaves text untouched for parser/extractor
+/// tests. Production config uses [`PrivacyTimedTextRedactor`] by default.
+#[cfg(test)]
 #[derive(Debug, Default)]
-pub struct NoopTimedTextRedactor;
+struct NoopTimedTextRedactor;
 
+#[cfg(test)]
 impl TimedTextRedactor for NoopTimedTextRedactor {
     fn redact(&self, normalized_text: &str) -> String {
         normalized_text.to_string()
+    }
+}
+
+/// Deterministic built-in redactor for transcript text persisted by Ferrex.
+/// It replaces common personal/contact data and credential/token patterns with
+/// stable labels so search can still match surrounding context without storing
+/// the secret value.
+#[derive(Debug, Clone)]
+pub struct PrivacyTimedTextRedactor {
+    email: Option<Regex>,
+    phone: Option<Regex>,
+    url_secret: Option<Regex>,
+    bearer: Option<Regex>,
+    token_assignment: Option<Regex>,
+    custom: Vec<Regex>,
+}
+
+impl PrivacyTimedTextRedactor {
+    /// Build a redactor from the shared scanner transcript redaction config.
+    pub fn from_config(
+        config: &crate::types::scan::orchestration::config::TranscriptRedactionConfig,
+    ) -> Result<Self> {
+        if !config.enabled {
+            return Ok(Self::disabled());
+        }
+
+        let custom = config
+            .custom_regexes
+            .iter()
+            .enumerate()
+            .map(|(idx, pattern)| {
+                Regex::new(pattern).map_err(|err| {
+                    MediaError::InvalidMedia(format!(
+                        "transcript redaction custom_regexes[{idx}] is invalid: {err}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Self {
+            email: regex_if(
+                config.redact_emails,
+                r"(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b",
+            )?,
+            phone: regex_if(
+                config.redact_phone_numbers,
+                r"\b\+?\d[\d\s().\-]{5,}\d\b",
+            )?,
+            url_secret: regex_if(
+                config.redact_url_secrets,
+                r"(?i)([?&](?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|api[_-]?key|key|secret|sig|signature|auth|password|pass|code)=)([^\s&#]+)",
+            )?,
+            bearer: regex_if(
+                config.redact_bearer_tokens,
+                r"(?i)\b(bearer\s+)([A-Za-z0-9._~+/=\-]{8,})",
+            )?,
+            token_assignment: regex_if(
+                config.redact_bearer_tokens,
+                r#"(?i)\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|token|secret|password)\s*[:=]\s*["']?)([A-Za-z0-9._~+/=\-]{8,})(["']?)"#,
+            )?,
+            custom,
+        })
+    }
+
+    fn disabled() -> Self {
+        Self {
+            email: None,
+            phone: None,
+            url_secret: None,
+            bearer: None,
+            token_assignment: None,
+            custom: Vec::new(),
+        }
+    }
+}
+
+impl Default for PrivacyTimedTextRedactor {
+    fn default() -> Self {
+        Self::from_config(
+            &crate::types::scan::orchestration::config::TranscriptRedactionConfig::default(),
+        )
+        .expect("built-in transcript redaction patterns compile")
+    }
+}
+
+impl TimedTextRedactor for PrivacyTimedTextRedactor {
+    fn redact(&self, normalized_text: &str) -> String {
+        let mut redacted = normalized_text.to_string();
+
+        if let Some(email) = &self.email {
+            redacted = email
+                .replace_all(&redacted, "[REDACTED:email]")
+                .into_owned();
+        }
+
+        if let Some(phone) = &self.phone {
+            redacted = phone
+                .replace_all(&redacted, |caps: &Captures<'_>| {
+                    let value = caps.get(0).map_or("", |m| m.as_str());
+                    let digits =
+                        value.chars().filter(|ch| ch.is_ascii_digit()).count();
+                    if digits >= 7 {
+                        "[REDACTED:phone]".to_string()
+                    } else {
+                        value.to_string()
+                    }
+                })
+                .into_owned();
+        }
+
+        if let Some(url_secret) = &self.url_secret {
+            redacted = url_secret
+                .replace_all(&redacted, |caps: &Captures<'_>| {
+                    format!(
+                        "{}[REDACTED:url_secret]",
+                        caps.get(1).map_or("", |m| m.as_str())
+                    )
+                })
+                .into_owned();
+        }
+
+        if let Some(bearer) = &self.bearer {
+            redacted = bearer
+                .replace_all(&redacted, |caps: &Captures<'_>| {
+                    format!(
+                        "{}[REDACTED:token]",
+                        caps.get(1).map_or("", |m| m.as_str())
+                    )
+                })
+                .into_owned();
+        }
+
+        if let Some(token_assignment) = &self.token_assignment {
+            redacted = token_assignment
+                .replace_all(&redacted, |caps: &Captures<'_>| {
+                    format!(
+                        "{}[REDACTED:token]{}",
+                        caps.get(1).map_or("", |m| m.as_str()),
+                        caps.get(3).map_or("", |m| m.as_str())
+                    )
+                })
+                .into_owned();
+        }
+
+        for custom in &self.custom {
+            redacted = custom
+                .replace_all(&redacted, "[REDACTED:custom]")
+                .into_owned();
+        }
+
+        redacted
+    }
+}
+
+fn regex_if(enabled: bool, pattern: &str) -> Result<Option<Regex>> {
+    if enabled {
+        Regex::new(pattern).map(Some).map_err(|err| {
+            MediaError::Internal(format!(
+                "built-in transcript redaction pattern failed to compile: {err}"
+            ))
+        })
+    } else {
+        Ok(None)
     }
 }
 
@@ -185,6 +352,12 @@ pub struct TimedTextExtractionConfig {
     pub ffprobe_path: PathBuf,
     /// Configured `ffmpeg` binary path.
     pub ffmpeg_path: PathBuf,
+    /// Extract text-convertible embedded subtitle streams.
+    pub extract_embedded: bool,
+    /// Extract sibling `.srt`/`.vtt` sidecar files.
+    pub extract_sidecars: bool,
+    /// Optional normalized language allow-list. Empty means all languages.
+    pub allowed_languages: Vec<String>,
     /// Timeout for embedded stream enumeration.
     pub probe_timeout: Duration,
     /// Timeout for one embedded stream conversion.
@@ -197,6 +370,8 @@ pub struct TimedTextExtractionConfig {
     pub max_converted_subtitle_bytes: usize,
     /// Maximum cues emitted for one source.
     pub max_cues_per_source: usize,
+    /// Maximum transcript segments emitted across all sources for one media.
+    pub max_segments_per_media: usize,
     /// Maximum sources processed for one media file.
     pub max_sources_per_media: usize,
     /// Maximum stored characters for a redacted cue.
@@ -210,6 +385,9 @@ impl fmt::Debug for TimedTextExtractionConfig {
         f.debug_struct("TimedTextExtractionConfig")
             .field("ffprobe_path", &"<configured>")
             .field("ffmpeg_path", &"<configured>")
+            .field("extract_embedded", &self.extract_embedded)
+            .field("extract_sidecars", &self.extract_sidecars)
+            .field("allowed_languages", &self.allowed_languages)
             .field("probe_timeout", &self.probe_timeout)
             .field("convert_timeout", &self.convert_timeout)
             .field("max_sidecar_bytes", &self.max_sidecar_bytes)
@@ -219,6 +397,7 @@ impl fmt::Debug for TimedTextExtractionConfig {
                 &self.max_converted_subtitle_bytes,
             )
             .field("max_cues_per_source", &self.max_cues_per_source)
+            .field("max_segments_per_media", &self.max_segments_per_media)
             .field("max_sources_per_media", &self.max_sources_per_media)
             .field("max_text_chars_per_cue", &self.max_text_chars_per_cue)
             .field("redactor", &"<redactor>")
@@ -231,16 +410,52 @@ impl Default for TimedTextExtractionConfig {
         Self {
             ffprobe_path: PathBuf::from("ffprobe"),
             ffmpeg_path: PathBuf::from("ffmpeg"),
+            extract_embedded: true,
+            extract_sidecars: true,
+            allowed_languages: Vec::new(),
             probe_timeout: DEFAULT_PROBE_TIMEOUT,
             convert_timeout: DEFAULT_CONVERT_TIMEOUT,
             max_sidecar_bytes: DEFAULT_MAX_SIDECAR_BYTES,
             max_probe_json_bytes: DEFAULT_MAX_PROBE_BYTES,
             max_converted_subtitle_bytes: DEFAULT_MAX_CONVERTED_BYTES,
             max_cues_per_source: DEFAULT_MAX_CUES_PER_SOURCE,
+            max_segments_per_media: DEFAULT_MAX_CUES_PER_SOURCE,
             max_sources_per_media: DEFAULT_MAX_SOURCES_PER_MEDIA,
             max_text_chars_per_cue: DEFAULT_MAX_TEXT_CHARS_PER_CUE,
-            redactor: Arc::new(NoopTimedTextRedactor),
+            redactor: Arc::new(PrivacyTimedTextRedactor::default()),
         }
+    }
+}
+
+impl TimedTextExtractionConfig {
+    /// Build extractor runtime settings from the shared scanner config while
+    /// keeping binary paths at their runtime defaults. Server wiring may still
+    /// override `ffprobe_path`/`ffmpeg_path` separately.
+    pub fn from_indexing_config(
+        config: &crate::types::scan::orchestration::config::TranscriptIndexingConfig,
+    ) -> Result<Self> {
+        let mut extraction = Self::default();
+        let timeout =
+            Duration::from_millis(config.extraction_timeout_ms.max(1));
+        let subtitle_bytes = config.max_subtitle_bytes.max(1);
+        let max_segments = config.max_segments_per_media.max(1);
+
+        extraction.extract_embedded = config.embedded_enabled;
+        extraction.extract_sidecars = config.sidecar_enabled;
+        extraction.allowed_languages = normalize_language_allow_list(
+            config.allowed_languages.iter().map(String::as_str),
+        );
+        extraction.probe_timeout = timeout;
+        extraction.convert_timeout = timeout;
+        extraction.max_sidecar_bytes = subtitle_bytes;
+        extraction.max_converted_subtitle_bytes = subtitle_bytes;
+        extraction.max_cues_per_source = max_segments;
+        extraction.max_segments_per_media = max_segments;
+        extraction.max_text_chars_per_cue = config.max_chars_per_segment.max(1);
+        extraction.redactor =
+            Arc::new(PrivacyTimedTextRedactor::from_config(&config.redaction)?);
+
+        Ok(extraction)
     }
 }
 
@@ -309,8 +524,12 @@ pub enum TimedTextSkipKind {
     EmptySource,
     /// Source contained only malformed cues.
     MalformedSource,
+    /// Source language is not included in the configured allow-list.
+    LanguageNotAllowed,
     /// Additional source skipped after the per-media source cap was reached.
     SourceLimitExceeded,
+    /// Additional source skipped after the per-media segment cap was reached.
+    SegmentLimitExceeded,
 }
 
 /// Safe skip status. Does not include paths, raw subtitle text, or command
@@ -467,9 +686,39 @@ impl TimedTextExtractor {
             }
         };
 
-        self.extract_sidecars(&request, &scope, &mut outcome).await;
-        self.extract_embedded(&request, &scope, &mut outcome).await;
+        if self.config.extract_sidecars {
+            self.extract_sidecars(&request, &scope, &mut outcome).await;
+        }
+        if self.config.extract_embedded {
+            self.extract_embedded(&request, &scope, &mut outcome).await;
+        }
         Ok(outcome)
+    }
+
+    fn language_allowed(&self, language_code: &str) -> bool {
+        self.config.allowed_languages.is_empty()
+            || self.config.allowed_languages.iter().any(|allowed| {
+                allowed == &normalize_language_code(language_code)
+            })
+    }
+
+    fn remaining_segments(
+        &self,
+        outcome: &TimedTextExtractionOutcome,
+    ) -> usize {
+        self.config
+            .max_segments_per_media
+            .saturating_sub(outcome.segment_count())
+    }
+
+    fn segment_limit_skip(
+        source: TimedTextSourceRef,
+    ) -> TimedTextExtractionSkip {
+        TimedTextExtractionSkip {
+            source,
+            kind: TimedTextSkipKind::SegmentLimitExceeded,
+            detail: "per-media transcript segment cap reached".to_string(),
+        }
     }
 
     async fn extract_sidecars(
@@ -508,6 +757,23 @@ impl TimedTextExtractor {
             let source_ref = TimedTextSourceRef::Sidecar {
                 path_hash: candidate.path_hash.clone(),
             };
+            let language_code =
+                normalize_language_code(&candidate.language_code);
+            if !self.language_allowed(&language_code) {
+                outcome.skipped.push(TimedTextExtractionSkip {
+                    source: source_ref,
+                    kind: TimedTextSkipKind::LanguageNotAllowed,
+                    detail:
+                        "subtitle language is not in the configured allow-list"
+                            .to_string(),
+                });
+                continue;
+            }
+            let remaining_segments = self.remaining_segments(outcome);
+            if remaining_segments == 0 {
+                outcome.skipped.push(Self::segment_limit_skip(source_ref));
+                continue;
+            }
             let bytes = match read_file_capped(
                 &candidate.path,
                 self.config.max_sidecar_bytes,
@@ -541,7 +807,7 @@ impl TimedTextExtractor {
                 request,
                 source_kind: TimedTextSourceKind::Sidecar,
                 source_ref,
-                language_code: candidate.language_code,
+                language_code,
                 source_key: format!("sidecar:{}", candidate.path_hash),
                 source_name: Some("Sidecar subtitle".to_string()),
                 stream_index: None,
@@ -558,6 +824,7 @@ impl TimedTextExtractor {
                     "format": candidate.format.as_str(),
                     "source": "sidecar",
                 }),
+                source_segment_limit: remaining_segments,
             }) {
                 Ok(batch) => outcome.sources.push(batch),
                 Err(skip) => outcome.skipped.push(skip),
@@ -679,12 +946,30 @@ impl TimedTextExtractor {
                 }
             }
 
+            let language_code = stream_language(&stream.tags);
+            if !self.language_allowed(&language_code) {
+                outcome.skipped.push(TimedTextExtractionSkip {
+                    source: stream_ref,
+                    kind: TimedTextSkipKind::LanguageNotAllowed,
+                    detail:
+                        "subtitle language is not in the configured allow-list"
+                            .to_string(),
+                });
+                continue;
+            }
+
             if outcome.sources.len() >= self.config.max_sources_per_media {
                 outcome.skipped.push(TimedTextExtractionSkip {
                     source: stream_ref,
                     kind: TimedTextSkipKind::SourceLimitExceeded,
                     detail: "per-media subtitle source cap reached".to_string(),
                 });
+                continue;
+            }
+
+            let remaining_segments = self.remaining_segments(outcome);
+            if remaining_segments == 0 {
+                outcome.skipped.push(Self::segment_limit_skip(stream_ref));
                 continue;
             }
 
@@ -756,7 +1041,6 @@ impl TimedTextExtractor {
                 continue;
             }
 
-            let language_code = stream_language(&stream.tags);
             match self.build_source_batch(SourceBuildInput {
                 request,
                 source_kind: TimedTextSourceKind::Embedded,
@@ -783,6 +1067,7 @@ impl TimedTextExtractor {
                     "codec_name": codec_name.to_ascii_lowercase(),
                     "ffmpeg_format": "srt",
                 }),
+                source_segment_limit: remaining_segments,
             }) {
                 Ok(batch) => outcome.sources.push(batch),
                 Err(skip) => outcome.skipped.push(skip),
@@ -819,7 +1104,13 @@ impl TimedTextExtractor {
         let mut duration_ms: Option<i64> = None;
         let mut truncated = false;
 
-        for cue in parse.cues.iter().take(self.config.max_cues_per_source) {
+        let source_segment_limit = self
+            .config
+            .max_cues_per_source
+            .min(input.source_segment_limit)
+            .max(1);
+
+        for cue in parse.cues.iter().take(source_segment_limit) {
             let mut redacted = self.config.redactor.redact(&cue.text);
             let (trimmed, was_truncated) = trim_to_chars(
                 redacted.as_str(),
@@ -864,7 +1155,7 @@ impl TimedTextExtractor {
             segment_hashes.push(segment_hash);
         }
 
-        if parse.cues.len() > self.config.max_cues_per_source {
+        if parse.cues.len() > source_segment_limit {
             truncated = true;
         }
 
@@ -928,6 +1219,7 @@ struct SourceBuildInput<'a> {
     format: SubtitleFormat,
     source_locator: serde_json::Value,
     extra_metadata: serde_json::Value,
+    source_segment_limit: usize,
 }
 
 /// Parse SubRip subtitle text into normalized cues.
@@ -1304,6 +1596,21 @@ fn is_playable_media(media_id: &MediaID) -> bool {
     matches!(media_id, MediaID::Movie(_) | MediaID::Episode(_))
 }
 
+fn normalize_language_allow_list<'a>(
+    languages: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    let mut normalized = languages
+        .into_iter()
+        .filter_map(|language| {
+            let trimmed = language.trim();
+            (!trimmed.is_empty()).then(|| normalize_language_code(trimmed))
+        })
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
 fn normalize_language_code(value: &str) -> String {
     let value = value.trim().to_ascii_lowercase();
     let mapped = match value.as_str() {
@@ -1609,12 +1916,16 @@ mod tests {
         TimedTextExtractionConfig {
             ffprobe_path,
             ffmpeg_path,
+            extract_embedded: true,
+            extract_sidecars: true,
+            allowed_languages: Vec::new(),
             probe_timeout: Duration::from_secs(2),
             convert_timeout: Duration::from_secs(2),
             max_sidecar_bytes: DEFAULT_MAX_SIDECAR_BYTES,
             max_probe_json_bytes: DEFAULT_MAX_PROBE_BYTES,
             max_converted_subtitle_bytes: DEFAULT_MAX_CONVERTED_BYTES,
             max_cues_per_source: DEFAULT_MAX_CUES_PER_SOURCE,
+            max_segments_per_media: DEFAULT_MAX_CUES_PER_SOURCE,
             max_sources_per_media: DEFAULT_MAX_SOURCES_PER_MEDIA,
             max_text_chars_per_cue: DEFAULT_MAX_TEXT_CHARS_PER_CUE,
             redactor: Arc::new(NoopTimedTextRedactor),
@@ -1788,6 +2099,148 @@ nope\n";
             source.segments[0].metadata["segment_content_hash"],
             source.segment_content_hashes[0]
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn extractor_applies_privacy_redaction_before_upsert() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("library");
+        let scripts = temp.path().join("scripts");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&scripts).unwrap();
+        let media = root.join("Secrets.mkv");
+        std::fs::write(&media, b"movie").unwrap();
+        std::fs::write(
+            root.join("Secrets.en.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\nEmail me@example.com or call +1 (555) 867-5309\n\n2\n00:00:03,000 --> 00:00:04,000\nOpen https://x.test/watch?token=abc123secret and use Bearer abcdef123456\n",
+        )
+        .unwrap();
+        let mut cfg = config(no_streams_probe(&scripts), noop_ffmpeg(&scripts));
+        cfg.redactor = Arc::new(PrivacyTimedTextRedactor::default());
+
+        let outcome = TimedTextExtractor::new(cfg)
+            .extract(request(&root, &media))
+            .await
+            .unwrap();
+
+        let joined = outcome.sources[0]
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(joined.contains("[REDACTED:email]"));
+        assert!(joined.contains("[REDACTED:phone]"));
+        assert!(joined.contains("token=[REDACTED:url_secret]"));
+        assert!(joined.contains("Bearer [REDACTED:token]"));
+        assert!(!joined.contains("me@example.com"));
+        assert!(!joined.contains("867-5309"));
+        assert!(!joined.contains("abc123secret"));
+        assert!(!joined.contains("abcdef123456"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn extractor_honors_source_language_and_segment_settings() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("library");
+        let scripts = temp.path().join("scripts");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&scripts).unwrap();
+        let media = root.join("Feature.mkv");
+        std::fs::write(&media, b"movie").unwrap();
+        std::fs::write(
+            root.join("Feature.en.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\nOne\n\n2\n00:00:03,000 --> 00:00:04,000\nTwo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Feature.fr.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n",
+        )
+        .unwrap();
+        let mut cfg = config(no_streams_probe(&scripts), noop_ffmpeg(&scripts));
+        cfg.allowed_languages = vec!["en".to_string()];
+        cfg.max_segments_per_media = 1;
+        cfg.max_cues_per_source = 1;
+
+        let outcome = TimedTextExtractor::new(cfg)
+            .extract(request(&root, &media))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.segment_count(), 1);
+        assert_eq!(outcome.sources.len(), 1);
+        assert_eq!(outcome.sources[0].source.language_code, "en");
+        assert!(
+            outcome
+                .skipped
+                .iter()
+                .any(|skip| skip.kind == TimedTextSkipKind::LanguageNotAllowed)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn extractor_disabled_sources_prevent_indexing() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("library");
+        let scripts = temp.path().join("scripts");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&scripts).unwrap();
+        let media = root.join("Silent.mkv");
+        std::fs::write(&media, b"movie").unwrap();
+        std::fs::write(
+            root.join("Silent.en.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\nHidden\n",
+        )
+        .unwrap();
+        let mut cfg = config(no_streams_probe(&scripts), noop_ffmpeg(&scripts));
+        cfg.extract_sidecars = false;
+        cfg.extract_embedded = false;
+
+        let outcome = TimedTextExtractor::new(cfg)
+            .extract(request(&root, &media))
+            .await
+            .unwrap();
+
+        assert!(outcome.sources.is_empty());
+        assert!(outcome.skipped.is_empty());
+        assert!(outcome.failures.is_empty());
+    }
+
+    #[test]
+    fn indexing_config_language_allow_list_preserves_unknown_language() {
+        let mut indexing = crate::types::scan::orchestration::config::TranscriptIndexingConfig::default();
+        indexing.allowed_languages = vec![
+            "English".to_string(),
+            "eng".to_string(),
+            "UND".to_string(),
+            " ".to_string(),
+            "fr".to_string(),
+        ];
+
+        let config = TimedTextExtractionConfig::from_indexing_config(&indexing)
+            .expect("indexing config maps to extraction config");
+
+        assert_eq!(config.allowed_languages, vec!["en", "fr", "und"]);
+    }
+
+    #[test]
+    fn custom_redaction_regexes_are_compiled_from_config() {
+        let mut redaction = crate::types::scan::orchestration::config::TranscriptRedactionConfig::default();
+        redaction.custom_regexes = vec!["classified-[0-9]+".to_string()];
+        let redactor = PrivacyTimedTextRedactor::from_config(&redaction)
+            .expect("custom regex compiles");
+
+        assert_eq!(
+            redactor.redact("classified-123 stays private"),
+            "[REDACTED:custom] stays private"
+        );
+
+        redaction.custom_regexes = vec!["(".to_string()];
+        assert!(PrivacyTimedTextRedactor::from_config(&redaction).is_err());
     }
 
     #[cfg(unix)]

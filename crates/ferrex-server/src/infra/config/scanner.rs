@@ -46,6 +46,13 @@ pub struct ScannerConfig {
     /// can flow through without diverging behaviour.
     #[serde(default = "default_video_extensions")]
     pub video_extensions: Vec<String>,
+    /// File extensions ignored even when the filesystem watcher sees changes.
+    #[serde(default)]
+    pub ignored_extensions: Vec<String>,
+    /// Reserved path-pattern ignore list exposed in effective config for future
+    /// scanner policy; current folder scanning only applies extension ignores.
+    #[serde(default)]
+    pub ignored_path_patterns: Vec<String>,
 }
 
 impl Default for ScannerConfig {
@@ -70,6 +77,8 @@ impl Default for ScannerConfig {
             library_actor_max_outstanding_jobs: 32,
             quiescence_window_ms: 5_000,
             video_extensions: default_video_extensions(),
+            ignored_extensions: Vec::new(),
+            ignored_path_patterns: Vec::new(),
         }
     }
 }

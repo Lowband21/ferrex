@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE orchestrator_jobs\n        SET payload = $1,\n            updated_at = NOW()\n        WHERE id = $2\n          AND state IN ('ready','deferred')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "53c6e16fdbe08a5c170e7e8f49d833ec2e245d3e25f8ccd28ec1178c67d5cab1"
+}

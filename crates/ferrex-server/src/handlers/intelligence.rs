@@ -361,6 +361,7 @@ pub(crate) async fn timed_text_search_handler(
     Extension(user): Extension<User>,
     Json(request): Json<TimedTextSnippetSearchRequest>,
 ) -> AppResult<Json<ApiResponse<TimedTextSnippetSearchResponse>>> {
+    let request = apply_transcript_snippet_policy(&state, request);
     let response = state
         .unit_of_work()
         .transcripts
@@ -368,6 +369,32 @@ pub(crate) async fn timed_text_search_handler(
         .await?;
 
     Ok(Json(ApiResponse::success(response)))
+}
+
+fn configured_transcript_snippet_chars(state: &AppState) -> u16 {
+    clamp_timed_text_snippet_chars(
+        state
+            .scan_control()
+            .orchestrator()
+            .config()
+            .transcript_indexing
+            .max_chars_per_snippet,
+    )
+}
+
+fn apply_transcript_snippet_policy(
+    state: &AppState,
+    mut request: TimedTextSnippetSearchRequest,
+) -> TimedTextSnippetSearchRequest {
+    let max_snippet_chars = configured_transcript_snippet_chars(state);
+    request.caps.timed_text_snippet_max_chars = clamp_timed_text_snippet_chars(
+        request.caps.timed_text_snippet_max_chars,
+    )
+    .min(max_snippet_chars);
+    request.caps.summary_max_chars =
+        clamp_intelligence_summary_chars(request.caps.summary_max_chars)
+            .min(max_snippet_chars);
+    request
 }
 
 async fn attach_transcript_grounding(
@@ -384,7 +411,8 @@ async fn attach_transcript_grounding(
     )
     .min(clamp_intelligence_summary_chars(
         request.caps.summary_max_chars,
-    ));
+    ))
+    .min(configured_transcript_snippet_chars(state));
 
     for candidate in &mut response.candidates {
         let remaining_grounding = grounding_limit.saturating_sub(

@@ -200,6 +200,14 @@ pub mod v1 {
         /// Enqueue transcript extraction refresh for a playable media item.
         pub const REFRESH: &str =
             v1_path!("/media/{type}/{id}/refresh-transcripts");
+        /// Purge transcript sources and segment text for one library media item.
+        pub const PURGE: &str = v1_path!(
+            "/libraries/{library_id}/media/{type}/{id}/transcripts:purge"
+        );
+        /// Purge transcript text and enqueue extraction rebuild when possible.
+        pub const REBUILD: &str = v1_path!(
+            "/libraries/{library_id}/media/{type}/{id}/transcripts:rebuild"
+        );
     }
 
     pub mod images {

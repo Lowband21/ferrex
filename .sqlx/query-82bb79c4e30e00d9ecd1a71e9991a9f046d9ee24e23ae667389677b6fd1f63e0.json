@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE transcript_sources\n            SET status = 'purged',\n                segment_count = 0,\n                purged_at = now(),\n                purge_reason = $2,\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "82bb79c4e30e00d9ecd1a71e9991a9f046d9ee24e23ae667389677b6fd1f63e0"
+}

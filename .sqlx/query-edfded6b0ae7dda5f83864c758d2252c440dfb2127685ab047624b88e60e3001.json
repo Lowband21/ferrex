@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE transcript_sources\n            SET segment_count = $2,\n                status = 'active',\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "edfded6b0ae7dda5f83864c758d2252c440dfb2127685ab047624b88e60e3001"
+}

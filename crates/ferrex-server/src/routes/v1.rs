@@ -51,6 +51,7 @@ use crate::{
         scan::handle_scan::{
             active_scans_handler, cancel_scan_handler, latest_progress_handler,
             media_events_sse_handler, pause_scan_handler,
+            purge_transcript_handler, rebuild_transcript_handler,
             refresh_transcript_handler, resume_scan_handler,
             scan_config_handler, scan_events_handler, scan_history_handler,
             scan_metrics_handler, scan_progress_sse_handler,
@@ -461,6 +462,8 @@ fn create_scan_routes(state: AppState) -> Router<AppState> {
         .route(v1::scan::METRICS, get(scan_metrics_handler))
         .route(v1::scan::CONFIG, get(scan_config_handler))
         .route(v1::transcripts::REFRESH, post(refresh_transcript_handler))
+        .route(v1::transcripts::PURGE, post(purge_transcript_handler))
+        .route(v1::transcripts::REBUILD, post(rebuild_transcript_handler))
         .route(v1::events::MEDIA, get(media_events_sse_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

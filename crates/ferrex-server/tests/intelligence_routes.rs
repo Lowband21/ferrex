@@ -1336,3 +1336,117 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
 
     Ok(())
 }
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn transcript_purge_and_rebuild_routes_remove_searchable_segments(
+    pool: PgPool,
+) -> Result<()> {
+    let library_id = Uuid::from_u128(0x1700);
+    let movie_id = Uuid::from_u128(0x2700);
+    let movie_file_id = Uuid::from_u128(0x2710);
+    let transcript_artifact_id = Uuid::from_u128(0x3700);
+    let transcript_source_id = Uuid::from_u128(0x4700);
+
+    seed_library(&pool, library_id).await;
+    seed_movie(
+        &pool,
+        library_id,
+        movie_id,
+        movie_file_id,
+        77,
+        "Purgeable Arrival",
+        878,
+        "Science Fiction",
+    )
+    .await;
+    let (server, _state, _tempdir) = build_server(pool.clone()).await?;
+    let (user_id, access_token) = register_user(&server, "purge_owner").await?;
+    seed_transcript_source(
+        &pool,
+        library_id,
+        movie_id,
+        movie_file_id,
+        transcript_source_id,
+        transcript_artifact_id,
+        user_id,
+    )
+    .await;
+
+    let found = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({
+            "query": "cosmic signal",
+            "library_ids": [library_id],
+            "caps": { "timed_text_snippet_limit": 1 }
+        }))
+        .await;
+    found.assert_status_ok();
+    let found_body: Value = found.json();
+    assert_eq!(
+        found_body["data"]["snippets"]
+            .as_array()
+            .expect("snippets before purge")
+            .len(),
+        1
+    );
+
+    let purge_path = route_utils::replace_params(
+        routes::v1::transcripts::PURGE,
+        &[
+            ("{library_id}", library_id.to_string()),
+            ("{type}", "movie".to_string()),
+            ("{id}", movie_id.to_string()),
+        ],
+    );
+    let purge = server
+        .post(&purge_path)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({"reason": "test purge"}))
+        .await;
+    purge.assert_status_ok();
+    let purge_body: Value = purge.json();
+    assert_eq!(purge_body["data"]["purged_sources"], 1);
+    assert_eq!(purge_body["data"]["rebuild_queued"], false);
+
+    let after_purge = server
+        .post(routes::v1::intelligence::TIMED_TEXT_SEARCH)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({
+            "query": "cosmic signal",
+            "library_ids": [library_id]
+        }))
+        .await;
+    after_purge.assert_status_ok();
+    let after_purge_body: Value = after_purge.json();
+    assert!(
+        after_purge_body["data"]["snippets"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "purged transcripts must not remain searchable"
+    );
+
+    let rebuild_path = route_utils::replace_params(
+        routes::v1::transcripts::REBUILD,
+        &[
+            ("{library_id}", library_id.to_string()),
+            ("{type}", "movie".to_string()),
+            ("{id}", movie_id.to_string()),
+        ],
+    );
+    let rebuild = server
+        .post(&rebuild_path)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({"reason": "test rebuild"}))
+        .await;
+    rebuild.assert_status_ok();
+    let rebuild_body: Value = rebuild.json();
+    assert_eq!(rebuild_body["data"]["purged_sources"], 0);
+    assert_eq!(rebuild_body["data"]["rebuild_queued"], false);
+    assert_eq!(
+        rebuild_body["data"]["reason"],
+        "transcript_indexing_disabled"
+    );
+
+    Ok(())
+}

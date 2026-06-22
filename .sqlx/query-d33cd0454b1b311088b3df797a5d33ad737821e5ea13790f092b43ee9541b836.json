@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO transcript_processing_status (\n            library_id,\n            media_id,\n            media_type,\n            media_file_id,\n            status,\n            source_count,\n            segment_count,\n            finished_at,\n            invalidated_at,\n            invalidation_reason,\n            purged_at,\n            purge_reason\n        ) VALUES (\n            $1,\n            $2,\n            ($3::text)::media_type,\n            $4,\n            $5,\n            $6,\n            $7,\n            now(),\n            CASE WHEN $8 THEN now() ELSE NULL END,\n            CASE WHEN $8 THEN $10 ELSE NULL END,\n            CASE WHEN $9 THEN now() ELSE NULL END,\n            CASE WHEN $9 THEN $10 ELSE NULL END\n        )\n        ON CONFLICT (library_id, media_file_id) DO UPDATE SET\n            media_id = EXCLUDED.media_id,\n            media_type = EXCLUDED.media_type,\n            status = EXCLUDED.status,\n            source_count = EXCLUDED.source_count,\n            segment_count = EXCLUDED.segment_count,\n            last_error_excerpt = NULL,\n            finished_at = now(),\n            invalidated_at = EXCLUDED.invalidated_at,\n            invalidation_reason = EXCLUDED.invalidation_reason,\n            purged_at = EXCLUDED.purged_at,\n            purge_reason = EXCLUDED.purge_reason,\n            updated_at = now()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Bool",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d33cd0454b1b311088b3df797a5d33ad737821e5ea13790f092b43ee9541b836"
+}

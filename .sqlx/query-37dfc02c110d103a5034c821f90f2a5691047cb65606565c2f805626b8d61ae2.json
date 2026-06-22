@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO transcript_sources (\n                id,\n                library_id,\n                media_id,\n                media_type,\n                media_file_id,\n                source_kind,\n                status,\n                language_code,\n                source_key,\n                source_name,\n                stream_index,\n                source_path_hash,\n                source_content_hash,\n                normalized_content_hash,\n                artifact_id,\n                duration_ms,\n                extracted_at,\n                source_locator,\n                metadata\n            ) VALUES (\n                COALESCE($1::uuid, uuidv7()),\n                $2,\n                $3,\n                ($4::text)::media_type,\n                $5,\n                $6,\n                'active',\n                $7,\n                $8,\n                $9,\n                $10,\n                $11,\n                $12,\n                $13,\n                $14,\n                $15,\n                now(),\n                $16,\n                $17\n            )\n            ON CONFLICT (library_id, media_file_id, source_kind, language_code, source_key)\n            DO UPDATE SET\n                media_id = EXCLUDED.media_id,\n                media_type = EXCLUDED.media_type,\n                source_name = EXCLUDED.source_name,\n                stream_index = EXCLUDED.stream_index,\n                source_path_hash = EXCLUDED.source_path_hash,\n                source_content_hash = EXCLUDED.source_content_hash,\n                normalized_content_hash = EXCLUDED.normalized_content_hash,\n                artifact_id = EXCLUDED.artifact_id,\n                duration_ms = EXCLUDED.duration_ms,\n                status = 'active',\n                segment_count = 0,\n                extracted_at = now(),\n                invalidated_at = NULL,\n                invalidation_reason = NULL,\n                purged_at = NULL,\n                purge_reason = NULL,\n                source_locator = EXCLUDED.source_locator,\n                metadata = EXCLUDED.metadata,\n                updated_at = now()\n            RETURNING id AS \"id!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "37dfc02c110d103a5034c821f90f2a5691047cb65606565c2f805626b8d61ae2"
+}

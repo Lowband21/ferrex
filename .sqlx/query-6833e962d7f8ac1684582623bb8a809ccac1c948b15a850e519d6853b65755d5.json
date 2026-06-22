@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                        SELECT id, priority, available_at, state\n                        FROM orchestrator_jobs\n                        WHERE dedupe_key = $1\n                          AND state IN ('ready','deferred','leased')\n                        ORDER BY created_at ASC\n                        LIMIT 1\n                        ",
+  "query": "\n                        SELECT id, priority, available_at, state, attempts\n                        FROM orchestrator_jobs\n                        WHERE dedupe_key = $1\n                          AND state IN ('ready','deferred','leased')\n                        ORDER BY created_at ASC\n                        LIMIT 1\n                        ",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "state",
         "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "attempts",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
@@ -33,8 +38,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "71fcf2767c66cb697d90c7757b4612d267f9c41b5afba4e2e5f6e3d3ae900a12"
+  "hash": "6833e962d7f8ac1684582623bb8a809ccac1c948b15a850e519d6853b65755d5"
 }

@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id AS \"segment_id!\", start_ms, end_ms, cue_text\n            FROM transcript_segments\n            WHERE transcript_source_id = $1\n              AND cue_index >= $2\n              AND status = 'active'\n              AND invalidated_at IS NULL\n              AND purged_at IS NULL\n            ORDER BY cue_index ASC\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "segment_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "start_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "end_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "cue_text",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e7bfef0b7c804e106cc1ca4955b83ebf1e187d010223e930e6005e5128cec375"
+}

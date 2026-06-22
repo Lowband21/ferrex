@@ -615,7 +615,7 @@ pub struct IntelligenceCandidateSearchRequest {
     #[serde(default)]
     pub include_artifacts: bool,
     /// Opt in to bounded transcript snippets that ground each candidate.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub include_transcript_grounding: bool,
 }
 

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n        FROM transcript_sources\n        WHERE library_id = $1\n          AND media_file_id = $2\n          AND status = 'active'\n          AND invalidated_at IS NULL\n          AND purged_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5581d8d8bd5427e447b74c2c7acedf573c8d21bf7f5ba5e82b9ee91d9987c0d1"
+}

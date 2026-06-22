@@ -169,7 +169,50 @@ max_jobs_per_library = 64
 max_root_entries_per_library = 256
 ```
 
-Invalid scanner config fails during startup with the field path in the error (for example, `scanner.orchestrator.watch.poll_interval_ms must be greater than 0`). Operators can inspect the effective policy and health counters via the scan config/metrics/status endpoints; these report watch strategy, poll/debounce/batch settings, maintenance sweep policy, media/ignore filters, watcher registrations, replay lag, stale cursor counts, and overflow events.
+### Optional transcript indexing
+
+Transcript indexing is **off by default**. When enabled, Ferrex stores only redacted, bounded subtitle segments from supported text sources: sidecar SubRip/WebVTT (`.srt`, `.vtt`, `.webvtt`) files and text-convertible embedded subtitle streams reported by `ffprobe`/`ffmpeg`. Bitmap subtitle formats such as PGS/DVD subtitles are skipped. Redaction runs before persistence and search indexing; built-in patterns cover email addresses, phone-like numbers, URL query secrets, bearer/token assignments, and deployment-specific `custom_regexes`.
+
+```toml
+[orchestrator.transcript_indexing]
+enabled = true
+embedded_enabled = true
+sidecar_enabled = true
+allowed_languages = ["en", "es"] # empty means all detected languages
+max_subtitle_bytes = 4194304
+max_segments_per_media = 20000
+max_chars_per_segment = 4000
+max_chars_per_snippet = 320
+extraction_timeout_ms = 15000
+concurrency_budget = 1
+
+[orchestrator.transcript_indexing.redaction]
+enabled = true
+redact_emails = true
+redact_phone_numbers = true
+redact_url_secrets = true
+redact_bearer_tokens = true
+custom_regexes = ["(?i)internal-case-[0-9]+"]
+```
+
+Operational controls:
+
+- Retry extraction for a playable item: `POST /api/v1/media/{movie|episode}/{id}/refresh-transcripts`.
+- Purge stored transcript sources/segments without deleting media files or non-transcript intelligence artifacts: `POST /api/v1/libraries/{library_id}/media/{movie|episode}/{id}/transcripts:purge` with `{"reason":"operator request"}`.
+- Purge and request a rebuild when the media file is still available: `POST /api/v1/libraries/{library_id}/media/{movie|episode}/{id}/transcripts:rebuild`.
+- Search snippets through `POST /api/v1/intelligence/timed-text:search`; snippet length is clamped by both request caps and `max_chars_per_snippet`.
+
+Validation commands for transcript changes:
+
+```bash
+cargo fmt --all --check
+nix develop .#ferrex-player --command env cargo check --workspace --all-targets
+nix develop .#ferrex-player --command env cargo test -p ferrex-core --lib
+DATABASE_URL=postgres://... cargo test -p ferrex-core --test transcript_repository
+DATABASE_URL=postgres://... cargo test -p ferrex-server --test intelligence_routes transcript_purge_and_rebuild_routes_remove_searchable_segments
+```
+
+Invalid scanner config fails during startup with the field path in the error (for example, `scanner.orchestrator.watch.poll_interval_ms must be greater than 0`). Operators can inspect the effective policy and health counters via the scan config/metrics/status endpoints; these report watch strategy, poll/debounce/batch settings, transcript indexing controls, maintenance sweep policy, media/ignore filters, watcher registrations, replay lag, stale cursor counts, and overflow events.
 
 ## Logging
 

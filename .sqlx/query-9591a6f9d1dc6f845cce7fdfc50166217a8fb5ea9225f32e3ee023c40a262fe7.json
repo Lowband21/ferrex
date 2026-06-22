@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE intelligence_artifacts\n                SET status = 'deleted',\n                    summary = NULL,\n                    excerpt = NULL,\n                    content = '{}'::jsonb,\n                    invalidated_at = now(),\n                    invalidation_reason = $2,\n                    updated_at = now()\n                WHERE id = $1\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9591a6f9d1dc6f845cce7fdfc50166217a8fb5ea9225f32e3ee023c40a262fe7"
+}

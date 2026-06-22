@@ -2528,6 +2528,7 @@ mod tests {
         async fn search_snippets(
             &self,
             _request: &crate::api::types::intelligence::TimedTextSnippetSearchRequest,
+            _user_id: Option<Uuid>,
         ) -> Result<
             crate::api::types::intelligence::TimedTextSnippetSearchResponse,
         > {

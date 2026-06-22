@@ -140,7 +140,7 @@ impl fmt::Debug for ScanOrchestrator {
 
 impl ScanOrchestrator {
     pub fn new(
-        config: OrchestratorConfig,
+        mut config: OrchestratorConfig,
         tmdb: Arc<TmdbApiProvider>,
         image_service: Arc<ImageService>,
         unit_of_work: Arc<AppUnitOfWork>,
@@ -149,6 +149,17 @@ impl ScanOrchestrator {
         budget: Arc<InMemoryBudget>,
         file_filters: ScannerFileFilterPolicy,
     ) -> Result<Self> {
+        let transcript_concurrency =
+            config.transcript_indexing.concurrency_budget.max(1);
+        if config.queue.max_parallel_transcript_extract < transcript_concurrency
+        {
+            config.queue.max_parallel_transcript_extract =
+                transcript_concurrency;
+        }
+        if config.budget.transcript_extraction_limit < transcript_concurrency {
+            config.budget.transcript_extraction_limit = transcript_concurrency;
+        }
+
         let events = Arc::new(InProcJobEventBus::new(256));
         let correlations = CorrelationCache::default();
         let actors = Arc::new(ActorSystem::new(
@@ -192,10 +203,14 @@ impl ScanOrchestrator {
         .with_delta_repository(delta_repo)
         .with_intelligence_repository(unit_of_work.intelligence.clone());
         if config.transcript_indexing.enabled {
+            let timed_text_config =
+                TimedTextExtractionConfig::from_indexing_config(
+                    &config.transcript_indexing,
+                )?;
             dispatcher = dispatcher.with_timed_text_extraction(
                 unit_of_work.libraries.clone(),
                 unit_of_work.transcripts.clone(),
-                TimedTextExtractionConfig::default(),
+                timed_text_config,
             );
         }
         let dispatcher: Arc<dyn JobDispatcher> = Arc::new(dispatcher);

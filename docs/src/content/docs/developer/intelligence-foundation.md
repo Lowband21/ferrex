@@ -1,13 +1,13 @@
 ---
 title: "Intelligence foundation and Phase 2 runtime"
-description: "Backend intelligence read models, bounded LLM tool contracts, local provider setup, and draft-only runtime semantics."
+description: "Backend intelligence read models, bounded LLM tool contracts, local provider setup, draft-only runtime semantics, and privacy-safe transcript search."
 sidebar:
   order: 7
 ---
 
 > **Drift-prevention:** This Starlight page is the canonical docs-site version. The legacy `docs/intelligence-foundation.md` path now points here instead of carrying a second copy.
 
-Ferrex intelligence is a backend-only safety boundary for local LLM features. Phase 1 added bounded read models, DTOs, and audit storage. Phase 2 adds a local provider boundary, a grounded tool loop, durable run events, and draft artifact creation. It does **not** let a model run code, write arbitrary rows, promote artifacts, or mutate playback/library state.
+Ferrex intelligence is a backend-only safety boundary for local LLM features. Phase 1 added bounded read models, DTOs, and audit storage. Phase 2 adds a local provider boundary, a grounded tool loop, durable run events, draft artifact creation, and opt-in transcript snippets. It does **not** let a model run code, write arbitrary rows, promote artifacts, mutate playback/library state, or read full transcript bodies.
 
 ## Public backend contract
 
@@ -17,7 +17,8 @@ All public payloads are defined in `crates/ferrex-core/src/api/types/intelligenc
 | --- | --- |
 | `POST /api/v1/intelligence/libraries/overview` | Bounded per-library counts, summaries, facets, and artifact ids. |
 | `POST /api/v1/intelligence/facets` | Same bounded overview payload focused on facet consumers. |
-| `POST /api/v1/intelligence/candidates:search` | Lexical candidate media search with grounding references and optional artifact ids. |
+| `POST /api/v1/intelligence/candidates:search` | Lexical candidate media search with grounding references, optional artifact ids, and optional transcript grounding. |
+| `POST /api/v1/intelligence/timed-text:search` | Bounded timestamped transcript snippet search over redacted stored subtitle segments. |
 | `POST /api/v1/intelligence/artifacts` / `POST /api/v1/intelligence/artifacts:search` | Bounded artifact summary search. |
 | `GET /api/v1/intelligence/artifacts/{artifact_id}` | Bounded artifact detail summary; raw artifact `content` is not returned. |
 | `POST /api/v1/intelligence/items/{media_id}/context` | Bounded item context packet with related items, artifacts, and grounding. |
@@ -31,7 +32,19 @@ All public payloads are defined in `crates/ferrex-core/src/api/types/intelligenc
 | `GET /api/v1/intelligence/drafts/{artifact_id}` | Fetch a draft payload, including persisted source edges, for its owner. |
 | `GET /api/v1/intelligence/provider/status` | Report configured provider readiness and advertised models. |
 
-`{media_id}` path parameters are encoded as `movie:<uuid>`, `series:<uuid>`, `season:<uuid>`, or `episode:<uuid>`.
+`{media_id}` path parameters are encoded as `movie:<uuid>`, `series:<uuid>`, `season:<uuid>`, or `episode:<uuid>`; handlers also accept plural and parenthesized variants for compatibility.
+
+## Safety bounds
+
+Responses are designed for model-ready context assembly without exposing unbounded database or provider payloads:
+
+- `IntelligencePagination` and `IntelligenceCaps` clamp page sizes, candidates, facets, related items, artifacts, grounding references, tool calls, summary lengths, and timed-text snippet budgets.
+- `IntelligenceSummary` truncates on character boundaries and records whether truncation happened.
+- Artifact APIs return `IntelligenceArtifactSummary` plus provenance/grounding; raw `intelligence_artifacts.content` JSON bodies remain out-of-band for public artifact summaries.
+- Timed-text APIs return timestamped snippets only; whole transcript bodies, local paths, source content hashes, and command stderr never leave repository internals.
+- Transcript text is redacted before `transcript_segments` persistence/search indexing and then clamped again by request caps plus the operator `max_chars_per_snippet` policy.
+- User-scoped artifacts, watch-state rows, run audits, draft payloads, and transcript-derived artifacts are only visible to authorized users; global rows remain visible to authenticated users.
+- Catalog/watch-state refresh and invalidation paths mark stale read-model rows and dependent artifacts invalidated instead of serving stale context.
 
 ## Runtime safety boundary
 
@@ -103,6 +116,25 @@ curl http://127.0.0.1:8081/v1/models
 
 Then start Ferrex with `FERREX_INTELLIGENCE_ENABLED=true` and check `GET /api/v1/intelligence/provider/status` as an authenticated user. Keep real model smoke tests local; committed tests use deterministic fake providers.
 
+## Transcript operations
+
+Transcript extraction is an opt-in evidence source controlled by `[orchestrator.transcript_indexing]` in scanner config. Operators can enable sidecar and/or embedded extraction, restrict languages, bound subtitle bytes/segments/segment characters/snippet characters, set extraction timeout/concurrency, and configure built-in plus custom regex redaction. Runtime routes support:
+
+- `POST /api/v1/media/{movie|episode}/{id}/refresh-transcripts` to enqueue a retry/refresh.
+- `POST /api/v1/libraries/{library_id}/media/{movie|episode}/{id}/transcripts:purge` to remove transcript segment text and mark transcript source artifacts deleted without deleting media files or unrelated intelligence artifacts.
+- `POST /api/v1/libraries/{library_id}/media/{movie|episode}/{id}/transcripts:rebuild` to purge and enqueue a rebuild when the media file is available.
+
+## Internal storage and repository surfaces
+
+The schema lives in `crates/ferrex-core/migrations/007_intelligence_foundation.sql`, `008_intelligence_runtime_ports.sql`, `009_timed_text_corpus.sql`, and `010_transcript_extract_jobs.sql`:
+
+- `intelligence_media_context` and `intelligence_search_documents` hold bounded read-model context.
+- `intelligence_artifacts` and `intelligence_artifact_sources` hold global/user artifacts, draft payloads, transcript source artifacts, and provenance edges.
+- `intelligence_runs`, `intelligence_tool_calls`, and `intelligence_run_events` hold durable audit and replay state.
+- `transcript_processing_status`, `transcript_sources`, `transcript_segments`, and `transcript_extract_jobs` hold redacted timed-text state, source manifests, searchable segments, and retryable extraction work.
+
+Repository access is behind `crates/ferrex-core/src/database/repository_ports/intelligence.rs` and `crates/ferrex-core/src/database/repository_ports/transcripts.rs`; Postgres behavior is implemented in `crates/ferrex-core/src/database/repositories/intelligence.rs` and `crates/ferrex-core/src/database/repositories/transcripts.rs`. Important internal operations include read-model refresh (`refresh_library_read_models`, `refresh_media_read_model`), catalog invalidation (`invalidate_media_catalog_change`), artifact upsert/invalidation, candidate search, timed-text snippet search, transcript status updates, purge/invalidate, and run/tool-call audit reads.
+
 ## Validation commands
 
 ```bash
@@ -116,18 +148,8 @@ set -a; source .env.sqlx; set +a
 nix develop .#ferrex-player --command env SQLX_OFFLINE=true DATABASE_URL="$DATABASE_URL_ADMIN" cargo test -p ferrex-server --test intelligence_routes -- --test-threads=1
 ```
 
-Focused contract coverage lives in `ferrex-core` unit tests for provider fallback/malformed output, fake-provider queues, runtime success/failure, grounding, budgets, cancellation, redaction, and draft/source persistence, plus DB-backed `ferrex-server` route tests for authenticated start/status/SSE/cancel/draft flows and user-scope isolation.
-
-## Internal storage and repository surfaces
-
-The schema lives in `crates/ferrex-core/migrations/007_intelligence_foundation.sql` and `008_intelligence_runtime_ports.sql`:
-
-- `intelligence_media_context` and `intelligence_search_documents` hold bounded read-model context.
-- `intelligence_artifacts` and `intelligence_artifact_sources` hold global/user artifacts, draft payloads, and provenance edges.
-- `intelligence_runs`, `intelligence_tool_calls`, and `intelligence_run_events` hold durable audit and replay state.
-
-Repository access is behind `crates/ferrex-core/src/database/repository_ports/intelligence.rs`; Postgres behavior is implemented in `crates/ferrex-core/src/database/repositories/intelligence.rs`.
+Focused contract coverage lives in `ferrex-core` unit tests for provider fallback/malformed output, fake-provider queues, runtime success/failure, grounding, budgets, cancellation, redaction, draft/source persistence, transcript repositories, and scanner transcript orchestration, plus DB-backed `ferrex-server` route tests for authenticated start/status/SSE/cancel/draft flows, user-scope isolation, bounded transcript snippet search, and purge/rebuild behavior.
 
 ## Deferred work
 
-The following remain outside this runtime slice: `pgvector`/embedding ranking, transcript segment persistence, client/UI presentation, and active-artifact promotion workflows.
+The following remain outside this runtime/timed-text slice: `pgvector`/embedding ranking, semantic transcript ranking, client/UI presentation, generated transcript/OCR pipelines, and active-artifact promotion workflows.

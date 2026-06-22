@@ -5,7 +5,7 @@ use crate::error::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::from_value;
-use sqlx::{Executor, PgPool, Row};
+use sqlx::{Executor, PgPool};
 use std::fmt;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use tracing::{debug, info, trace, warn};
@@ -72,7 +72,7 @@ async fn mark_transcript_queue_status(
     let running = status == TranscriptProcessingState::Running;
     let error = bounded_queue_error(error);
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         INSERT INTO transcript_processing_status (
             library_id,
@@ -132,19 +132,19 @@ async fn mark_transcript_queue_status(
             finished_at = CASE WHEN $12 THEN now() ELSE NULL END,
             updated_at = now()
         "#,
+        job.library_id.0,
+        *job.media_id.as_uuid(),
+        media_type,
+        job.media_file_id,
+        status_str,
+        attempt_count.max(0),
+        i32::from(max_attempts),
+        error,
+        correlation_id,
+        next_retry_at,
+        running,
+        terminal,
     )
-    .bind(job.library_id.0)
-    .bind(*job.media_id.as_uuid())
-    .bind(media_type)
-    .bind(job.media_file_id)
-    .bind(status_str)
-    .bind(attempt_count.max(0))
-    .bind(i32::from(max_attempts))
-    .bind(error)
-    .bind(correlation_id)
-    .bind(next_retry_at)
-    .bind(running)
-    .bind(terminal)
     .execute(pool)
     .await?;
 
@@ -166,7 +166,7 @@ async fn replace_pending_transcript_payload<'e, E>(
 where
     E: Executor<'e, Database = sqlx::Postgres>,
 {
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE orchestrator_jobs
         SET payload = $1,
@@ -174,9 +174,9 @@ where
         WHERE id = $2
           AND state IN ('ready','deferred')
         "#,
+        payload_json,
+        job_id,
     )
-    .bind(payload_json)
-    .bind(job_id)
     .execute(executor)
     .await?;
 
@@ -607,7 +607,7 @@ impl QueueService for PostgresQueueService {
 
         // Fast path: if an active job with the same dedupe_key exists, merge without
         // causing a unique violation. This avoids noisy ERROR logs in Postgres.
-        if let Some(existing) = sqlx::query(
+        if let Some(existing) = sqlx::query!(
             r#"
             SELECT id, priority, state, attempts
             FROM orchestrator_jobs
@@ -616,19 +616,19 @@ impl QueueService for PostgresQueueService {
             ORDER BY created_at ASC
             LIMIT 1
             "#,
+            &dedupe_key,
         )
-        .bind(&dedupe_key)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
             MediaError::Internal(format!("enqueue precheck failed: {e}"))
         })? {
-            let existing_uuid: uuid::Uuid = existing.try_get("id")?;
+            let existing_uuid = existing.id;
             let existing_id =
                 crate::domain::scan::orchestration::job::JobId(existing_uuid);
-            let existing_priority: i16 = existing.try_get("priority")?;
-            let existing_state: String = existing.try_get("state")?;
-            let existing_attempts: i32 = existing.try_get("attempts")?;
+            let existing_priority = existing.priority;
+            let existing_state = existing.state;
+            let existing_attempts = existing.attempts;
             // Try to elevate priority if incoming is higher and the job is not leased
             if priority_val < existing_priority {
                 let _ = sqlx::query!(
@@ -752,7 +752,7 @@ impl QueueService for PostgresQueueService {
                 // Unique violation => merge
                 let code = db_err.code().map(|c| c.to_string());
                 if code.as_deref() == Some("23505") {
-                    let existing = sqlx::query(
+                    let existing = sqlx::query!(
                         r#"
                         SELECT id, priority, available_at, state, attempts
                         FROM orchestrator_jobs
@@ -761,8 +761,8 @@ impl QueueService for PostgresQueueService {
                         ORDER BY created_at ASC
                         LIMIT 1
                         "#,
+                        &dedupe_key,
                     )
-                    .bind(&dedupe_key)
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(|e| {
@@ -772,11 +772,11 @@ impl QueueService for PostgresQueueService {
                     })?;
 
                     if let Some(row) = existing {
-                        let row_id: uuid::Uuid = row.try_get("id")?;
-                        let row_state: String = row.try_get("state")?;
-                        let row_attempts: i32 = row.try_get("attempts")?;
+                        let row_id = row.id;
+                        let row_state = row.state;
+                        let row_attempts = row.attempts;
                         // Elevate priority if incoming is higher (lower numeric value)
-                        let existing_pri: i16 = row.try_get("priority")?;
+                        let existing_pri = row.priority;
                         if priority_val < existing_pri {
                             let update = sqlx::query!(
                                 r#"
@@ -935,7 +935,7 @@ impl QueueService for PostgresQueueService {
                                     == Some("23505") =>
                             {
                                 // Another concurrent inserter won; fetch and return the winner
-                                let winner = sqlx::query(
+                                let winner = sqlx::query!(
                                     r#"
                                     SELECT id, state, attempts, correlation_id
                                     FROM orchestrator_jobs
@@ -944,8 +944,8 @@ impl QueueService for PostgresQueueService {
                                     ORDER BY created_at ASC
                                     LIMIT 1
                                     "#,
+                                    &dedupe_key,
                                 )
-                                .bind(&dedupe_key)
                                 .fetch_optional(&self.pool)
                                 .await
                                 .map_err(|e| {
@@ -955,15 +955,11 @@ impl QueueService for PostgresQueueService {
                                 })?;
 
                                 if let Some(w) = winner {
-                                    let winner_id: uuid::Uuid =
-                                        w.try_get("id")?;
-                                    let winner_state: String =
-                                        w.try_get("state")?;
-                                    let winner_attempts: i32 =
-                                        w.try_get("attempts")?;
-                                    let winner_correlation_id: Option<
-                                        uuid::Uuid,
-                                    > = w.try_get("correlation_id")?;
+                                    let winner_id = w.id;
+                                    let winner_state = w.state;
+                                    let winner_attempts = w.attempts;
+                                    let winner_correlation_id =
+                                        w.correlation_id;
                                     if winner_state.as_str() != "leased"
                                         && transcript_payload(&request.payload)
                                             .is_some()
@@ -1076,7 +1072,7 @@ impl QueueService for PostgresQueueService {
             };
 
             // Fast-path merge check inside transaction
-            if let Some(existing) = sqlx::query(
+            if let Some(existing) = sqlx::query!(
                 r#"
                 SELECT id, priority, state, attempts, correlation_id
                 FROM orchestrator_jobs
@@ -1085,8 +1081,8 @@ impl QueueService for PostgresQueueService {
                 ORDER BY created_at ASC
                 LIMIT 1
                 "#,
+                &dedupe_key,
             )
-            .bind(&dedupe_key)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
@@ -1094,16 +1090,15 @@ impl QueueService for PostgresQueueService {
                     "enqueue_many precheck failed: {e}"
                 ))
             })? {
-                let existing_uuid: uuid::Uuid = existing.try_get("id")?;
+                let existing_uuid = existing.id;
                 let existing_id =
                     crate::domain::scan::orchestration::job::JobId(
                         existing_uuid,
                     );
-                let existing_priority: i16 = existing.try_get("priority")?;
-                let existing_state: String = existing.try_get("state")?;
-                let existing_attempts: i32 = existing.try_get("attempts")?;
-                let existing_correlation_id: Option<uuid::Uuid> =
-                    existing.try_get("correlation_id")?;
+                let existing_priority = existing.priority;
+                let existing_state = existing.state;
+                let existing_attempts = existing.attempts;
+                let existing_correlation_id = existing.correlation_id;
                 if priority_val < existing_priority {
                     let _ = sqlx::query!(
                         r#"
@@ -1209,7 +1204,7 @@ impl QueueService for PostgresQueueService {
                 Err(sqlx::Error::Database(db_err)) => {
                     let code = db_err.code().map(|c| c.to_string());
                     if code.as_deref() == Some("23505") {
-                        let existing = sqlx::query(
+                        let existing = sqlx::query!(
                             r#"
                             SELECT id, priority, available_at, state, attempts, correlation_id
                             FROM orchestrator_jobs
@@ -1218,8 +1213,8 @@ impl QueueService for PostgresQueueService {
                             ORDER BY created_at ASC
                             LIMIT 1
                             "#,
+                            request.dedupe_key().to_string(),
                         )
-                        .bind(request.dedupe_key().to_string())
                         .fetch_optional(&mut *tx)
                         .await
                         .map_err(|e| {
@@ -1229,12 +1224,11 @@ impl QueueService for PostgresQueueService {
                         })?;
 
                         if let Some(row) = existing {
-                            let row_id: uuid::Uuid = row.try_get("id")?;
-                            let existing_pri: i16 = row.try_get("priority")?;
-                            let row_state: String = row.try_get("state")?;
-                            let row_attempts: i32 = row.try_get("attempts")?;
-                            let row_correlation_id: Option<uuid::Uuid> =
-                                row.try_get("correlation_id")?;
+                            let row_id = row.id;
+                            let existing_pri = row.priority;
+                            let row_state = row.state;
+                            let row_attempts = row.attempts;
+                            let row_correlation_id = row.correlation_id;
                             if priority_val < existing_pri {
                                 let _ = sqlx::query!(
                                     r#"
@@ -1689,15 +1683,15 @@ impl QueueService for PostgresQueueService {
         })?;
 
         // Lock the row and get current attempts
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             SELECT id, attempts, library_id, payload, correlation_id
             FROM orchestrator_jobs
             WHERE lease_id = $1::uuid AND state = 'leased'
             FOR UPDATE
             "#,
+            lease_id.0,
         )
-        .bind(lease_id.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -1709,15 +1703,14 @@ impl QueueService for PostgresQueueService {
             return Ok(());
         };
 
-        let row_id: uuid::Uuid = row.try_get("id")?;
-        let attempts_before: i32 = row.try_get("attempts")?;
-        let row_correlation_id: Option<uuid::Uuid> =
-            row.try_get("correlation_id")?;
+        let row_id = row.id;
+        let attempts_before = row.attempts;
+        let row_correlation_id = row.correlation_id;
         let max_attempts = i32::from(self.retry_config.max_attempts);
         let attempt_next = attempts_before.saturating_add(1) as u16;
         let job_id = JobId(row_id);
-        let library_id = LibraryId(row.try_get("library_id")?);
-        let row_payload: serde_json::Value = row.try_get("payload")?;
+        let library_id = LibraryId(row.library_id);
+        let row_payload = row.payload;
         let payload: JobPayload = from_value(row_payload).map_err(|e| {
             MediaError::Internal(format!(
                 "fail payload decode failed for job {}: {e}",
@@ -1882,14 +1875,14 @@ impl QueueService for PostgresQueueService {
         lease_id: LeaseId,
         error: Option<String>,
     ) -> Result<()> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             SELECT id, attempts, payload, correlation_id
             FROM orchestrator_jobs
             WHERE lease_id = $1::uuid AND state = 'leased'
             "#,
+            lease_id.0,
         )
-        .bind(lease_id.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
@@ -1918,11 +1911,10 @@ impl QueueService for PostgresQueueService {
 
         if res.rows_affected() > 0 {
             if let Some(row) = row {
-                let row_id: uuid::Uuid = row.try_get("id")?;
-                let attempts: i32 = row.try_get("attempts")?;
-                let row_correlation_id: Option<uuid::Uuid> =
-                    row.try_get("correlation_id")?;
-                let row_payload: serde_json::Value = row.try_get("payload")?;
+                let row_id = row.id;
+                let attempts = row.attempts;
+                let row_correlation_id = row.correlation_id;
+                let row_payload = row.payload;
                 if let Ok(payload) =
                     serde_json::from_value::<JobPayload>(row_payload)
                     && let Some(job) = transcript_payload(&payload)
@@ -1948,14 +1940,14 @@ impl QueueService for PostgresQueueService {
 
     async fn cancel_job(&self, job_id: JobId) -> Result<()> {
         // Delete only non-leased jobs; leased jobs require different handling.
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             SELECT attempts, payload, correlation_id
             FROM orchestrator_jobs
             WHERE id = $1 AND state IN ('ready','deferred')
             "#,
+            job_id.0,
         )
-        .bind(job_id.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
@@ -1978,10 +1970,9 @@ impl QueueService for PostgresQueueService {
         if res.rows_affected() > 0
             && let Some(row) = row
         {
-            let attempts: i32 = row.try_get("attempts")?;
-            let row_correlation_id: Option<uuid::Uuid> =
-                row.try_get("correlation_id")?;
-            let row_payload: serde_json::Value = row.try_get("payload")?;
+            let attempts = row.attempts;
+            let row_correlation_id = row.correlation_id;
+            let row_payload = row.payload;
             if let Ok(payload) =
                 serde_json::from_value::<JobPayload>(row_payload)
                 && let Some(job) = transcript_payload(&payload)

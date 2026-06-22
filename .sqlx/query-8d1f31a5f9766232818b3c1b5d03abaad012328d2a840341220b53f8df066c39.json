@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO transcript_segments (\n                    transcript_source_id,\n                    library_id,\n                    media_id,\n                    media_type,\n                    media_file_id,\n                    language_code,\n                    cue_index,\n                    start_ms,\n                    end_ms,\n                    cue_text,\n                    segment_hash,\n                    status,\n                    metadata\n                ) VALUES (\n                    $1,\n                    $2,\n                    $3,\n                    ($4::text)::media_type,\n                    $5,\n                    $6,\n                    $7,\n                    $8,\n                    $9,\n                    $10,\n                    $11,\n                    'active',\n                    $12\n                )\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Varchar",
+        "Int4",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8d1f31a5f9766232818b3c1b5d03abaad012328d2a840341220b53f8df066c39"
+}

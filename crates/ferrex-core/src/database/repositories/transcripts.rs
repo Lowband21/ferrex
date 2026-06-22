@@ -1,8 +1,7 @@
 //! PostgreSQL-backed timed-text corpus repository.
 //!
-//! SQL uses runtime-checked `sqlx::query` calls so this foundation can evolve
-//! without requiring new offline SQLx metadata for every transcript query. The
-//! migration owns the durable constraints and indexes.
+//! SQL uses compile-checked SQLx macros backed by checked-in offline metadata.
+//! The migration owns the durable constraints and indexes.
 
 use std::collections::HashSet;
 
@@ -12,7 +11,7 @@ use ferrex_model::{
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
@@ -58,9 +57,9 @@ impl PostgresTranscriptRepository {
         let before = i32::try_from(segment_limit.saturating_sub(1) / 2)
             .unwrap_or_default();
         let start_cue_index = cue_index.saturating_sub(before).max(0);
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT id AS segment_id, start_ms, end_ms, cue_text
+            SELECT id AS "segment_id!", start_ms, end_ms, cue_text
             FROM transcript_segments
             WHERE transcript_source_id = $1
               AND cue_index >= $2
@@ -70,23 +69,22 @@ impl PostgresTranscriptRepository {
             ORDER BY cue_index ASC
             LIMIT $3
             "#,
+            source_id,
+            start_cue_index,
+            i64::try_from(segment_limit).unwrap_or(i64::MAX),
         )
-        .bind(source_id)
-        .bind(start_cue_index)
-        .bind(i64::try_from(segment_limit).unwrap_or(i64::MAX))
         .fetch_all(self.pool())
         .await?;
 
-        rows.into_iter()
-            .map(|row| {
-                Ok(SnippetContextSegment {
-                    segment_id: row.try_get("segment_id")?,
-                    start_ms: row.try_get("start_ms")?,
-                    end_ms: row.try_get("end_ms")?,
-                    cue_text: row.try_get("cue_text")?,
-                })
+        Ok(rows
+            .into_iter()
+            .map(|row| SnippetContextSegment {
+                segment_id: row.segment_id,
+                start_ms: row.start_ms,
+                end_ms: row.end_ms,
+                cue_text: row.cue_text,
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -315,7 +313,7 @@ async fn media_file_ids_for_media(
     media_uuid: Uuid,
     media_type: &str,
 ) -> Result<Vec<Uuid>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
         SELECT id
         FROM media_files
@@ -323,18 +321,14 @@ async fn media_file_ids_for_media(
           AND media_id = $2
           AND media_type = ($3::text)::media_type
         "#,
+        library_id.0,
+        media_uuid,
+        media_type,
     )
-    .bind(library_id.0)
-    .bind(media_uuid)
-    .bind(media_type)
     .fetch_all(&mut **executor)
     .await?;
 
-    let mut ids = Vec::with_capacity(rows.len());
-    for row in rows {
-        ids.push(row.try_get("id")?);
-    }
-    Ok(ids)
+    Ok(rows.into_iter().map(|row| row.id).collect())
 }
 
 async fn delete_pending_transcript_jobs(
@@ -353,15 +347,15 @@ async fn delete_pending_transcript_jobs(
         })
         .collect();
 
-    let result = sqlx::query(
+    let result = sqlx::query!(
         r#"
         DELETE FROM orchestrator_jobs
         WHERE kind = 7
           AND state IN ('ready', 'deferred')
           AND dedupe_key = ANY($1::text[])
         "#,
+        &dedupe_keys,
     )
-    .bind(&dedupe_keys)
     .execute(&mut **executor)
     .await?;
 
@@ -373,9 +367,9 @@ async fn fetch_counts(
     library_id: LibraryId,
     media_file_id: Uuid,
 ) -> Result<(i64, i64)> {
-    let source_count = sqlx::query_scalar::<_, i64>(
+    let source_count = sqlx::query_scalar!(
         r#"
-        SELECT count(*)
+        SELECT count(*) AS "count!"
         FROM transcript_sources
         WHERE library_id = $1
           AND media_file_id = $2
@@ -383,15 +377,15 @@ async fn fetch_counts(
           AND invalidated_at IS NULL
           AND purged_at IS NULL
         "#,
+        library_id.0,
+        media_file_id,
     )
-    .bind(library_id.0)
-    .bind(media_file_id)
     .fetch_one(&mut **executor)
     .await?;
 
-    let segment_count = sqlx::query_scalar::<_, i64>(
+    let segment_count = sqlx::query_scalar!(
         r#"
-        SELECT count(*)
+        SELECT count(*) AS "count!"
         FROM transcript_segments
         WHERE library_id = $1
           AND media_file_id = $2
@@ -399,9 +393,9 @@ async fn fetch_counts(
           AND invalidated_at IS NULL
           AND purged_at IS NULL
         "#,
+        library_id.0,
+        media_file_id,
     )
-    .bind(library_id.0)
-    .bind(media_file_id)
     .fetch_one(&mut **executor)
     .await?;
 
@@ -423,7 +417,7 @@ async fn mark_status(
     let is_invalidated = status == TranscriptProcessingState::Invalidated;
     let is_purged = status == TranscriptProcessingState::Purged;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         INSERT INTO transcript_processing_status (
             library_id,
@@ -466,17 +460,17 @@ async fn mark_status(
             purge_reason = EXCLUDED.purge_reason,
             updated_at = now()
         "#,
+        library_id.0,
+        *media_id.as_uuid(),
+        media_type,
+        media_file_id,
+        status_str,
+        i32::try_from(source_count).unwrap_or(i32::MAX),
+        i32::try_from(segment_count).unwrap_or(i32::MAX),
+        is_invalidated,
+        is_purged,
+        reason,
     )
-    .bind(library_id.0)
-    .bind(*media_id.as_uuid())
-    .bind(media_type)
-    .bind(media_file_id)
-    .bind(status_str)
-    .bind(i32::try_from(source_count).unwrap_or(i32::MAX))
-    .bind(i32::try_from(segment_count).unwrap_or(i32::MAX))
-    .bind(is_invalidated)
-    .bind(is_purged)
-    .bind(reason)
     .execute(&mut **executor)
     .await?;
 
@@ -494,15 +488,15 @@ async fn fetch_source_identity(
     pool: &PgPool,
     source_id: Uuid,
 ) -> Result<SourceIdentity> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
-        SELECT library_id, media_id, media_type::text AS media_type,
+        SELECT library_id, media_id, media_type::text AS "media_type!",
                media_file_id, artifact_id
         FROM transcript_sources
         WHERE id = $1
         "#,
+        source_id,
     )
-    .bind(source_id)
     .fetch_optional(pool)
     .await?;
 
@@ -512,15 +506,13 @@ async fn fetch_source_identity(
         )));
     };
 
-    let library_id = LibraryId(row.try_get("library_id")?);
-    let media_uuid: Uuid = row.try_get("media_id")?;
-    let media_type: String = row.try_get("media_type")?;
-    let media_id = media_id_from_parts(&media_type, media_uuid);
+    let library_id = LibraryId(row.library_id);
+    let media_id = media_id_from_parts(&row.media_type, row.media_id);
     Ok(SourceIdentity {
         library_id,
         media_id,
-        media_file_id: row.try_get("media_file_id")?,
-        artifact_id: row.try_get("artifact_id")?,
+        media_file_id: row.media_file_id,
+        artifact_id: row.artifact_id,
     })
 }
 
@@ -542,7 +534,7 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let language_code = source.language_code.trim().to_string();
         let mut tx = self.pool().begin().await?;
 
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             INSERT INTO transcript_sources (
                 id,
@@ -606,35 +598,35 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 source_locator = EXCLUDED.source_locator,
                 metadata = EXCLUDED.metadata,
                 updated_at = now()
-            RETURNING id
+            RETURNING id AS "id!"
             "#,
+            source.source_id,
+            source.library_id.0,
+            media_uuid,
+            media_type,
+            source.media_file_id,
+            source_kind,
+            &language_code,
+            source.source_key.trim(),
+            source.source_name.as_deref(),
+            source.stream_index,
+            source.source_path_hash.as_deref(),
+            &source.source_content_hash,
+            source.normalized_content_hash.as_deref(),
+            source.artifact_id,
+            source.duration_ms,
+            &source.source_locator,
+            &source.metadata,
         )
-        .bind(source.source_id)
-        .bind(source.library_id.0)
-        .bind(media_uuid)
-        .bind(media_type)
-        .bind(source.media_file_id)
-        .bind(source_kind)
-        .bind(&language_code)
-        .bind(source.source_key.trim())
-        .bind(source.source_name.as_deref())
-        .bind(source.stream_index)
-        .bind(source.source_path_hash.as_deref())
-        .bind(&source.source_content_hash)
-        .bind(source.normalized_content_hash.as_deref())
-        .bind(source.artifact_id)
-        .bind(source.duration_ms)
-        .bind(&source.source_locator)
-        .bind(&source.metadata)
         .fetch_one(&mut *tx)
         .await?;
 
-        let source_id: Uuid = row.try_get("id")?;
+        let source_id: Uuid = row.id;
 
-        sqlx::query(
+        sqlx::query!(
             "DELETE FROM transcript_segments WHERE transcript_source_id = $1",
+            source_id,
         )
-        .bind(source_id)
         .execute(&mut *tx)
         .await?;
 
@@ -649,7 +641,7 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 segment.text.as_str(),
             ]);
 
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 INSERT INTO transcript_segments (
                     transcript_source_id,
@@ -681,24 +673,24 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                     $12
                 )
                 "#,
+                source_id,
+                source.library_id.0,
+                media_uuid,
+                media_type,
+                source.media_file_id,
+                &language_code,
+                segment.cue_index,
+                segment.start_ms,
+                segment.end_ms,
+                &segment.text,
+                segment_hash,
+                &segment.metadata,
             )
-            .bind(source_id)
-            .bind(source.library_id.0)
-            .bind(media_uuid)
-            .bind(media_type)
-            .bind(source.media_file_id)
-            .bind(&language_code)
-            .bind(segment.cue_index)
-            .bind(segment.start_ms)
-            .bind(segment.end_ms)
-            .bind(&segment.text)
-            .bind(segment_hash)
-            .bind(&segment.metadata)
             .execute(&mut *tx)
             .await?;
         }
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE transcript_sources
             SET segment_count = $2,
@@ -706,9 +698,9 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 updated_at = now()
             WHERE id = $1
             "#,
+            source_id,
+            i32::try_from(segments.len()).unwrap_or(i32::MAX),
         )
-        .bind(source_id)
-        .bind(i32::try_from(segments.len()).unwrap_or(i32::MAX))
         .execute(&mut *tx)
         .await?;
 
@@ -749,15 +741,15 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let status = filter.status.map(TranscriptSourceStatus::as_db_str);
         let limit = i64::from(clamp_limit(filter.limit, 50, 200));
 
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
             SELECT id,
                    library_id,
                    media_id,
-                   media_type::text AS media_type,
+                   media_type::text AS "media_type!",
                    media_file_id,
-                   source_kind::text AS source_kind,
-                   status::text AS status,
+                   source_kind::text AS "source_kind!",
+                   status::text AS "status!",
                    language_code,
                    source_name,
                    artifact_id,
@@ -775,37 +767,33 @@ impl TranscriptRepository for PostgresTranscriptRepository {
             ORDER BY updated_at DESC, id
             LIMIT $6
             "#,
+            filter.library_id.map(|id| id.0),
+            filter.media_file_id,
+            media_uuid,
+            media_type,
+            status,
+            limit,
         )
-        .bind(filter.library_id.map(|id| id.0))
-        .bind(filter.media_file_id)
-        .bind(media_uuid)
-        .bind(media_type)
-        .bind(status)
-        .bind(limit)
         .fetch_all(self.pool())
         .await?;
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let media_uuid: Uuid = row.try_get("media_id")?;
-            let media_type: String = row.try_get("media_type")?;
-            let source_kind: String = row.try_get("source_kind")?;
-            let status: String = row.try_get("status")?;
             out.push(TranscriptSourceStatusSummary {
-                source_id: row.try_get("id")?,
-                library_id: LibraryId(row.try_get("library_id")?),
-                media_id: media_id_from_parts(&media_type, media_uuid),
-                media_file_id: row.try_get("media_file_id")?,
-                source_kind: TimedTextSourceKind::from_db_str(&source_kind),
-                status: TranscriptSourceStatus::from_db_str(&status),
-                language_code: row.try_get("language_code")?,
-                source_name: row.try_get("source_name")?,
-                artifact_id: row.try_get("artifact_id")?,
-                segment_count: row.try_get("segment_count")?,
-                duration_ms: row.try_get("duration_ms")?,
-                invalidated_at: row.try_get("invalidated_at")?,
-                purged_at: row.try_get("purged_at")?,
-                updated_at: row.try_get("updated_at")?,
+                source_id: row.id,
+                library_id: LibraryId(row.library_id),
+                media_id: media_id_from_parts(&row.media_type, row.media_id),
+                media_file_id: row.media_file_id,
+                source_kind: TimedTextSourceKind::from_db_str(&row.source_kind),
+                status: TranscriptSourceStatus::from_db_str(&row.status),
+                language_code: row.language_code,
+                source_name: row.source_name,
+                artifact_id: row.artifact_id,
+                segment_count: row.segment_count,
+                duration_ms: row.duration_ms,
+                invalidated_at: row.invalidated_at,
+                purged_at: row.purged_at,
+                updated_at: row.updated_at,
             });
         }
         Ok(out)
@@ -824,14 +812,14 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let status = filter.status.map(TranscriptProcessingState::as_db_str);
         let limit = i64::from(clamp_limit(filter.limit, 50, 200));
 
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
             SELECT id,
                    library_id,
                    media_id,
-                   media_type::text AS media_type,
+                   media_type::text AS "media_type!",
                    media_file_id,
-                   status::text AS status,
+                   status::text AS "status!",
                    source_count,
                    segment_count,
                    attempt_count,
@@ -850,37 +838,33 @@ impl TranscriptRepository for PostgresTranscriptRepository {
             ORDER BY updated_at DESC, id
             LIMIT $6
             "#,
+            filter.library_id.map(|id| id.0),
+            filter.media_file_id,
+            media_uuid,
+            media_type,
+            status,
+            limit,
         )
-        .bind(filter.library_id.map(|id| id.0))
-        .bind(filter.media_file_id)
-        .bind(media_uuid)
-        .bind(media_type)
-        .bind(status)
-        .bind(limit)
         .fetch_all(self.pool())
         .await?;
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let media_uuid: Uuid = row.try_get("media_id")?;
-            let media_type: String = row.try_get("media_type")?;
-            let status: String = row.try_get("status")?;
             out.push(TranscriptProcessingStatusSummary {
-                status_id: row.try_get("id")?,
-                library_id: LibraryId(row.try_get("library_id")?),
-                media_id: media_id_from_parts(&media_type, media_uuid),
-                media_file_id: row.try_get("media_file_id")?,
-                status: TranscriptProcessingState::from_db_str(&status),
-                source_count: row.try_get("source_count")?,
-                segment_count: row.try_get("segment_count")?,
-                attempt_count: row.try_get("attempt_count")?,
-                last_error_excerpt: row.try_get("last_error_excerpt")?,
-                next_retry_at: row.try_get("next_retry_at")?,
-                last_run_correlation_id: row
-                    .try_get("last_run_correlation_id")?,
-                invalidated_at: row.try_get("invalidated_at")?,
-                purged_at: row.try_get("purged_at")?,
-                updated_at: row.try_get("updated_at")?,
+                status_id: row.id,
+                library_id: LibraryId(row.library_id),
+                media_id: media_id_from_parts(&row.media_type, row.media_id),
+                media_file_id: row.media_file_id,
+                status: TranscriptProcessingState::from_db_str(&row.status),
+                source_count: row.source_count,
+                segment_count: row.segment_count,
+                attempt_count: row.attempt_count,
+                last_error_excerpt: row.last_error_excerpt,
+                next_retry_at: row.next_retry_at,
+                last_run_correlation_id: row.last_run_correlation_id,
+                invalidated_at: row.invalidated_at,
+                purged_at: row.purged_at,
+                updated_at: row.updated_at,
             });
         }
         Ok(out)
@@ -908,7 +892,7 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let error_excerpt = bounded_excerpt(update.last_error_excerpt);
         let max_attempts = update.max_attempts.unwrap_or(3).max(0);
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO transcript_processing_status (
                 library_id,
@@ -968,23 +952,23 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 purged_at = CASE WHEN $16 THEN now() ELSE NULL END,
                 updated_at = now()
             "#,
+            update.library_id.0,
+            *update.media_id.as_uuid(),
+            media_type,
+            update.media_file_id,
+            status,
+            update.source_count.max(0),
+            update.segment_count.max(0),
+            update.attempt_count.max(0),
+            max_attempts,
+            error_excerpt,
+            update.last_run_correlation_id,
+            update.next_retry_at,
+            running,
+            terminal,
+            invalidated,
+            purged,
         )
-        .bind(update.library_id.0)
-        .bind(*update.media_id.as_uuid())
-        .bind(media_type)
-        .bind(update.media_file_id)
-        .bind(status)
-        .bind(update.source_count.max(0))
-        .bind(update.segment_count.max(0))
-        .bind(update.attempt_count.max(0))
-        .bind(max_attempts)
-        .bind(error_excerpt)
-        .bind(update.last_run_correlation_id)
-        .bind(update.next_retry_at)
-        .bind(running)
-        .bind(terminal)
-        .bind(invalidated)
-        .bind(purged)
         .execute(self.pool())
         .await?;
 
@@ -1011,9 +995,9 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         )
         .await?;
 
-        let artifact_ids = sqlx::query_scalar::<_, Uuid>(
+        let artifact_ids = sqlx::query_scalar!(
             r#"
-            SELECT artifact_id
+            SELECT artifact_id AS "artifact_id!"
             FROM transcript_sources
             WHERE library_id = $1
               AND media_id = $2
@@ -1021,14 +1005,14 @@ impl TranscriptRepository for PostgresTranscriptRepository {
               AND artifact_id IS NOT NULL
               AND status <> 'purged'
             "#,
+            library_id.0,
+            media_uuid,
+            media_type,
         )
-        .bind(library_id.0)
-        .bind(media_uuid)
-        .bind(media_type)
         .fetch_all(&mut *tx)
         .await?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE transcript_segments
             SET status = 'invalidated',
@@ -1040,15 +1024,15 @@ impl TranscriptRepository for PostgresTranscriptRepository {
               AND media_type = ($3::text)::media_type
               AND purged_at IS NULL
             "#,
+            library_id.0,
+            media_uuid,
+            media_type,
+            reason,
         )
-        .bind(library_id.0)
-        .bind(media_uuid)
-        .bind(media_type)
-        .bind(reason)
         .execute(&mut *tx)
         .await?;
 
-        let affected = sqlx::query(
+        let affected = sqlx::query!(
             r#"
             UPDATE transcript_sources
             SET status = 'invalidated',
@@ -1060,17 +1044,17 @@ impl TranscriptRepository for PostgresTranscriptRepository {
               AND media_type = ($3::text)::media_type
               AND status <> 'purged'
             "#,
+            library_id.0,
+            media_uuid,
+            media_type,
+            reason,
         )
-        .bind(library_id.0)
-        .bind(media_uuid)
-        .bind(media_type)
-        .bind(reason)
         .execute(&mut *tx)
         .await?
         .rows_affected();
 
         if !artifact_ids.is_empty() {
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 UPDATE intelligence_artifacts
                 SET status = 'invalidated',
@@ -1080,32 +1064,31 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 WHERE id = ANY($1::uuid[])
                   AND status <> 'deleted'
                 "#,
+                &artifact_ids,
+                reason,
             )
-            .bind(&artifact_ids)
-            .bind(reason)
             .execute(&mut *tx)
             .await?;
         }
 
-        let media_file_rows = sqlx::query(
+        let media_file_rows = sqlx::query!(
             r#"
-            SELECT DISTINCT media_file_id
+            SELECT DISTINCT media_file_id AS "media_file_id!"
             FROM transcript_sources
             WHERE library_id = $1
               AND media_id = $2
               AND media_type = ($3::text)::media_type
             "#,
+            library_id.0,
+            media_uuid,
+            media_type,
         )
-        .bind(library_id.0)
-        .bind(media_uuid)
-        .bind(media_type)
         .fetch_all(&mut *tx)
         .await?;
 
         for row in media_file_rows {
-            let media_file_id: Uuid = row.try_get("media_file_id")?;
-            if !media_file_ids.contains(&media_file_id) {
-                media_file_ids.push(media_file_id);
+            if !media_file_ids.contains(&row.media_file_id) {
+                media_file_ids.push(row.media_file_id);
             }
         }
 
@@ -1149,33 +1132,30 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         )
         .await?;
 
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT id, media_file_id, artifact_id
+            SELECT id AS "id!", media_file_id, artifact_id
             FROM transcript_sources
             WHERE library_id = $1
               AND media_id = $2
               AND media_type = ($3::text)::media_type
               AND status <> 'purged'
             "#,
+            library_id.0,
+            media_uuid,
+            media_type,
         )
-        .bind(library_id.0)
-        .bind(media_uuid)
-        .bind(media_type)
         .fetch_all(&mut *tx)
         .await?;
 
         let mut source_ids = Vec::with_capacity(rows.len());
         let mut artifact_ids = Vec::new();
         for row in rows {
-            source_ids.push(row.try_get::<Uuid, _>("id")?);
-            let media_file_id: Uuid = row.try_get("media_file_id")?;
-            if !media_file_ids.contains(&media_file_id) {
-                media_file_ids.push(media_file_id);
+            source_ids.push(row.id);
+            if !media_file_ids.contains(&row.media_file_id) {
+                media_file_ids.push(row.media_file_id);
             }
-            if let Some(artifact_id) =
-                row.try_get::<Option<Uuid>, _>("artifact_id")?
-            {
+            if let Some(artifact_id) = row.artifact_id {
                 artifact_ids.push(artifact_id);
             }
         }
@@ -1198,14 +1178,14 @@ impl TranscriptRepository for PostgresTranscriptRepository {
             return Ok(0);
         }
 
-        sqlx::query(
+        sqlx::query!(
             "DELETE FROM transcript_segments WHERE transcript_source_id = ANY($1::uuid[])",
+            &source_ids,
         )
-        .bind(&source_ids)
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE transcript_sources
             SET status = 'purged',
@@ -1215,14 +1195,14 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 updated_at = now()
             WHERE id = ANY($1::uuid[])
             "#,
+            &source_ids,
+            reason,
         )
-        .bind(&source_ids)
-        .bind(reason)
         .execute(&mut *tx)
         .await?;
 
         if !artifact_ids.is_empty() {
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 UPDATE intelligence_artifacts
                 SET status = 'deleted',
@@ -1234,9 +1214,9 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                     updated_at = now()
                 WHERE id = ANY($1::uuid[])
                 "#,
+                &artifact_ids,
+                reason,
             )
-            .bind(&artifact_ids)
-            .bind(reason)
             .execute(&mut *tx)
             .await?;
         }
@@ -1267,7 +1247,7 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let identity = fetch_source_identity(self.pool(), source_id).await?;
         let mut tx = self.pool().begin().await?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE transcript_segments
             SET status = 'invalidated',
@@ -1277,13 +1257,13 @@ impl TranscriptRepository for PostgresTranscriptRepository {
             WHERE transcript_source_id = $1
               AND purged_at IS NULL
             "#,
+            source_id,
+            reason,
         )
-        .bind(source_id)
-        .bind(reason)
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE transcript_sources
             SET status = 'invalidated',
@@ -1293,14 +1273,14 @@ impl TranscriptRepository for PostgresTranscriptRepository {
             WHERE id = $1
               AND status <> 'purged'
             "#,
+            source_id,
+            reason,
         )
-        .bind(source_id)
-        .bind(reason)
         .execute(&mut *tx)
         .await?;
 
         if let Some(artifact_id) = identity.artifact_id {
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 UPDATE intelligence_artifacts
                 SET status = 'invalidated',
@@ -1310,9 +1290,9 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 WHERE id = $1
                   AND status <> 'deleted'
                 "#,
+                artifact_id,
+                reason,
             )
-            .bind(artifact_id)
-            .bind(reason)
             .execute(&mut *tx)
             .await?;
         }
@@ -1340,14 +1320,14 @@ impl TranscriptRepository for PostgresTranscriptRepository {
         let identity = fetch_source_identity(self.pool(), source_id).await?;
         let mut tx = self.pool().begin().await?;
 
-        sqlx::query(
+        sqlx::query!(
             "DELETE FROM transcript_segments WHERE transcript_source_id = $1",
+            source_id,
         )
-        .bind(source_id)
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE transcript_sources
             SET status = 'purged',
@@ -1357,14 +1337,14 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 updated_at = now()
             WHERE id = $1
             "#,
+            source_id,
+            reason,
         )
-        .bind(source_id)
-        .bind(reason)
         .execute(&mut *tx)
         .await?;
 
         if let Some(artifact_id) = identity.artifact_id {
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 UPDATE intelligence_artifacts
                 SET status = 'deleted',
@@ -1376,9 +1356,9 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                     updated_at = now()
                 WHERE id = $1
                 "#,
+                artifact_id,
+                reason,
             )
-            .bind(artifact_id)
-            .bind(reason)
             .execute(&mut *tx)
             .await?;
         }
@@ -1456,19 +1436,19 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 .max(i64::from(limit));
         let fetch_limit = match_window.saturating_add(1);
 
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
             WITH query AS (
                 SELECT websearch_to_tsquery('simple'::regconfig, $1) AS tsq
             )
-            SELECT seg.id AS segment_id,
+            SELECT seg.id AS "segment_id!",
                    seg.library_id,
                    seg.media_id,
-                   seg.media_type::text AS media_type,
+                   seg.media_type::text AS "media_type!",
                    seg.cue_index,
-                   src.id AS source_id,
+                   src.id AS "source_id!",
                    CASE WHEN $7::bool AND ia.id IS NOT NULL THEN ia.id ELSE NULL END AS artifact_id,
-                   src.source_kind::text AS source_kind,
+                   src.source_kind::text AS "source_kind!",
                    src.language_code,
                    COALESCE(
                        mr.title,
@@ -1477,9 +1457,9 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                            WHEN er.id IS NOT NULL THEN format('S%s E%s', er.season_number, er.episode_number)
                            ELSE 'Untitled media'
                        END
-                   ) AS title,
-                   ts_rank_cd(seg.search_vector, query.tsq) AS fts_score,
-                   similarity(seg.cue_text::text, $1) AS trigram_score
+                   ) AS "title!",
+                   ts_rank_cd(seg.search_vector, query.tsq) AS "fts_score!",
+                   similarity(seg.cue_text::text, $1) AS "trigram_score!"
             FROM transcript_segments seg
             JOIN transcript_sources src ON src.id = seg.transcript_source_id
             CROSS JOIN query
@@ -1515,14 +1495,14 @@ impl TranscriptRepository for PostgresTranscriptRepository {
               )
             ORDER BY
                 (seg.cue_text ILIKE ('%' || $1 || '%')) DESC,
-                fts_score DESC,
+                ts_rank_cd(seg.search_vector, query.tsq) DESC,
                 CASE
                     WHEN seg.search_vector @@ query.tsq
                       OR seg.cue_text ILIKE ('%' || $1 || '%')
                     THEN seg.start_ms
                     ELSE NULL
                 END ASC NULLS LAST,
-                trigram_score DESC,
+                similarity(seg.cue_text::text, $1) DESC,
                 seg.library_id,
                 seg.media_type,
                 seg.media_id,
@@ -1530,17 +1510,17 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 seg.id
             LIMIT $9 OFFSET $10
             "#,
+            query,
+            &library_ids,
+            &media_ids,
+            &media_kinds,
+            &language_codes,
+            &source_kinds,
+            request.include_artifacts,
+            user_id,
+            fetch_limit,
+            offset,
         )
-        .bind(query)
-        .bind(&library_ids)
-        .bind(&media_ids)
-        .bind(&media_kinds)
-        .bind(&language_codes)
-        .bind(&source_kinds)
-        .bind(request.include_artifacts)
-        .bind(user_id)
-        .bind(fetch_limit)
-        .bind(offset)
         .fetch_all(self.pool())
         .await?;
 
@@ -1550,22 +1530,17 @@ impl TranscriptRepository for PostgresTranscriptRepository {
                 .min(usize::try_from(match_window).unwrap_or(usize::MAX)),
         );
         for row in rows.into_iter().take(match_window as usize) {
-            let media_uuid: Uuid = row.try_get("media_id")?;
-            let media_type: String = row.try_get("media_type")?;
-            let source_kind: String = row.try_get("source_kind")?;
-            let fts_score: f32 = row.try_get("fts_score")?;
-            let trigram_score: f32 = row.try_get("trigram_score")?;
             matches.push(SnippetMatchRow {
-                segment_id: row.try_get("segment_id")?,
-                source_id: row.try_get("source_id")?,
-                library_id: LibraryId(row.try_get("library_id")?),
-                media_id: media_id_from_parts(&media_type, media_uuid),
-                title: row.try_get("title")?,
-                artifact_id: row.try_get("artifact_id")?,
-                source_kind: TimedTextSourceKind::from_db_str(&source_kind),
-                language_code: row.try_get("language_code")?,
-                cue_index: row.try_get("cue_index")?,
-                score: fts_score + trigram_score,
+                segment_id: row.segment_id,
+                source_id: row.source_id,
+                library_id: LibraryId(row.library_id),
+                media_id: media_id_from_parts(&row.media_type, row.media_id),
+                title: row.title,
+                artifact_id: row.artifact_id,
+                source_kind: TimedTextSourceKind::from_db_str(&row.source_kind),
+                language_code: row.language_code,
+                cue_index: row.cue_index,
+                score: row.fts_score + row.trigram_score,
             });
         }
 

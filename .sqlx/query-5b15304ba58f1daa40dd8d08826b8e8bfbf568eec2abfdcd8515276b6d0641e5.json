@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO transcript_processing_status (\n                library_id,\n                media_id,\n                media_type,\n                media_file_id,\n                status,\n                source_count,\n                segment_count,\n                attempt_count,\n                max_attempts,\n                last_error_excerpt,\n                last_run_correlation_id,\n                next_retry_at,\n                started_at,\n                finished_at,\n                invalidated_at,\n                purged_at\n            ) VALUES (\n                $1,\n                $2,\n                ($3::text)::media_type,\n                $4,\n                $5,\n                $6,\n                $7,\n                $8,\n                $9,\n                $10,\n                $11,\n                $12,\n                CASE WHEN $13 THEN now() ELSE NULL END,\n                CASE WHEN $14 THEN now() ELSE NULL END,\n                CASE WHEN $15 THEN now() ELSE NULL END,\n                CASE WHEN $16 THEN now() ELSE NULL END\n            )\n            ON CONFLICT (library_id, media_file_id) DO UPDATE SET\n                media_id = EXCLUDED.media_id,\n                media_type = EXCLUDED.media_type,\n                status = EXCLUDED.status,\n                source_count = EXCLUDED.source_count,\n                segment_count = EXCLUDED.segment_count,\n                attempt_count = EXCLUDED.attempt_count,\n                max_attempts = EXCLUDED.max_attempts,\n                last_error_excerpt = EXCLUDED.last_error_excerpt,\n                last_run_correlation_id = COALESCE(\n                    EXCLUDED.last_run_correlation_id,\n                    transcript_processing_status.last_run_correlation_id\n                ),\n                next_retry_at = EXCLUDED.next_retry_at,\n                started_at = CASE\n                    WHEN $13 THEN COALESCE(transcript_processing_status.started_at, now())\n                    ELSE NULL\n                END,\n                finished_at = CASE WHEN $14 THEN now() ELSE NULL END,\n                invalidated_at = CASE WHEN $15 THEN now() ELSE NULL END,\n                purged_at = CASE WHEN $16 THEN now() ELSE NULL END,\n                updated_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Varchar",
+        "Uuid",
+        "Timestamptz",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b15304ba58f1daa40dd8d08826b8e8bfbf568eec2abfdcd8515276b6d0641e5"
+}

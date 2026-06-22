@@ -36,7 +36,7 @@ use ferrex_core::api::scan::{
     IncrementalScanStatusView, LeaseConfigView, MaintenanceConfigView,
     MetadataLimitsView, OrchestratorConfigView, QueueConfigView,
     RetryConfigView, ScanConfig, ScanMetrics, TranscriptIndexingConfigView,
-    WatchConfigView,
+    TranscriptRedactionConfigView, WatchConfigView,
 };
 
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
@@ -96,6 +96,26 @@ pub struct TranscriptRefreshResponse {
     pub media_type: String,
     pub media_file_id: Option<Uuid>,
     pub queued: bool,
+    pub accepted: bool,
+    pub job_id: Option<Uuid>,
+    pub merged_into: Option<Uuid>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TranscriptPurgeRequest {
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TranscriptPurgeResponse {
+    pub library_id: Uuid,
+    pub media_id: Uuid,
+    pub media_type: String,
+    pub purged_sources: u64,
+    pub media_file_id: Option<Uuid>,
+    pub rebuild_queued: bool,
     pub accepted: bool,
     pub job_id: Option<Uuid>,
     pub merged_into: Option<Uuid>,
@@ -391,6 +411,128 @@ pub async fn refresh_transcript_handler(
     Ok((status, Json(ApiResponse::success(response))))
 }
 
+pub async fn purge_transcript_handler(
+    State(state): State<AppState>,
+    Path((library_id, media_type, media_id)): Path<(Uuid, String, Uuid)>,
+    Json(request): Json<TranscriptPurgeRequest>,
+) -> Result<impl IntoResponse, ScanHttpError> {
+    let (typed_media_id, variant) =
+        parse_transcript_refresh_media_id(&media_type, media_id)?;
+    let normalized_media_type = transcript_media_type_label(variant);
+    let reason = transcript_purge_reason(
+        request.reason,
+        "operator requested transcript purge",
+    );
+    let purged_sources = state
+        .unit_of_work()
+        .transcripts
+        .purge_media(LibraryId(library_id), typed_media_id, &reason)
+        .await
+        .map_err(transcript_repo_error)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse::success(TranscriptPurgeResponse {
+            library_id,
+            media_id,
+            media_type: normalized_media_type.to_string(),
+            purged_sources,
+            media_file_id: None,
+            rebuild_queued: false,
+            accepted: false,
+            job_id: None,
+            merged_into: None,
+            reason: Some(reason),
+        })),
+    ))
+}
+
+pub async fn rebuild_transcript_handler(
+    State(state): State<AppState>,
+    Path((library_id, media_type, media_id)): Path<(Uuid, String, Uuid)>,
+    Json(request): Json<TranscriptPurgeRequest>,
+) -> Result<impl IntoResponse, ScanHttpError> {
+    let (typed_media_id, variant) =
+        parse_transcript_refresh_media_id(&media_type, media_id)?;
+    let normalized_media_type = transcript_media_type_label(variant);
+    let reason = transcript_purge_reason(
+        request.reason,
+        "operator requested transcript rebuild",
+    );
+    let library = LibraryId(library_id);
+    let purged_sources = state
+        .unit_of_work()
+        .transcripts
+        .purge_media(library, typed_media_id, &reason)
+        .await
+        .map_err(transcript_repo_error)?;
+
+    let orchestrator = state.scan_control().orchestrator();
+    let media_file = state
+        .unit_of_work()
+        .media_files_read
+        .get_by_media_id(&typed_media_id)
+        .await
+        .map_err(internal_scan_error)?
+        .filter(|file| file.library_id == library);
+
+    let handle = if let Some(media_file) = &media_file {
+        orchestrator
+            .enqueue_transcript_refresh(
+                media_file.library_id,
+                typed_media_id,
+                variant,
+                media_file.id,
+                media_file.path.to_string_lossy().to_string(),
+                None,
+            )
+            .await
+            .map_err(internal_scan_error)?
+    } else {
+        None
+    };
+
+    let status = if handle.is_some() {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::OK
+    };
+    let disabled = !orchestrator.config().transcript_indexing.enabled;
+    let media_file_id = media_file.as_ref().map(|file| file.id);
+    let response = match handle {
+        Some(handle) => TranscriptPurgeResponse {
+            library_id,
+            media_id,
+            media_type: normalized_media_type.to_string(),
+            purged_sources,
+            media_file_id,
+            rebuild_queued: true,
+            accepted: handle.accepted,
+            job_id: Some(handle.job_id.0),
+            merged_into: handle.merged_into.map(|id| id.0),
+            reason: None,
+        },
+        None => TranscriptPurgeResponse {
+            library_id,
+            media_id,
+            media_type: normalized_media_type.to_string(),
+            purged_sources,
+            media_file_id,
+            rebuild_queued: false,
+            accepted: false,
+            job_id: None,
+            merged_into: None,
+            reason: Some(if disabled {
+                "transcript_indexing_disabled".to_string()
+            } else {
+                "media_file_unavailable".to_string()
+            }),
+        },
+    };
+
+    Ok((status, Json(ApiResponse::success(response))))
+}
+
 pub async fn scan_metrics_handler(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<ScanMetrics>>, ScanHttpError> {
@@ -465,6 +607,47 @@ pub async fn scan_config_handler(
         },
         transcript_indexing: TranscriptIndexingConfigView {
             enabled: cfg.transcript_indexing.enabled,
+            embedded_enabled: cfg.transcript_indexing.embedded_enabled,
+            sidecar_enabled: cfg.transcript_indexing.sidecar_enabled,
+            allowed_languages: cfg
+                .transcript_indexing
+                .allowed_languages
+                .clone(),
+            max_subtitle_bytes: cfg.transcript_indexing.max_subtitle_bytes,
+            max_segments_per_media: cfg
+                .transcript_indexing
+                .max_segments_per_media,
+            max_chars_per_segment: cfg
+                .transcript_indexing
+                .max_chars_per_segment,
+            max_chars_per_snippet: cfg
+                .transcript_indexing
+                .max_chars_per_snippet,
+            extraction_timeout_ms: cfg
+                .transcript_indexing
+                .extraction_timeout_ms,
+            concurrency_budget: cfg.transcript_indexing.concurrency_budget,
+            redaction: TranscriptRedactionConfigView {
+                enabled: cfg.transcript_indexing.redaction.enabled,
+                redact_emails: cfg.transcript_indexing.redaction.redact_emails,
+                redact_phone_numbers: cfg
+                    .transcript_indexing
+                    .redaction
+                    .redact_phone_numbers,
+                redact_url_secrets: cfg
+                    .transcript_indexing
+                    .redaction
+                    .redact_url_secrets,
+                redact_bearer_tokens: cfg
+                    .transcript_indexing
+                    .redaction
+                    .redact_bearer_tokens,
+                custom_regexes: cfg
+                    .transcript_indexing
+                    .redaction
+                    .custom_regexes
+                    .clone(),
+            },
         },
         bulk_mode: BulkModeView {
             speedup_factor: cfg.bulk_mode.speedup_factor,
@@ -573,6 +756,26 @@ fn transcript_media_type_label(media_type: VideoMediaType) -> &'static str {
         VideoMediaType::Episode => "episode",
         VideoMediaType::Series => "series",
         VideoMediaType::Season => "season",
+    }
+}
+
+fn transcript_purge_reason(
+    reason: Option<String>,
+    fallback: &'static str,
+) -> String {
+    reason
+        .map(|value| value.trim().chars().take(512).collect::<String>())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn transcript_repo_error(error: MediaError) -> ScanHttpError {
+    match error {
+        MediaError::InvalidMedia(message) => ScanHttpError {
+            status: StatusCode::BAD_REQUEST,
+            message,
+        },
+        other => internal_scan_error(other),
     }
 }
 

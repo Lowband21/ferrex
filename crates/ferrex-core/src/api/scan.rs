@@ -172,6 +172,42 @@ pub struct MetadataLimitsView {
 pub struct TranscriptIndexingConfigView {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub embedded_enabled: bool,
+    #[serde(default)]
+    pub sidecar_enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_languages: Vec<String>,
+    #[serde(default)]
+    pub max_subtitle_bytes: usize,
+    #[serde(default)]
+    pub max_segments_per_media: usize,
+    #[serde(default)]
+    pub max_chars_per_segment: usize,
+    #[serde(default)]
+    pub max_chars_per_snippet: u16,
+    #[serde(default)]
+    pub extraction_timeout_ms: u64,
+    #[serde(default)]
+    pub concurrency_budget: usize,
+    #[serde(default)]
+    pub redaction: TranscriptRedactionConfigView,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TranscriptRedactionConfigView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub redact_emails: bool,
+    #[serde(default)]
+    pub redact_phone_numbers: bool,
+    #[serde(default)]
+    pub redact_url_secrets: bool,
+    #[serde(default)]
+    pub redact_bearer_tokens: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_regexes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
