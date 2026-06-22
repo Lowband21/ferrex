@@ -1,7 +1,7 @@
 use std::any::type_name;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -18,18 +18,20 @@ use crate::{
 
 use super::folder::ScannerFileFilterPolicy;
 use super::messages::{ActorObserver, IssuedJobRecord};
-use crate::domain::scan::orchestration::context::{
-    FolderScanContext, MovieFolderScanContext, MovieRootPath,
-    SeriesFolderScanContext, SeriesRootPath,
-};
 use crate::domain::scan::orchestration::{
     correlation::CorrelationCache,
     events::JobEventPublisher,
     job::{
-        DedupeKey, JobHandle, JobId, JobPriority, MetadataEnrichJob, ScanReason,
+        DedupeKey, EnqueueRequest, JobHandle, JobId, JobPayload, JobPriority,
+        MetadataEnrichJob, ScanReason,
     },
     queue::QueueService,
     scan_cursor::normalize_path,
+    work_planning::{
+        FsEventPlanningInput, LibraryStartPlanningInput, ScanFilesystemEvent,
+        ScanFilesystemEventKind, ScanPlanningLimits, ScanPlanningRoot,
+        ScanStartPlanningMode, plan_fs_event_burst, plan_library_start,
+    },
 };
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -116,12 +118,9 @@ pub enum LibraryActorCommand {
 /// Events emitted by the `LibraryActor`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LibraryActorEvent {
-    /// Request orchestrator to enqueue a folder scan. Actors must not enqueue directly.
+    /// Request orchestrator to enqueue a planned folder scan. Actors must not enqueue directly.
     EnqueueFolderScan {
-        context: Box<FolderScanContext>,
-        priority: JobPriority,
-        reason: ScanReason,
-        correlation_id: Option<Uuid>,
+        request: Box<EnqueueRequest>,
     },
     /// Request orchestrator to enqueue a metadata enrich job (e.g., series pre-seed).
     EnqueueMetadataEnrich {
@@ -171,32 +170,6 @@ impl LibraryActorState {
 
     pub fn mark_scan_inactive(&mut self, folder: &str) {
         self.active_folder_scans.remove(folder);
-    }
-
-    pub fn coalesce_events(&self, events: &[FileSystemEvent]) -> Vec<String> {
-        let mut seen = HashSet::new();
-        let mut folders = Vec::new();
-
-        for event in events {
-            let candidate = if event.path.is_dir() {
-                event.path.clone()
-            } else {
-                event
-                    .path
-                    .parent()
-                    .map(|parent| parent.to_path_buf())
-                    .unwrap_or_else(|| event.path.clone())
-            };
-
-            let folder_norm = normalize_path(&candidate);
-            if let Ok(folder_norm) = folder_norm
-                && seen.insert(folder_norm.clone())
-            {
-                folders.push(folder_norm);
-            }
-        }
-
-        folders
     }
 }
 
@@ -279,38 +252,6 @@ where
     O: ActorObserver,
     E: JobEventPublisher,
 {
-    fn build_root_scan_context(
-        &self,
-        library_root_path_norm: &str,
-        folder_path_norm: String,
-    ) -> Result<FolderScanContext> {
-        let library_id = self.config.library.id;
-        match self.config.library.library_type {
-            crate::types::library::LibraryType::Movies => {
-                let movie_root_path =
-                    MovieRootPath::try_new_under_library_root(
-                        library_root_path_norm,
-                        folder_path_norm,
-                    )?;
-                Ok(FolderScanContext::Movie(MovieFolderScanContext {
-                    library_id,
-                    movie_root_path,
-                }))
-            }
-            crate::types::library::LibraryType::Series => {
-                let series_root_path =
-                    SeriesRootPath::try_new_under_library_root(
-                        library_root_path_norm,
-                        folder_path_norm,
-                    )?;
-                Ok(FolderScanContext::Series(SeriesFolderScanContext {
-                    library_id,
-                    series_root_path,
-                }))
-            }
-        }
-    }
-
     pub fn new(
         config: LibraryActorConfig,
         queue: Arc<Q>,
@@ -347,26 +288,65 @@ where
         }
     }
 
+    fn planning_roots(&self) -> Vec<ScanPlanningRoot> {
+        self.config
+            .roots()
+            .map(|root| {
+                ScanPlanningRoot::with_path_norm(
+                    root.root_id.0,
+                    PathBuf::from(&root.path_norm),
+                    root.path_norm,
+                )
+            })
+            .collect()
+    }
+
+    fn planning_start_mode(mode: StartMode) -> ScanStartPlanningMode {
+        match mode {
+            StartMode::Bulk => ScanStartPlanningMode::Bulk,
+            StartMode::Maintenance => ScanStartPlanningMode::Maintenance,
+            StartMode::Resume => ScanStartPlanningMode::Resume,
+        }
+    }
+
+    fn planning_event_kind(
+        kind: FileSystemEventKind,
+    ) -> ScanFilesystemEventKind {
+        match kind {
+            FileSystemEventKind::Created => ScanFilesystemEventKind::Created,
+            FileSystemEventKind::Modified => ScanFilesystemEventKind::Modified,
+            FileSystemEventKind::Deleted => ScanFilesystemEventKind::Deleted,
+            FileSystemEventKind::Moved => ScanFilesystemEventKind::Moved,
+            FileSystemEventKind::Overflow => ScanFilesystemEventKind::Overflow,
+        }
+    }
+
     async fn enqueue_folder_scan(
         &mut self,
-        context: FolderScanContext,
-        priority: JobPriority,
-        reason: ScanReason,
-        correlation_id: Option<Uuid>,
+        request: EnqueueRequest,
     ) -> Result<Vec<LibraryActorEvent>> {
         let library_id = self.config.library.id;
-        if context.library_id() != library_id {
+        let (context_library_id, folder_path, reason) = match &request.payload {
+            JobPayload::FolderScan(job) => (
+                job.context.library_id(),
+                job.context.folder_path_norm().to_string(),
+                job.scan_reason,
+            ),
+            _ => {
+                return Err(crate::error::MediaError::Internal(
+                    "library actor can only admit folder scan requests".into(),
+                ));
+            }
+        };
+
+        if context_library_id != library_id {
             return Err(crate::error::MediaError::Internal(format!(
                 "enqueue folder scan library_id mismatch (actor={}, context={}, folder={})",
-                library_id,
-                context.library_id(),
-                context.folder_path_norm()
+                library_id, context_library_id, folder_path
             )));
         }
-        let folder_path = context.folder_path_norm().to_string();
-        let dedupe_key = DedupeKey::FolderScan {
-            candidate: MediaCandidate::new(library_id, folder_path.clone()),
-        };
+
+        let dedupe_key = request.dedupe_key();
 
         if self.state.is_scan_active(&folder_path) {
             return Ok(vec![LibraryActorEvent::JobThrottled { dedupe_key }]);
@@ -386,11 +366,11 @@ where
             }
         }
 
-        // Record outstanding and mark active; orchestrator will enqueue from the returned event
+        // Record outstanding and mark active; orchestrator will enqueue from the returned event.
         self.state.record_job(IssuedJobRecord {
             dedupe_key: dedupe_key.clone(),
             job_id: None,
-            issued_at: Utc::now(),
+            issued_at: request.requested_at,
             pending_children: vec![],
         });
         self.state.mark_scan_active(&folder_path);
@@ -401,26 +381,24 @@ where
             folder = %folder_path,
             queued_total,
             reason = ?reason,
-            priority = ?priority,
+            priority = ?request.priority,
             "requesting enqueue for folder scan (via orchestrator)"
         );
         Ok(vec![LibraryActorEvent::EnqueueFolderScan {
-            context: Box::new(context),
-            priority,
-            reason,
-            correlation_id,
+            request: Box::new(request),
         }])
     }
 
     async fn seed_bulk_folders(
         &mut self,
+        mode: StartMode,
         correlation_id: Option<Uuid>,
     ) -> Result<Vec<LibraryActorEvent>> {
         let mut events = Vec::new();
 
-        let roots: Vec<LibraryRootDescriptor> = self.config.roots().collect();
+        let roots = self.planning_roots();
         let root_paths: Vec<String> =
-            roots.iter().map(|r| r.path_norm.clone()).collect();
+            roots.iter().map(|root| root.path_norm.clone()).collect();
         let preview: Vec<&str> =
             root_paths.iter().take(5).map(|s| s.as_str()).collect();
         info!(
@@ -432,91 +410,40 @@ where
             "preparing bulk folder scan seed (depth=1)"
         );
 
-        // Depth-1 enumeration only; let FolderScan jobs recurse
-        let (folders, skipped) =
-            Self::enumerate_first_level_folders(&roots).await;
+        let plan = plan_library_start(LibraryStartPlanningInput {
+            library: &self.config.library,
+            roots: &roots,
+            mode: Self::planning_start_mode(mode),
+            correlation_id,
+            limits: ScanPlanningLimits::unbounded(),
+            now: Utc::now(),
+        })
+        .await?;
+
+        for error in &plan.errors {
+            warn!(
+                target: "scan::seed",
+                library_id = %self.config.library.id,
+                error = %error,
+                "bulk seed planner reported an enumeration error"
+            );
+        }
 
         info!(
             target: "scan::seed",
             library_id = %self.config.library.id,
-            folders = folders.len(),
-            skipped,
+            folders = plan.requests.len(),
+            skipped = plan.skipped_entries,
             "bulk seed enumerated root child folders"
         );
 
-        for (root_path_norm, folder_path_norm) in folders {
-            let context = self
-                .build_root_scan_context(&root_path_norm, folder_path_norm)?;
+        for request in plan.requests {
             // For bulk seeding we bypass outstanding throttles; persistence dedupe ensures safety.
-            let mut issued = self
-                .enqueue_folder_scan(
-                    context,
-                    JobPriority::P1,
-                    ScanReason::BulkSeed,
-                    correlation_id,
-                )
-                .await?;
+            let mut issued = self.enqueue_folder_scan(request).await?;
             events.append(&mut issued);
         }
 
         Ok(events)
-    }
-
-    // Enumerate immediate child folders for each root (depth=1).
-    // Continues on errors; returns (folders, skipped_count).
-    async fn enumerate_first_level_folders(
-        roots: &[LibraryRootDescriptor],
-    ) -> (Vec<(String, String)>, usize) {
-        use tokio::fs;
-        let mut folders: Vec<(String, String)> = Vec::new();
-        let mut skipped: usize = 0;
-
-        for root in roots {
-            match fs::read_dir(&root.path_norm).await {
-                Ok(mut rd) => {
-                    while let Ok(Some(entry)) = rd.next_entry().await {
-                        let name = entry.file_name();
-                        let name_str = name.to_string_lossy();
-                        if name_str.starts_with('.') {
-                            continue;
-                        }
-                        match entry.metadata().await {
-                            Ok(meta) => {
-                                if meta.is_dir() {
-                                    let path = entry.path();
-                                    let norm = normalize_path(&path);
-                                    if let Ok(norm) = norm {
-                                        folders.push((
-                                            root.path_norm.clone(),
-                                            norm,
-                                        ));
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                skipped += 1;
-                                warn!(
-                                    target: "scan::seed",
-                                    path = %root.path_norm,
-                                    error = %err,
-                                    "skipping entry due to metadata error"
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(err) => {
-                    skipped += 1;
-                    warn!(
-                        target: "scan::seed",
-                        path = %root.path_norm,
-                        error = %err,
-                        "skipping directory due to read_dir error"
-                    );
-                }
-            }
-        }
-        (folders, skipped)
     }
 
     async fn handle_fs_events(
@@ -539,113 +466,54 @@ where
             return Ok(responses);
         };
         let root_path_norm = normalize_path(&root_path)?;
+        let planning_root = ScanPlanningRoot::with_path_norm(
+            root.0,
+            root_path.clone(),
+            root_path_norm,
+        );
+        let planning_events = events
+            .into_iter()
+            .map(|event| ScanFilesystemEvent {
+                correlation_id: event.correlation_id,
+                path: event.path,
+                kind: Self::planning_event_kind(event.kind),
+            })
+            .collect();
 
-        let state_correlation = self.state.current_correlation;
-        let event_hint = events.iter().find_map(|event| event.correlation_id);
-        let burst_correlation =
-            correlation_id.or(state_correlation).or(event_hint);
+        let plan = plan_fs_event_burst(FsEventPlanningInput {
+            library: &self.config.library,
+            root: planning_root,
+            events: planning_events,
+            command_correlation_id: correlation_id,
+            state_correlation_id: self.state.current_correlation,
+            file_filters: &self.file_filters,
+            limits: ScanPlanningLimits::unbounded(),
+            now: Utc::now(),
+        })
+        .await?;
 
-        let (overflow, changes): (Vec<_>, Vec<_>) =
-            events.into_iter().partition(|event| {
-                matches!(event.kind, FileSystemEventKind::Overflow)
-            });
-
-        if !overflow.is_empty() {
-            // Overflow means we may have missed events; fall back to scanning the
-            // root's immediate children (depth=1) which are our only supported scan units.
-            let roots = vec![LibraryRootDescriptor {
-                root_id: root,
-                path_norm: root_path_norm.clone(),
-            }];
-            let (folders, _skipped) =
-                Self::enumerate_first_level_folders(&roots).await;
-            for (root_path_norm, folder_path_norm) in folders {
-                let context = self.build_root_scan_context(
-                    &root_path_norm,
-                    folder_path_norm,
-                )?;
-                let mut issued = self
-                    .enqueue_folder_scan(
-                        context,
-                        JobPriority::P0,
-                        ScanReason::WatcherOverflow,
-                        burst_correlation,
-                    )
-                    .await?;
-                responses.append(&mut issued);
-            }
+        if plan.dropped_events > 0 {
+            warn!(
+                target: "scan::events",
+                dropped = plan.dropped_events,
+                "ignored non-media file change events"
+            );
+        }
+        for error in &plan.errors {
+            warn!(
+                target: "scan::events",
+                root_id = root.0,
+                error = %error,
+                "filesystem event planner reported an enumeration error"
+            );
         }
 
-        if !changes.is_empty() {
-            // Filter out non-media file changes to avoid starving bulk scans
-            // with HotChange re-scans caused by our own image writes, etc.
-            let total_changes = changes.len();
-            let filtered: Vec<FileSystemEvent> = changes
-                .into_iter()
-                .filter(|ev| {
-                    if ev.path.is_dir() {
-                        return true;
-                    }
-                    self.file_filters.is_media_file_path(&ev.path)
-                })
-                .collect();
-            let dropped = total_changes.saturating_sub(filtered.len());
-            if dropped > 0 {
-                warn!(
-                    target: "scan::events",
-                    dropped,
-                    "ignored non-media file change events"
-                );
-            }
-            let mut targets: HashSet<String> = HashSet::new();
-            for ev in &filtered {
-                if let Some(target) =
-                    Self::scan_target_under_root(&root_path, &ev.path)
-                {
-                    targets.insert(target);
-                }
-            }
-
-            for folder_path_norm in targets {
-                let context = self.build_root_scan_context(
-                    &root_path_norm,
-                    folder_path_norm,
-                )?;
-                let mut issued = self
-                    .enqueue_folder_scan(
-                        context,
-                        JobPriority::P0,
-                        ScanReason::HotChange,
-                        burst_correlation,
-                    )
-                    .await?;
-                responses.append(&mut issued);
-            }
+        for request in plan.requests {
+            let mut issued = self.enqueue_folder_scan(request).await?;
+            responses.append(&mut issued);
         }
 
         Ok(responses)
-    }
-
-    fn scan_target_under_root(
-        root_path: &PathBuf,
-        path: &Path,
-    ) -> Option<String> {
-        if path.as_os_str().is_empty() {
-            return None;
-        }
-
-        let candidate = if path.is_dir() { path } else { path.parent()? };
-
-        if !candidate.starts_with(root_path) {
-            return None;
-        }
-
-        let rel = candidate.strip_prefix(root_path).ok()?;
-        let child = rel.components().next()?;
-
-        let mut target = root_path.clone();
-        target.push(child.as_os_str());
-        normalize_path(&target).ok()
     }
 }
 
@@ -706,7 +574,7 @@ where
                                     },
                                 );
                             }
-                            self.seed_bulk_folders(correlation_id).await
+                            self.seed_bulk_folders(mode, correlation_id).await
                         }
                         StartMode::Maintenance | StartMode::Resume => {
                             self.state.is_bulk_scanning = false;
@@ -956,11 +824,26 @@ mod tests {
         events
             .iter()
             .filter_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan {
-                    context, ..
-                } = event
+                if let LibraryActorEvent::EnqueueFolderScan { request } = event
+                    && let JobPayload::FolderScan(job) = &request.payload
                 {
-                    Some(context.folder_path_norm().to_string())
+                    Some(job.context.folder_path_norm().to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn enqueued_correlations(
+        events: &[LibraryActorEvent],
+    ) -> Vec<Option<Uuid>> {
+        events
+            .iter()
+            .filter_map(|event| {
+                if let LibraryActorEvent::EnqueueFolderScan { request } = event
+                {
+                    Some(request.correlation_id)
                 } else {
                     None
                 }
@@ -1021,19 +904,9 @@ mod tests {
             })
             .await?;
 
-        let enqueued = events
-            .iter()
-            .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan {
-                    correlation_id,
-                    ..
-                } = event
-                {
-                    Some(*correlation_id)
-                } else {
-                    None
-                }
-            })
+        let enqueued = enqueued_correlations(&events)
+            .into_iter()
+            .next()
             .expect("expected an enqueue event");
 
         assert_eq!(enqueued, Some(correlation));
@@ -1366,19 +1239,9 @@ mod tests {
             })
             .await?;
 
-        let enqueued = responses
-            .iter()
-            .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan {
-                    correlation_id: observed,
-                    ..
-                } = event
-                {
-                    Some(*observed)
-                } else {
-                    None
-                }
-            })
+        let enqueued = enqueued_correlations(&responses)
+            .into_iter()
+            .next()
             .expect("maintenance watcher should enqueue folder scan");
 
         assert_eq!(enqueued, Some(correlation));
@@ -1423,19 +1286,9 @@ mod tests {
             })
             .await?;
 
-        let enqueued = responses
-            .iter()
-            .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan {
-                    correlation_id,
-                    ..
-                } = event
-                {
-                    Some(*correlation_id)
-                } else {
-                    None
-                }
-            })
+        let enqueued = enqueued_correlations(&responses)
+            .into_iter()
+            .next()
             .expect("expected enqueue response");
 
         assert_eq!(enqueued, None);

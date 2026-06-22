@@ -405,16 +405,9 @@ where
                                 Vec::new();
                             for evt in events {
                                 match evt {
-                                    crate::domain::scan::actors::LibraryActorEvent::EnqueueFolderScan { context, priority, reason, correlation_id } => {
-                                        let job = FolderScanJob {
-                                            context: *context.clone(),
-                                            scan_reason: reason,
-                                            enqueue_time: chrono::Utc::now(),
-                                            device_id: None,
-                                        };
-                                        let payload = JobPayload::FolderScan(job);
-                                        let mut request = EnqueueRequest::new(priority, payload.clone());
-                                        request.correlation_id = correlation_id;
+                                    crate::domain::scan::actors::LibraryActorEvent::EnqueueFolderScan { request } => {
+                                        let request = *request;
+                                        let payload = request.payload.clone();
                                         batch.push((payload, request));
                                     }
                                     crate::domain::scan::actors::LibraryActorEvent::EnqueueMetadataEnrich { job, priority, correlation_id } => {

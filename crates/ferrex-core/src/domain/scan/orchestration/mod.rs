@@ -22,6 +22,7 @@ pub mod scan_run;
 pub mod scheduler;
 pub mod series;
 pub mod series_state;
+pub mod work_planning;
 
 pub use crate::domain::scan::actors::*;
 pub use budget::*;
@@ -41,3 +42,4 @@ pub use scan_run::*;
 pub use scheduler::*;
 pub use series::*;
 pub use series_state::*;
+pub use work_planning::*;
