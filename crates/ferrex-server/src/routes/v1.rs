@@ -8,6 +8,9 @@ use ferrex_core::api::routes::v1::admin::MEDIA_ROOT_BROWSER;
 
 #[cfg(feature = "demo")]
 use crate::handlers::admin::demo_handlers;
+use crate::handlers::collections;
+use crate::handlers::discovery;
+use crate::handlers::media::collections as collection_media_handlers;
 use crate::handlers::stream::stream_handlers;
 use crate::handlers::users::admin_user_management;
 use crate::handlers::users::{
@@ -18,7 +21,6 @@ use crate::handlers::users::{
     },
     user_handlers, user_management, watch_status_handlers,
 };
-use crate::handlers::{collections as collection_handlers, discovery};
 use crate::{
     handlers::{
         admin::{dev_handlers, media_root},
@@ -190,6 +192,70 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         //
         .route(v1::discovery::EXPLORE, get(discovery::get_explore_handler))
         .route(v1::discovery::RESUME, get(discovery::get_resume_handler))
+        // Collection endpoints
+        .route(
+            v1::collections::COLLECTION,
+            get(collections::list_collections_handler)
+                .post(collection_media_handlers::create_collection_handler),
+        )
+        .route(
+            v1::collections::ITEM,
+            get(collections::get_collection_detail_handler)
+                .put(collection_media_handlers::update_collection_handler)
+                .delete(collection_media_handlers::delete_collection_handler),
+        )
+        .route(
+            v1::collections::ARCHIVE,
+            post(collection_media_handlers::archive_collection_handler),
+        )
+        .route(
+            v1::collections::ITEMS,
+            get(collections::list_collection_items_handler),
+        )
+        .route(
+            v1::collections::MANUAL_ADD_ITEMS,
+            post(collection_media_handlers::manual_add_collection_items_handler),
+        )
+        .route(
+            v1::collections::MANUAL_REMOVE_ITEMS,
+            post(collection_media_handlers::manual_remove_collection_items_handler),
+        )
+        .route(
+            v1::collections::MANUAL_REORDER_ITEMS,
+            post(collection_media_handlers::manual_reorder_collection_items_handler),
+        )
+        .route(
+            v1::collections::RULE_VALIDATE,
+            post(collection_media_handlers::validate_collection_rule_handler),
+        )
+        .route(
+            v1::collections::RULE_PREVIEW,
+            post(collection_media_handlers::preview_collection_rule_handler),
+        )
+        .route(
+            v1::collections::RULE_REFRESH,
+            post(collection_media_handlers::refresh_collection_rule_handler),
+        )
+        .route(
+            v1::collections::tmdb::IMPORT,
+            post(collection_media_handlers::tmdb_import_collection_handler),
+        )
+        .route(
+            v1::collections::tmdb::LIST,
+            post(collection_media_handlers::tmdb_list_collections_handler),
+        )
+        .route(
+            v1::shelves::PLACEMENTS,
+            post(collection_media_handlers::list_shelf_placements_handler),
+        )
+        .route(
+            v1::shelves::PIN_PLACEMENT,
+            post(collection_media_handlers::pin_shelf_placement_handler),
+        )
+        .route(
+            v1::shelves::REORDER_PLACEMENTS,
+            post(collection_media_handlers::reorder_shelf_placements_handler),
+        )
         // Watch status endpoints
         //
         .route(
@@ -324,23 +390,6 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         .route(
             v1::intelligence::PROVIDER_STATUS,
             get(intelligence_handlers::provider_status_handler),
-        )
-        // Collection read APIs
-        .route(
-            v1::collections::COLLECTION,
-            get(collection_handlers::list_collections_handler),
-        )
-        .route(
-            v1::collections::ITEM,
-            get(collection_handlers::get_collection_detail_handler),
-        )
-        .route(
-            v1::collections::ITEMS,
-            get(collection_handlers::list_collection_items_handler),
-        )
-        .route(
-            v1::shelves::PLACEMENTS,
-            get(collection_handlers::list_shelf_placements_handler),
         )
         // Query system
         .route(v1::media::QUERY, post(query_media_handler))
