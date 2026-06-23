@@ -15,6 +15,7 @@ pub mod media_repo_sync;
 pub mod responses;
 pub mod scan;
 pub mod setup;
+pub mod system_collections;
 pub mod users_admin;
 
 pub use admin::{
@@ -63,6 +64,7 @@ pub use scan::{
     ScanCommandRequest, ScanLifecycleStatus, ScanRunMode, ScanSnapshotDto,
     ScanStartDisposition, StartScanRequest,
 };
+pub use system_collections::*;
 pub use users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 
 /// Curated exports relied on by the UI/player crates.
@@ -114,6 +116,7 @@ pub mod player {
         ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,
         StartClaimResponse,
     };
+    pub use super::system_collections::*;
     pub use super::users_admin::{
         AdminUserInfo, CreateUserRequest, UpdateUserRequest,
     };

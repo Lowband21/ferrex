@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use ferrex_model::{EpisodeID, MediaID, MovieID};
+use ferrex_model::{EpisodeID, MediaID, MovieID, SeriesID};
 use ordered_float::OrderedFloat;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -86,6 +86,39 @@ struct EpisodeCandidateRow {
     watch_duration: Option<f64>,
     last_watched: Option<i64>,
     completed_at: Option<i64>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SeriesCandidateRow {
+    id: Uuid,
+    library_id: Uuid,
+    title: String,
+    overview: Option<String>,
+    release_date: Option<NaiveDate>,
+    discovered_at: DateTime<Utc>,
+    added_at: DateTime<Utc>,
+    created_at: Option<DateTime<Utc>>,
+    updated_at: DateTime<Utc>,
+    runtime_minutes: Option<i32>,
+    rating: Option<f64>,
+    popularity: Option<f64>,
+    content_rating: Option<String>,
+    tmdb_id: Option<i64>,
+    file_size_bytes: Option<i64>,
+    is_available: bool,
+    tombstone_reason: Option<String>,
+    genres: Vec<String>,
+    keywords: Vec<String>,
+    actor_names: Vec<String>,
+    actor_tmdb_ids: Vec<i64>,
+    director_names: Vec<String>,
+    director_tmdb_ids: Vec<i64>,
+    watch_position: Option<f64>,
+    watch_duration: Option<f64>,
+    last_watched: Option<i64>,
+    completed_count: i64,
+    in_progress_count: i64,
+    available_episode_count: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -251,6 +284,7 @@ impl<'a> DynamicCollectionEvaluator<'a> {
     ) -> Result<Vec<DynamicCollectionCandidate>> {
         let mut candidates = Vec::new();
         candidates.extend(self.load_movie_candidates(watch_user_id).await?);
+        candidates.extend(self.load_series_candidates(watch_user_id).await?);
         candidates.extend(self.load_episode_candidates(watch_user_id).await?);
         Ok(candidates)
     }
@@ -352,6 +386,150 @@ impl<'a> DynamicCollectionEvaluator<'a> {
         })?;
 
         Ok(rows.into_iter().map(movie_candidate_from_row).collect())
+    }
+
+    async fn load_series_candidates(
+        &self,
+        watch_user_id: Option<Uuid>,
+    ) -> Result<Vec<DynamicCollectionCandidate>> {
+        let episode_media_type = CollectionMediaKind::Episode.media_type_code();
+        let rows = sqlx::query_as::<_, SeriesCandidateRow>(
+            r#"
+            SELECT
+                s.id,
+                s.library_id,
+                s.title::text AS title,
+                sm.overview AS overview,
+                sm.first_air_date AS release_date,
+                s.discovered_at AS discovered_at,
+                s.discovered_at AS added_at,
+                s.created_at AS created_at,
+                s.updated_at AS updated_at,
+                NULL::integer AS runtime_minutes,
+                sm.vote_average::double precision AS rating,
+                sm.popularity::double precision AS popularity,
+                sm.primary_content_rating AS content_rating,
+                s.tmdb_id AS tmdb_id,
+                availability.file_size_bytes AS file_size_bytes,
+                (availability.available_episode_count > 0) AS is_available,
+                CASE
+                    WHEN availability.episode_count = 0 THEN 'series has no episodes'
+                    WHEN availability.available_episode_count = 0 THEN 'series has no available episodes'
+                    ELSE NULL
+                END AS tombstone_reason,
+                ARRAY(
+                    SELECT lower(sg.name)
+                    FROM series_genres sg
+                    WHERE sg.series_id = s.id
+                    ORDER BY lower(sg.name), sg.genre_id
+                ) AS genres,
+                ARRAY(
+                    SELECT lower(sk.name)
+                    FROM series_keywords sk
+                    WHERE sk.series_id = s.id
+                    ORDER BY lower(sk.name), sk.keyword_id
+                ) AS keywords,
+                ARRAY(
+                    SELECT lower(p.name)
+                    FROM series_cast sc
+                    JOIN persons p ON p.id = sc.person_id
+                    WHERE sc.series_id = s.id
+                    ORDER BY lower(p.name), sc.person_tmdb_id
+                ) AS actor_names,
+                ARRAY(
+                    SELECT sc.person_tmdb_id
+                    FROM series_cast sc
+                    WHERE sc.series_id = s.id
+                    ORDER BY sc.person_tmdb_id
+                ) AS actor_tmdb_ids,
+                ARRAY(
+                    SELECT lower(p.name)
+                    FROM series_crew sc
+                    JOIN persons p ON p.id = sc.person_id
+                    WHERE sc.series_id = s.id
+                      AND lower(sc.job) = 'director'
+                    ORDER BY lower(p.name), sc.person_tmdb_id
+                ) AS director_names,
+                ARRAY(
+                    SELECT sc.person_tmdb_id
+                    FROM series_crew sc
+                    WHERE sc.series_id = s.id
+                      AND lower(sc.job) = 'director'
+                    ORDER BY sc.person_tmdb_id
+                ) AS director_tmdb_ids,
+                progress.position::double precision AS watch_position,
+                progress.duration::double precision AS watch_duration,
+                activity.last_watched AS last_watched,
+                activity.completed_count,
+                activity.in_progress_count,
+                availability.available_episode_count
+            FROM series s
+            LEFT JOIN series_metadata sm ON sm.series_id = s.id
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) AS episode_count,
+                    COUNT(*) FILTER (WHERE mf.is_available) AS available_episode_count,
+                    SUM(mf.file_size)::bigint AS file_size_bytes
+                FROM episode_references er
+                JOIN media_files mf ON mf.id = er.file_id
+                WHERE er.series_id = s.id
+            ) availability ON TRUE
+            LEFT JOIN LATERAL (
+                WITH watched AS (
+                    SELECT
+                        MAX(uwp.last_watched) AS progress_last_watched,
+                        MAX(ucm.completed_at) AS completed_last_watched,
+                        COUNT(uwp.media_uuid) AS in_progress_count,
+                        COUNT(ucm.media_uuid) AS completed_count
+                    FROM episode_references er
+                    LEFT JOIN user_watch_progress uwp
+                      ON $1::uuid IS NOT NULL
+                     AND uwp.user_id = $1
+                     AND uwp.media_uuid = er.id
+                     AND uwp.media_type = $2
+                    LEFT JOIN user_completed_media ucm
+                      ON $1::uuid IS NOT NULL
+                     AND ucm.user_id = $1
+                     AND ucm.media_uuid = er.id
+                     AND ucm.media_type = $2
+                    WHERE er.series_id = s.id
+                )
+                SELECT
+                    CASE
+                        WHEN progress_last_watched IS NULL THEN completed_last_watched
+                        WHEN completed_last_watched IS NULL THEN progress_last_watched
+                        ELSE GREATEST(progress_last_watched, completed_last_watched)
+                    END AS last_watched,
+                    in_progress_count,
+                    completed_count
+                FROM watched
+            ) activity ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT uwp.position, uwp.duration
+                FROM episode_references er
+                JOIN user_watch_progress uwp
+                  ON $1::uuid IS NOT NULL
+                 AND uwp.user_id = $1
+                 AND uwp.media_uuid = er.id
+                 AND uwp.media_type = $2
+                WHERE er.series_id = s.id
+                ORDER BY uwp.last_watched DESC, er.id
+                LIMIT 1
+            ) progress ON TRUE
+            ORDER BY s.id
+            "#,
+        )
+        .bind(watch_user_id)
+        .bind(episode_media_type)
+        .fetch_all(self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to load dynamic collection series candidates: {e}"
+            ))
+        })?;
+
+        Ok(rows.into_iter().map(series_candidate_from_row).collect())
     }
 
     async fn load_episode_candidates(
@@ -519,6 +697,55 @@ fn movie_candidate_from_row(
         watch_duration: row.watch_duration,
         last_watched: row.last_watched,
         completed_at: row.completed_at,
+        watch_status: None,
+    })
+}
+
+fn series_candidate_from_row(
+    row: SeriesCandidateRow,
+) -> DynamicCollectionCandidate {
+    let media_id = MediaID::Series(SeriesID(row.id));
+    let watch_status = if row.available_episode_count > 0
+        && row.completed_count >= row.available_episode_count
+    {
+        CollectionWatchStatus::Completed
+    } else if row.completed_count > 0 || row.in_progress_count > 0 {
+        CollectionWatchStatus::InProgress
+    } else {
+        CollectionWatchStatus::Unwatched
+    };
+
+    candidate_from_parts(CandidateParts {
+        media_id,
+        media_type: CollectionMediaKind::Series,
+        library_id: row.library_id,
+        title: row.title,
+        subtitle: None,
+        overview: row.overview,
+        release_date: row.release_date,
+        discovered_at: row.discovered_at,
+        added_at: row.added_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        runtime_minutes: row.runtime_minutes,
+        rating: row.rating,
+        popularity: row.popularity,
+        content_rating: row.content_rating,
+        tmdb_id: row.tmdb_id,
+        file_size_bytes: row.file_size_bytes,
+        is_available: row.is_available,
+        tombstone_reason: row.tombstone_reason,
+        genres: row.genres,
+        keywords: row.keywords,
+        actor_names: row.actor_names,
+        actor_tmdb_ids: row.actor_tmdb_ids,
+        director_names: row.director_names,
+        director_tmdb_ids: row.director_tmdb_ids,
+        watch_position: row.watch_position,
+        watch_duration: row.watch_duration,
+        last_watched: row.last_watched,
+        completed_at: None,
+        watch_status: Some(watch_status),
     })
 }
 
@@ -556,6 +783,7 @@ fn episode_candidate_from_row(
         watch_duration: row.watch_duration,
         last_watched: row.last_watched,
         completed_at: row.completed_at,
+        watch_status: None,
     })
 }
 
@@ -589,6 +817,7 @@ struct CandidateParts {
     watch_duration: Option<f64>,
     last_watched: Option<i64>,
     completed_at: Option<i64>,
+    watch_status: Option<CollectionWatchStatus>,
 }
 
 fn candidate_from_parts(parts: CandidateParts) -> DynamicCollectionCandidate {
@@ -600,13 +829,14 @@ fn candidate_from_parts(parts: CandidateParts) -> DynamicCollectionCandidate {
             }
             _ => None,
         };
-    let watch_status = if parts.completed_at.is_some() {
+    let inferred_watch_status = if parts.completed_at.is_some() {
         CollectionWatchStatus::Completed
     } else if watch_progress_percent.is_some_and(|percent| percent > 0.0) {
         CollectionWatchStatus::InProgress
     } else {
         CollectionWatchStatus::Unwatched
     };
+    let watch_status = parts.watch_status.unwrap_or(inferred_watch_status);
     let availability = if parts.is_available {
         CollectionMemberAvailability {
             status: CollectionMemberAvailabilityStatus::Available,
@@ -834,7 +1064,9 @@ fn field_is_supported(field: CollectionRuleField) -> bool {
 fn media_kind_is_supported(kind: CollectionMediaKind) -> bool {
     matches!(
         kind,
-        CollectionMediaKind::Movie | CollectionMediaKind::Episode
+        CollectionMediaKind::Movie
+            | CollectionMediaKind::Series
+            | CollectionMediaKind::Episode
     )
 }
 

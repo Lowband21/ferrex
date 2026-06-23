@@ -1,6 +1,8 @@
 use std::{any::type_name, fmt, path::PathBuf, sync::Arc};
 
+use crate::api::types::MarkSystemCollectionsStaleRequest;
 use crate::database::repository_ports::{
+    collections::CollectionRepository,
     intelligence::IntelligenceRepository,
     library::LibraryRepository,
     transcripts::{
@@ -212,6 +214,19 @@ where
         self.media_pipeline_flow = self
             .media_pipeline_flow
             .with_intelligence_repository(intelligence);
+        self
+    }
+
+    pub fn with_collection_repository(
+        mut self,
+        collections: Arc<dyn CollectionRepository>,
+    ) -> Self {
+        self.folder_flow = self
+            .folder_flow
+            .with_collection_repository(Arc::clone(&collections));
+        self.media_pipeline_flow = self
+            .media_pipeline_flow
+            .with_collection_repository(collections);
         self
     }
 
@@ -615,6 +630,7 @@ where
     series_coordinator: Arc<SeriesCoordinator>,
     deltas: Arc<dyn FolderDeltaRepository>,
     intelligence: Option<Arc<dyn IntelligenceRepository>>,
+    collections: Option<Arc<dyn CollectionRepository>>,
     planner: FollowUpPlanner,
     follow_ups: FollowUpEnqueuer<Q, E>,
 }
@@ -633,6 +649,7 @@ where
             .field("series_coordinator", &self.series_coordinator)
             .field("deltas", &"FolderDeltaRepository")
             .field("intelligence", &self.intelligence.is_some())
+            .field("collections", &self.collections.is_some())
             .field("planner", &self.planner)
             .field("follow_ups", &self.follow_ups)
             .finish()
@@ -661,6 +678,7 @@ where
             series_coordinator,
             deltas,
             intelligence: None,
+            collections: None,
             planner,
             follow_ups,
         }
@@ -680,6 +698,30 @@ where
     ) -> Self {
         self.intelligence = Some(intelligence);
         self
+    }
+
+    fn with_collection_repository(
+        mut self,
+        collections: Arc<dyn CollectionRepository>,
+    ) -> Self {
+        self.collections = Some(collections);
+        self
+    }
+
+    async fn mark_system_discovery_catalog_stale(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+    ) -> Result<()> {
+        if let Some(collections) = &self.collections {
+            collections
+                .mark_system_collections_stale(
+                    MarkSystemCollectionsStaleRequest::catalog(Some(
+                        library_id,
+                    )),
+                )
+                .await?;
+        }
+        Ok(())
     }
 
     async fn invalidate_intelligence_catalog_change(
@@ -731,6 +773,11 @@ where
             {
                 return classify_media_error(err);
             }
+        }
+        if let Err(err) =
+            self.mark_system_discovery_catalog_stale(library_id).await
+        {
+            return classify_media_error(err);
         }
         if let Err(err) = self
             .deltas
@@ -848,6 +895,9 @@ where
                 .await
                 .map_err(classify_media_error)?;
             }
+            self.mark_system_discovery_catalog_stale(library_id)
+                .await
+                .map_err(classify_media_error)?;
         }
 
         let known_cursor_paths = self
@@ -1245,6 +1295,7 @@ where
     actors: DispatcherActors,
     series_coordinator: Arc<SeriesCoordinator>,
     intelligence: Option<Arc<dyn IntelligenceRepository>>,
+    collections: Option<Arc<dyn CollectionRepository>>,
     timed_text: Option<TimedTextRuntime>,
     planner: FollowUpPlanner,
     follow_ups: FollowUpEnqueuer<Q, E>,
@@ -1261,6 +1312,7 @@ where
             .field("actors", &self.actors)
             .field("series_coordinator", &self.series_coordinator)
             .field("intelligence", &self.intelligence.is_some())
+            .field("collections", &self.collections.is_some())
             .field("timed_text", &self.timed_text.is_some())
             .field("planner", &self.planner)
             .field("follow_ups", &self.follow_ups)
@@ -1285,6 +1337,7 @@ where
             actors,
             series_coordinator,
             intelligence: None,
+            collections: None,
             timed_text: None,
             planner,
             follow_ups,
@@ -1296,6 +1349,14 @@ where
         intelligence: Arc<dyn IntelligenceRepository>,
     ) -> Self {
         self.intelligence = Some(intelligence);
+        self
+    }
+
+    fn with_collection_repository(
+        mut self,
+        collections: Arc<dyn CollectionRepository>,
+    ) -> Self {
+        self.collections = Some(collections);
         self
     }
 
@@ -1321,6 +1382,22 @@ where
         if let Some(intelligence) = &self.intelligence {
             intelligence
                 .refresh_media_read_model(library_id, media_id, None)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn mark_system_discovery_metadata_stale(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+    ) -> Result<()> {
+        if let Some(collections) = &self.collections {
+            collections
+                .mark_system_collections_stale(
+                    MarkSystemCollectionsStaleRequest::metadata(Some(
+                        library_id,
+                    )),
+                )
                 .await?;
         }
         Ok(())
@@ -1603,6 +1680,13 @@ where
 
         if let Err(err) = self
             .refresh_intelligence_read_model(job.library_id, job.media_id)
+            .await
+        {
+            return classify_media_error(err);
+        }
+
+        if let Err(err) = self
+            .mark_system_discovery_metadata_stale(job.library_id)
             .await
         {
             return classify_media_error(err);
