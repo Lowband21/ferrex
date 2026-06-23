@@ -8,7 +8,9 @@ use super::HomeFocusState;
 use crate::infra::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::{
     api::types::collections::{
-        CollectionDetail, CollectionId, CollectionPageInfo, CollectionSummary,
+        CollectionDetail, CollectionId, CollectionMaterializationStatus,
+        CollectionMember, CollectionPageInfo, CollectionSummary,
+        CollectionVersion,
     },
     player_prelude::{
         ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedModel,
@@ -491,6 +493,69 @@ impl Default for CollectionDetailLoadState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionItemsLoadState {
+    NotLoaded,
+    Loading,
+    Loaded,
+    LoadingMore,
+    Error(String),
+}
+
+impl Default for CollectionItemsLoadState {
+    fn default() -> Self {
+        Self::NotLoaded
+    }
+}
+
+impl CollectionItemsLoadState {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading | Self::LoadingMore)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectionItemsState {
+    pub items: Vec<CollectionMember>,
+    pub page: Option<CollectionPageInfo>,
+    pub materialization: Option<CollectionMaterializationStatus>,
+    pub load_state: CollectionItemsLoadState,
+}
+
+impl CollectionItemsState {
+    pub fn next_cursor(&self) -> Option<String> {
+        self.page.as_ref().and_then(|page| page.next_cursor.clone())
+    }
+
+    pub fn has_more(&self) -> bool {
+        self.next_cursor().is_some()
+    }
+}
+
+impl Default for CollectionItemsState {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            page: None,
+            materialization: None,
+            load_state: CollectionItemsLoadState::NotLoaded,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionRefreshState {
+    Idle,
+    Refreshing,
+    Error(String),
+}
+
+impl Default for CollectionRefreshState {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
 /// State for the desktop Collections tab and detail cache.
 #[derive(Debug)]
 pub struct CollectionsTabState {
@@ -508,6 +573,12 @@ pub struct CollectionsTabState {
 
     /// Per-collection detail state, loaded on demand when cards are opened.
     pub detail_states: HashMap<CollectionId, CollectionDetailLoadState>,
+
+    /// Per-collection paginated member state for the detail grid.
+    pub item_states: HashMap<CollectionId, CollectionItemsState>,
+
+    /// Per-collection refresh affordance state.
+    pub refresh_states: HashMap<CollectionId, CollectionRefreshState>,
 }
 
 impl CollectionsTabState {
@@ -518,6 +589,8 @@ impl CollectionsTabState {
             page: None,
             scrollable_id: Id::from("collections-tab"),
             detail_states: HashMap::new(),
+            item_states: HashMap::new(),
+            refresh_states: HashMap::new(),
         }
     }
 
@@ -565,10 +638,16 @@ impl CollectionsTabState {
     }
 
     pub fn mark_detail_loaded(&mut self, detail: CollectionDetail) {
-        self.detail_states.insert(
-            detail.summary.identity.id,
-            CollectionDetailLoadState::Loaded(detail),
-        );
+        let collection_id = detail.summary.identity.id;
+        if let Some(summary) = self
+            .summaries
+            .iter_mut()
+            .find(|summary| summary.identity.id == collection_id)
+        {
+            *summary = detail.summary.clone();
+        }
+        self.detail_states
+            .insert(collection_id, CollectionDetailLoadState::Loaded(detail));
     }
 
     pub fn mark_detail_error(
@@ -590,6 +669,134 @@ impl CollectionsTabState {
             .get(&collection_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    pub fn item_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionItemsState {
+        self.item_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn mark_items_loading(
+        &mut self,
+        collection_id: CollectionId,
+        append: bool,
+    ) {
+        let entry = self.item_states.entry(collection_id).or_default();
+        entry.load_state = if append {
+            CollectionItemsLoadState::LoadingMore
+        } else {
+            CollectionItemsLoadState::Loading
+        };
+        if !append {
+            entry.items.clear();
+            entry.page = None;
+        }
+    }
+
+    pub fn mark_items_loaded(
+        &mut self,
+        collection_id: CollectionId,
+        items: Vec<CollectionMember>,
+        page: CollectionPageInfo,
+        materialization: CollectionMaterializationStatus,
+        append: bool,
+    ) {
+        let entry = self.item_states.entry(collection_id).or_default();
+        if append {
+            entry.items.extend(items);
+        } else {
+            entry.items = items;
+        }
+        entry.items.sort_by(|left, right| {
+            left.position
+                .cmp(&right.position)
+                .then_with(|| left.item_key.cmp(&right.item_key))
+        });
+        entry.page = Some(page);
+        entry.materialization = Some(materialization);
+        entry.load_state = CollectionItemsLoadState::Loaded;
+    }
+
+    pub fn mark_items_error(
+        &mut self,
+        collection_id: CollectionId,
+        message: impl Into<String>,
+    ) {
+        let entry = self.item_states.entry(collection_id).or_default();
+        entry.load_state = CollectionItemsLoadState::Error(message.into());
+    }
+
+    pub fn refresh_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionRefreshState {
+        self.refresh_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn mark_refreshing(&mut self, collection_id: CollectionId) {
+        self.refresh_states
+            .insert(collection_id, CollectionRefreshState::Refreshing);
+    }
+
+    pub fn mark_refresh_succeeded(
+        &mut self,
+        collection_id: CollectionId,
+        materialization: CollectionMaterializationStatus,
+        version: CollectionVersion,
+    ) {
+        self.refresh_states
+            .insert(collection_id, CollectionRefreshState::Idle);
+        self.apply_materialization_status(
+            collection_id,
+            materialization,
+            version,
+        );
+    }
+
+    pub fn mark_refresh_error(
+        &mut self,
+        collection_id: CollectionId,
+        message: impl Into<String>,
+    ) {
+        self.refresh_states.insert(
+            collection_id,
+            CollectionRefreshState::Error(message.into()),
+        );
+    }
+
+    fn apply_materialization_status(
+        &mut self,
+        collection_id: CollectionId,
+        materialization: CollectionMaterializationStatus,
+        version: CollectionVersion,
+    ) {
+        if let Some(summary) = self
+            .summaries
+            .iter_mut()
+            .find(|summary| summary.identity.id == collection_id)
+        {
+            summary.materialization = materialization.clone();
+            summary.version = version.clone();
+        }
+
+        if let Some(CollectionDetailLoadState::Loaded(detail)) =
+            self.detail_states.get_mut(&collection_id)
+        {
+            detail.summary.materialization = materialization.clone();
+            detail.summary.version = version;
+        }
+
+        if let Some(items_state) = self.item_states.get_mut(&collection_id) {
+            items_state.materialization = Some(materialization);
+        }
     }
 }
 

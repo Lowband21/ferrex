@@ -1,10 +1,19 @@
-use chrono::Utc;
-use ferrex_core::api::types::collections::{
-    CollectionDetail, CollectionDuplicatePolicy, CollectionKind,
-    CollectionMaterializationState, CollectionMediaKind, CollectionMediaScope,
-    CollectionPresentationMode, CollectionSource, CollectionSummary,
-    CollectionVisibility,
+use chrono::{DateTime, Utc};
+use ferrex_core::{
+    api::types::collections::{
+        CollectionDetail, CollectionDuplicatePolicy, CollectionKind,
+        CollectionLimitPolicy, CollectionLimitWindow,
+        CollectionMaterializationState, CollectionMediaKind,
+        CollectionMediaScope, CollectionMember,
+        CollectionMemberAvailabilityStatus, CollectionPresentationMode,
+        CollectionRuleField, CollectionRuleOperator, CollectionRulePredicate,
+        CollectionRuleValue, CollectionSortDirection, CollectionSortKey,
+        CollectionSortPolicy, CollectionSource, CollectionSummary,
+        CollectionVisibility, DynamicCollectionRule, ShelfPlacement,
+    },
+    player_prelude::{EpisodeID, MovieID, SeriesID},
 };
+use ferrex_model::MediaID;
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, scrollable, text},
@@ -15,7 +24,10 @@ use crate::{
         collections::{self, CollectionsMessage},
         messages::UiMessage,
         shell_ui::UiShellMessage,
-        tabs::{CollectionDetailLoadState, CollectionsLoadState},
+        tabs::{
+            CollectionDetailLoadState, CollectionItemsLoadState,
+            CollectionItemsState, CollectionRefreshState, CollectionsLoadState,
+        },
         theme,
     },
     state::State,
@@ -62,6 +74,170 @@ pub fn collection_summary_row(
         item_count: item_count_label(summary.item_count),
         materialization,
         is_stale: is_materialization_stale(summary),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollectionItemAction {
+    ViewMovie(MovieID),
+    ViewSeries(SeriesID),
+    ViewEpisode(EpisodeID),
+}
+
+impl CollectionItemAction {
+    fn shell_message(self) -> UiShellMessage {
+        match self {
+            Self::ViewMovie(movie_id) => {
+                UiShellMessage::ViewMovieDetails(movie_id)
+            }
+            Self::ViewSeries(series_id) => {
+                UiShellMessage::ViewTvShow(series_id)
+            }
+            Self::ViewEpisode(episode_id) => {
+                UiShellMessage::ViewEpisode(episode_id)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionItemRow {
+    pub position: u32,
+    pub title: String,
+    pub subtitle: String,
+    pub media_kind: String,
+    pub availability: String,
+    pub action: Option<CollectionItemAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionItemsViewModel {
+    pub rows: Vec<CollectionItemRow>,
+    pub loaded_count: usize,
+    pub hidden_count: usize,
+    pub total_count: u64,
+    pub can_load_more: bool,
+    pub status_summary: String,
+    pub hidden_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionStatusSummary {
+    pub source_summary: String,
+    pub provenance_summary: String,
+    pub rule_summary: String,
+    pub materialization_summary: String,
+    pub refresh_available: bool,
+    pub refresh_label: Option<String>,
+    pub refresh_error: Option<String>,
+}
+
+pub fn collection_item_rows(
+    items: &[CollectionMember],
+) -> Vec<CollectionItemRow> {
+    let mut visible: Vec<_> = items
+        .iter()
+        .filter(|item| is_collection_member_visible(item))
+        .collect();
+    visible.sort_by(|left, right| {
+        left.position
+            .cmp(&right.position)
+            .then_with(|| left.item_key.cmp(&right.item_key))
+    });
+
+    visible
+        .into_iter()
+        .map(|item| CollectionItemRow {
+            position: item.position,
+            title: item.title.clone(),
+            subtitle: item.subtitle.clone().unwrap_or_else(|| {
+                media_kind_label(item.media_type).to_string()
+            }),
+            media_kind: media_kind_label(item.media_type).to_string(),
+            availability: availability_label(item.availability.status)
+                .to_string(),
+            action: collection_item_action(item),
+        })
+        .collect()
+}
+
+pub fn collection_items_view_model(
+    item_state: Option<&CollectionItemsState>,
+    summary_item_count: u32,
+) -> CollectionItemsViewModel {
+    let items = item_state
+        .map(|state| state.items.as_slice())
+        .unwrap_or(&[]);
+    let rows = collection_item_rows(items);
+    let hidden_count = items
+        .iter()
+        .filter(|item| !is_collection_member_visible(item))
+        .count();
+    let loaded_count = items.len();
+    let total_count = item_state
+        .and_then(|state| state.page.as_ref().map(|page| page.total))
+        .unwrap_or(summary_item_count as u64);
+    let can_load_more = item_state.is_some_and(CollectionItemsState::has_more);
+    let status_summary = if loaded_count == 0 {
+        format!("{} reported by API", item_count_label_u64(total_count))
+    } else {
+        format!(
+            "Showing {} visible of {} loaded · {} reported by API",
+            rows.len(),
+            loaded_count,
+            item_count_label_u64(total_count)
+        )
+    };
+    let hidden_summary = (hidden_count > 0).then(|| {
+        format!(
+            "{} unavailable or missing item{} hidden from the normal detail view",
+            hidden_count,
+            if hidden_count == 1 { "" } else { "s" }
+        )
+    });
+
+    CollectionItemsViewModel {
+        rows,
+        loaded_count,
+        hidden_count,
+        total_count,
+        can_load_more,
+        status_summary,
+        hidden_summary,
+    }
+}
+
+pub fn collection_status_summary(
+    detail: &CollectionDetail,
+    item_state: Option<&CollectionItemsState>,
+    refresh_state: Option<&CollectionRefreshState>,
+) -> CollectionStatusSummary {
+    let summary = &detail.summary;
+    let refresh_state = refresh_state.cloned().unwrap_or_default();
+    let refresh_available = can_refresh_collection(detail);
+    let refresh_label = refresh_available.then(|| match refresh_state {
+        CollectionRefreshState::Idle => "Refresh materialization".to_string(),
+        CollectionRefreshState::Refreshing => "Refreshing…".to_string(),
+        CollectionRefreshState::Error(_) => "Retry refresh".to_string(),
+    });
+    let refresh_error = match refresh_state {
+        CollectionRefreshState::Error(message) => Some(message),
+        CollectionRefreshState::Idle | CollectionRefreshState::Refreshing => {
+            None
+        }
+    };
+    let materialization = item_state
+        .and_then(|state| state.materialization.as_ref())
+        .unwrap_or(&summary.materialization);
+
+    CollectionStatusSummary {
+        source_summary: source_summary(summary),
+        provenance_summary: provenance_summary(summary),
+        rule_summary: rule_summary(detail.rule.as_ref()),
+        materialization_summary: materialization_summary(materialization),
+        refresh_available,
+        refresh_label,
+        refresh_error,
     }
 }
 
@@ -137,11 +313,14 @@ pub fn view_collection_detail(
     let tab = collections::collections_tab(state);
     let detail_state =
         tab.and_then(|tab| tab.detail_states.get(&collection_id));
+    let item_state = tab.and_then(|tab| tab.item_states.get(&collection_id));
+    let refresh_state =
+        tab.and_then(|tab| tab.refresh_states.get(&collection_id));
     let summary = tab.and_then(|tab| tab.summary(collection_id));
 
     match detail_state {
         Some(CollectionDetailLoadState::Loaded(detail)) => {
-            collection_detail_content(state, detail)
+            collection_detail_content(state, detail, item_state, refresh_state)
         }
         Some(CollectionDetailLoadState::Error(message)) => {
             let title = summary
@@ -173,7 +352,7 @@ pub fn view_collection_detail(
                 title,
                 center_panel(
                     "Loading collection detail…",
-                    "Fetching rules, shelf placements, and item previews.",
+                    "Fetching metadata, status, and paginated items.",
                     None,
                     fonts,
                 ),
@@ -399,143 +578,364 @@ fn center_panel<'a>(
 fn collection_detail_content<'a>(
     state: &'a State,
     detail: &'a CollectionDetail,
+    item_state: Option<&'a CollectionItemsState>,
+    refresh_state: Option<&'a CollectionRefreshState>,
 ) -> Element<'a, UiMessage> {
     let fonts = &state.domains.ui.state.size_provider.font;
     let summary = &detail.summary;
     let row_model = collection_summary_row(summary);
-
-    let mut preview = column![
-        text("Item preview")
-            .size(fonts.subtitle)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY)
-    ]
-    .spacing(10);
-
-    if detail.items_preview.is_empty() {
-        preview = preview.push(
-            text("No preview items are currently materialized.")
-                .size(fonts.body)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        );
-    } else {
-        for item in &detail.items_preview {
-            preview = preview.push(
-                container(
-                    row![
-                        text(format!("#{:02}", item.position))
-                            .size(fonts.caption)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        column![
-                            text(item.title.as_str())
-                                .size(fonts.body)
-                                .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                            text(
-                                item.subtitle.as_deref().unwrap_or(
-                                    media_kind_label(item.media_type)
-                                )
-                            )
-                            .size(fonts.caption)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        ]
-                        .spacing(4),
-                        Space::new().width(Length::Fill),
-                        text(format!("{:?}", item.availability.status))
-                            .size(fonts.caption)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    ]
-                    .spacing(12)
-                    .align_y(iced::Alignment::Center),
-                )
-                .padding(12)
-                .style(theme::Container::Card.style()),
-            );
-        }
-    }
-
-    let rule_text = detail
-        .rule
-        .as_ref()
-        .map(|rule| format!("Dynamic rule schema v{}", rule.schema_version))
-        .unwrap_or_else(|| "No dynamic rule attached".to_string());
-    let shelf_text = if detail.shelf_placements.is_empty() {
-        "No shelf placements".to_string()
-    } else {
-        format!(
-            "{} shelf placement{}",
-            detail.shelf_placements.len(),
-            if detail.shelf_placements.len() == 1 {
-                ""
-            } else {
-                "s"
-            }
-        )
-    };
+    let status = collection_status_summary(detail, item_state, refresh_state);
+    let items_model =
+        collection_items_view_model(item_state, summary.item_count);
+    let collection_id = summary.identity.id;
 
     detail_shell(
         row_model.title.clone(),
         column![
-            container(
-                row![
-                    collection_art_block(
-                        row_model.artwork.clone(),
-                        row_model.theme.clone(),
-                        fonts.caption,
-                    ),
-                    column![
-                        text(row_model.description.clone())
-                            .size(fonts.body)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        row(vec![
-                            badge(row_model.kind.clone(), fonts.caption),
-                            badge(row_model.source.clone(), fonts.caption),
-                            badge(row_model.visibility.clone(), fonts.caption),
-                            badge(row_model.status.clone(), fonts.caption),
-                        ])
-                        .spacing(8),
-                        text(row_model.media_scope.clone())
-                            .size(fonts.caption)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        text(row_model.materialization.clone())
-                            .size(fonts.caption)
-                            .color(if row_model.is_stale {
-                                theme::MediaServerTheme::WARNING
-                            } else {
-                                theme::MediaServerTheme::TEXT_SECONDARY
-                            }),
-                    ]
-                    .spacing(8)
-                    .width(Length::Fill),
-                ]
-                .spacing(16)
-                .align_y(iced::Alignment::Center),
-            )
-            .padding(18)
-            .style(theme::Container::Card.style()),
-            container(
-                column![
-                    text("Collection metadata")
-                        .size(fonts.subtitle)
-                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                    text(rule_text)
-                        .size(fonts.body)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    text(shelf_text)
-                        .size(fonts.body)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    text(format!("Revision {}", summary.version.revision))
-                        .size(fonts.caption)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                ]
-                .spacing(8),
-            )
-            .padding(18)
-            .style(theme::Container::Card.style()),
-            preview,
+            collection_detail_header_card(row_model.clone(), fonts),
+            collection_status_cards(
+                status,
+                detail,
+                collection_id,
+                refresh_state,
+                fonts,
+            ),
+            collection_items_section(
+                items_model,
+                item_state,
+                collection_id,
+                fonts,
+            ),
         ]
         .spacing(18)
         .into(),
         fonts,
     )
+}
+
+fn collection_detail_header_card<'a>(
+    row_model: CollectionSummaryRow,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    container(
+        row![
+            collection_art_block(
+                row_model.artwork.clone(),
+                row_model.theme.clone(),
+                fonts.caption,
+            ),
+            column![
+                text(row_model.description.clone())
+                    .size(fonts.body)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                row(vec![
+                    badge(row_model.kind.clone(), fonts.caption),
+                    badge(row_model.source.clone(), fonts.caption),
+                    badge(row_model.visibility.clone(), fonts.caption),
+                    badge(row_model.status.clone(), fonts.caption),
+                    badge("Read-only", fonts.caption),
+                ])
+                .spacing(8),
+                text(row_model.media_scope.clone())
+                    .size(fonts.caption)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                text(row_model.materialization.clone())
+                    .size(fonts.caption)
+                    .color(if row_model.is_stale {
+                        theme::MediaServerTheme::WARNING
+                    } else {
+                        theme::MediaServerTheme::TEXT_SECONDARY
+                    }),
+            ]
+            .spacing(8)
+            .width(Length::Fill),
+        ]
+        .spacing(16)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding(18)
+    .style(theme::Container::Card.style())
+    .into()
+}
+
+fn collection_status_cards<'a>(
+    status: CollectionStatusSummary,
+    detail: &'a CollectionDetail,
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    refresh_state: Option<&CollectionRefreshState>,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let refreshing =
+        matches!(refresh_state, Some(CollectionRefreshState::Refreshing));
+    let refresh_control: Element<'a, UiMessage> =
+        if let Some(label) = status.refresh_label.clone() {
+            let mut control =
+                button(text(label)).style(theme::Button::Secondary.style());
+            if !refreshing {
+                control = control.on_press(
+                    CollectionsMessage::RefreshMaterialization(collection_id)
+                        .into(),
+                );
+            }
+            control.into()
+        } else {
+            text("Refresh unavailable for this source")
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY)
+                .into()
+        };
+
+    let mut source_card = column![
+        text("Read-only source")
+            .size(fonts.subtitle)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+        text(status.source_summary.clone())
+            .size(fonts.body)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        text(status.provenance_summary.clone())
+            .size(fonts.caption)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        refresh_control,
+    ]
+    .spacing(8);
+
+    if let Some(message) = status.refresh_error.as_deref() {
+        source_card = source_card.push(
+            text(format!("Refresh failed: {message}"))
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::ERROR),
+        );
+    }
+
+    let metadata = row(vec![
+        metadata_tile("Rule / source", status.rule_summary.clone(), fonts),
+        metadata_tile(
+            "Materialization",
+            status.materialization_summary.clone(),
+            fonts,
+        ),
+        metadata_tile(
+            "Shelf placement",
+            shelf_placements_summary(&detail.shelf_placements),
+            fonts,
+        ),
+    ])
+    .spacing(12);
+
+    column![
+        container(source_card)
+            .padding(18)
+            .style(theme::Container::Card.style()),
+        metadata,
+    ]
+    .spacing(12)
+    .into()
+}
+
+fn metadata_tile<'a>(
+    title: &'a str,
+    body: String,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    container(
+        column![
+            text(title)
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            text(body)
+                .size(fonts.body)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+        ]
+        .spacing(6),
+    )
+    .padding(14)
+    .width(Length::FillPortion(1))
+    .style(theme::Container::Card.style())
+    .into()
+}
+
+fn collection_items_section<'a>(
+    model: CollectionItemsViewModel,
+    item_state: Option<&'a CollectionItemsState>,
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let mut section = column![
+        row![
+            column![
+                text("Collection items")
+                    .size(fonts.subtitle)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                text(model.status_summary.clone())
+                    .size(fonts.caption)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            ]
+            .spacing(4),
+            Space::new().width(Length::Fill),
+            text("Stable collection order")
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        ]
+        .align_y(iced::Alignment::Center)
+    ]
+    .spacing(12);
+
+    if let Some(hidden_summary) = model.hidden_summary.clone() {
+        section = section.push(
+            text(hidden_summary)
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::WARNING),
+        );
+    }
+
+    if let Some(CollectionItemsLoadState::Error(message)) =
+        item_state.map(|state| &state.load_state)
+    {
+        section = section.push(item_error_banner(collection_id, message));
+    }
+
+    if model.rows.is_empty() {
+        let loading = item_state.is_none_or(|state| {
+            matches!(
+                state.load_state,
+                CollectionItemsLoadState::NotLoaded
+                    | CollectionItemsLoadState::Loading
+            )
+        });
+        section = section.push(if loading {
+            center_panel(
+                "Loading collection items…",
+                "Fetching the first page of materialized members.",
+                None,
+                fonts,
+            )
+        } else if model.hidden_count > 0 {
+            center_panel(
+                "No available items to show",
+                "Unavailable, missing, or archived members are hidden from the normal detail view.",
+                None,
+                fonts,
+            )
+        } else {
+            center_panel(
+                "No items in this collection",
+                "The API did not return visible materialized members for this collection.",
+                None,
+                fonts,
+            )
+        });
+    } else {
+        section = section.push(collection_item_grid(model.rows.clone(), fonts));
+    }
+
+    if model.can_load_more {
+        let label = if matches!(
+            item_state.map(|state| &state.load_state),
+            Some(CollectionItemsLoadState::LoadingMore)
+        ) {
+            "Loading more…"
+        } else {
+            "Load more items"
+        };
+        let mut load_more =
+            button(label).style(theme::Button::Secondary.style());
+        if !matches!(
+            item_state.map(|state| &state.load_state),
+            Some(CollectionItemsLoadState::LoadingMore)
+        ) {
+            load_more = load_more.on_press(
+                CollectionsMessage::LoadMoreItems(collection_id).into(),
+            );
+        }
+        section = section.push(load_more);
+    }
+
+    container(section)
+        .padding(18)
+        .style(theme::Container::Card.style())
+        .into()
+}
+
+fn item_error_banner<'a>(
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    message: &'a str,
+) -> Element<'a, UiMessage> {
+    container(
+        row![
+            text(format!("Items failed to load: {message}"))
+                .color(theme::MediaServerTheme::ERROR),
+            Space::new().width(Length::Fill),
+            button("Retry items")
+                .on_press(
+                    CollectionsMessage::RetryDetailItems(collection_id).into()
+                )
+                .style(theme::Button::Text.style()),
+        ]
+        .align_y(iced::Alignment::Center),
+    )
+    .padding(12)
+    .style(theme::Container::HeaderAccent.style())
+    .into()
+}
+
+fn collection_item_grid<'a>(
+    rows: Vec<CollectionItemRow>,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let mut grid = column![].spacing(12);
+    for chunk in rows.chunks(3) {
+        let mut cards = Vec::new();
+        for row_model in chunk {
+            cards.push(collection_item_card(row_model.clone(), fonts));
+        }
+        for _ in chunk.len()..3 {
+            cards.push(Space::new().width(Length::FillPortion(1)).into());
+        }
+        grid = grid.push(row(cards).spacing(12));
+    }
+    grid.into()
+}
+
+fn collection_item_card<'a>(
+    row_model: CollectionItemRow,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let content = container(
+        column![
+            row![
+                text(format!("#{:02}", row_model.position))
+                    .size(fonts.caption)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::new().width(Length::Fill),
+                badge(row_model.media_kind.clone(), fonts.caption),
+            ]
+            .align_y(iced::Alignment::Center),
+            text(row_model.title.clone())
+                .size(fonts.body)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            text(row_model.subtitle.clone())
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            text(row_model.availability.clone())
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        ]
+        .spacing(8),
+    )
+    .padding(14)
+    .width(Length::Fill)
+    .height(Length::Fixed(154.0))
+    .style(theme::Container::HeaderAccent.style());
+
+    if let Some(action) = row_model.action {
+        button(content)
+            .on_press(action.shell_message().into())
+            .style(theme::Button::MediaCard.style())
+            .width(Length::FillPortion(1))
+            .into()
+    } else {
+        content.width(Length::FillPortion(1)).into()
+    }
 }
 
 fn detail_shell<'a>(
@@ -558,7 +958,327 @@ fn detail_shell<'a>(
     .into()
 }
 
+fn is_collection_member_visible(item: &CollectionMember) -> bool {
+    !matches!(
+        item.availability.status,
+        CollectionMemberAvailabilityStatus::Missing
+            | CollectionMemberAvailabilityStatus::Unavailable
+            | CollectionMemberAvailabilityStatus::Archived
+    )
+}
+
+fn collection_item_action(
+    item: &CollectionMember,
+) -> Option<CollectionItemAction> {
+    match item.media_id {
+        MediaID::Movie(movie_id) => {
+            Some(CollectionItemAction::ViewMovie(movie_id))
+        }
+        MediaID::Series(series_id) => {
+            Some(CollectionItemAction::ViewSeries(series_id))
+        }
+        MediaID::Episode(episode_id) => {
+            Some(CollectionItemAction::ViewEpisode(episode_id))
+        }
+        MediaID::Season(_) => None,
+    }
+}
+
+fn availability_label(
+    status: CollectionMemberAvailabilityStatus,
+) -> &'static str {
+    match status {
+        CollectionMemberAvailabilityStatus::Available => "Available",
+        CollectionMemberAvailabilityStatus::Pending => "Pending availability",
+        CollectionMemberAvailabilityStatus::Missing => "Missing",
+        CollectionMemberAvailabilityStatus::Unavailable => "Unavailable",
+        CollectionMemberAvailabilityStatus::Archived => "Archived",
+    }
+}
+
+fn source_summary(summary: &CollectionSummary) -> String {
+    let source = match summary.source {
+        CollectionSource::Manual => "Manual collection",
+        CollectionSource::DynamicRule => "Dynamic rule collection",
+        CollectionSource::Tmdb => "TMDB-backed collection",
+        CollectionSource::System => "System collection",
+        CollectionSource::Imported => "Imported collection",
+    };
+    format!(
+        "{source} · {} · {} · {}",
+        kind_label(summary.kind),
+        visibility_label(summary.visibility),
+        presentation_label(summary.presentation)
+    )
+}
+
+fn provenance_summary(summary: &CollectionSummary) -> String {
+    let provenance = &summary.provenance;
+    let mut parts =
+        vec![format!("Source: {}", source_label(provenance.source))];
+    if let Some(imported_from) = provenance.imported_from.as_deref() {
+        parts.push(format!("Imported from {imported_from}"));
+    }
+    if let Some(external_id) = provenance.external_id.as_deref() {
+        parts.push(format!("External id {external_id}"));
+    }
+    if let Some(generated_by) = provenance.generated_by.as_deref() {
+        parts.push(format!("Generated by {generated_by}"));
+    }
+    if let Some(rule_hash) = provenance.rule_hash.as_deref() {
+        parts.push(format!("Rule hash {rule_hash}"));
+    }
+    if let Some(last_refreshed_at) = provenance.last_refreshed_at {
+        parts.push(format!(
+            "Last refreshed {}",
+            format_datetime(last_refreshed_at)
+        ));
+    }
+    parts.join(" · ")
+}
+
+fn rule_summary(rule: Option<&DynamicCollectionRule>) -> String {
+    rule.map(|rule| {
+        format!(
+            "Schema v{} · {} · {} · {}",
+            rule.schema_version,
+            predicate_summary(&rule.predicate),
+            sort_policy_summary(&rule.sort),
+            limit_policy_summary(&rule.limit)
+        )
+    })
+    .unwrap_or_else(|| {
+        "No dynamic rule attached; membership is read-only here".to_string()
+    })
+}
+
+fn materialization_summary(
+    materialization: &ferrex_core::api::types::collections::CollectionMaterializationStatus,
+) -> String {
+    let mut parts = vec![format!(
+        "{} · {}",
+        materialization_state_label(materialization.state),
+        item_count_label(materialization.item_count)
+    )];
+    if let Some(generated_at) = materialization.generated_at {
+        parts.push(format!("Evaluated at {}", format_datetime(generated_at)));
+    }
+    if let Some(expires_at) = materialization.expires_at {
+        parts.push(format!("Expires {}", format_datetime(expires_at)));
+    }
+    if let Some(rule_hash) = materialization.rule_hash.as_deref() {
+        parts.push(format!("Rule hash {rule_hash}"));
+    }
+    if let Some(last_error) = materialization.last_error.as_deref() {
+        parts.push(format!("Error: {last_error}"));
+    }
+    if materialization
+        .expires_at
+        .is_some_and(|expires_at| expires_at < Utc::now())
+        && !matches!(
+            materialization.state,
+            CollectionMaterializationState::Stale
+        )
+    {
+        parts.push("stale".to_string());
+    }
+    parts.join(" · ")
+}
+
+fn materialization_state_label(
+    state: CollectionMaterializationState,
+) -> &'static str {
+    match state {
+        CollectionMaterializationState::NotMaterialized => "Not materialized",
+        CollectionMaterializationState::Pending => "Pending",
+        CollectionMaterializationState::Refreshing => "Refreshing",
+        CollectionMaterializationState::Ready => "Ready",
+        CollectionMaterializationState::Stale => "Stale",
+        CollectionMaterializationState::Failed => "Failed",
+    }
+}
+
+fn predicate_summary(predicate: &CollectionRulePredicate) -> String {
+    match predicate {
+        CollectionRulePredicate::All { clauses } if clauses.is_empty() => {
+            "all items".to_string()
+        }
+        CollectionRulePredicate::All { clauses } => {
+            format!(
+                "all of {} condition{}",
+                clauses.len(),
+                plural(clauses.len())
+            )
+        }
+        CollectionRulePredicate::Any { clauses } => {
+            format!(
+                "any of {} condition{}",
+                clauses.len(),
+                plural(clauses.len())
+            )
+        }
+        CollectionRulePredicate::Not { clause } => {
+            format!("not ({})", predicate_summary(clause))
+        }
+        CollectionRulePredicate::Field {
+            field,
+            operator,
+            value,
+        } => format!(
+            "{} {} {}",
+            rule_field_label(*field),
+            rule_operator_label(*operator),
+            rule_value_label(value)
+        ),
+    }
+}
+
+fn sort_policy_summary(sort: &CollectionSortPolicy) -> String {
+    if sort.keys.is_empty() {
+        return "default stable order".to_string();
+    }
+
+    sort.keys
+        .iter()
+        .map(sort_key_summary)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn sort_key_summary(key: &CollectionSortKey) -> String {
+    let direction = match key.direction {
+        CollectionSortDirection::Asc => "ascending",
+        CollectionSortDirection::Desc => "descending",
+    };
+    format!("{:?} {direction}", key.field)
+}
+
+fn limit_policy_summary(limit: &CollectionLimitPolicy) -> String {
+    let mut parts = Vec::new();
+    if let Some(max_items) = limit.max_items {
+        parts.push(format!("max {max_items}"));
+    }
+    if let Some(per_media_type) = limit.per_media_type {
+        parts.push(format!("{per_media_type} per media type"));
+    }
+    parts.push(match limit.window {
+        CollectionLimitWindow::All => "all window".to_string(),
+        CollectionLimitWindow::Newest => "newest window".to_string(),
+        CollectionLimitWindow::Oldest => "oldest window".to_string(),
+        CollectionLimitWindow::RecentlyAdded => {
+            "recently added window".to_string()
+        }
+        CollectionLimitWindow::RecentlyUpdated => {
+            "recently updated window".to_string()
+        }
+    });
+    parts.join(" · ")
+}
+
+fn rule_field_label(field: CollectionRuleField) -> &'static str {
+    match field {
+        CollectionRuleField::MediaType => "media type",
+        CollectionRuleField::LibraryId => "library",
+        CollectionRuleField::Title => "title",
+        CollectionRuleField::SortTitle => "sort title",
+        CollectionRuleField::Genre => "genre",
+        CollectionRuleField::ReleaseYear => "release year",
+        CollectionRuleField::AddedAt => "added date",
+        CollectionRuleField::UpdatedAt => "updated date",
+        CollectionRuleField::RuntimeMinutes => "runtime",
+        CollectionRuleField::AudienceRating => "audience rating",
+        CollectionRuleField::CriticRating => "critic rating",
+        CollectionRuleField::WatchStatus => "watch status",
+        CollectionRuleField::Availability => "availability",
+        CollectionRuleField::TmdbId => "TMDB id",
+        CollectionRuleField::ActorName => "actor",
+        CollectionRuleField::DirectorName => "director",
+    }
+}
+
+fn rule_operator_label(operator: CollectionRuleOperator) -> &'static str {
+    match operator {
+        CollectionRuleOperator::Equals => "equals",
+        CollectionRuleOperator::NotEquals => "does not equal",
+        CollectionRuleOperator::Contains => "contains",
+        CollectionRuleOperator::StartsWith => "starts with",
+        CollectionRuleOperator::In => "is in",
+        CollectionRuleOperator::GreaterThan => "is greater than",
+        CollectionRuleOperator::GreaterThanOrEqual => "is at least",
+        CollectionRuleOperator::LessThan => "is less than",
+        CollectionRuleOperator::LessThanOrEqual => "is at most",
+        CollectionRuleOperator::Between => "is between",
+        CollectionRuleOperator::Exists => "exists",
+    }
+}
+
+fn rule_value_label(value: &CollectionRuleValue) -> String {
+    match value {
+        CollectionRuleValue::String(value) => value.clone(),
+        CollectionRuleValue::Strings(values) => values.join(", "),
+        CollectionRuleValue::Integer(value) => value.to_string(),
+        CollectionRuleValue::Integers(values) => values
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+        CollectionRuleValue::Decimal(value) => value.clone(),
+        CollectionRuleValue::Boolean(value) => value.to_string(),
+        CollectionRuleValue::Date(value) => value.clone(),
+        CollectionRuleValue::Uuid(value) => value.to_string(),
+        CollectionRuleValue::MediaType(kind) => {
+            media_kind_label(*kind).to_string()
+        }
+        CollectionRuleValue::Availability(status) => {
+            availability_label(*status).to_string()
+        }
+    }
+}
+
+fn can_refresh_collection(detail: &CollectionDetail) -> bool {
+    detail.rule.is_some()
+        && (matches!(
+            detail.summary.kind,
+            CollectionKind::DynamicRule | CollectionKind::System
+        ) || matches!(
+            detail.summary.source,
+            CollectionSource::DynamicRule | CollectionSource::System
+        ))
+}
+
+fn shelf_placements_summary(placements: &[ShelfPlacement]) -> String {
+    if placements.is_empty() {
+        return "No shelf placements".to_string();
+    }
+
+    placements
+        .iter()
+        .map(|placement| {
+            format!(
+                "{:?}/{} at #{}{}",
+                placement.surface,
+                placement.shelf_key,
+                placement.position,
+                if placement.pinned { " pinned" } else { "" }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_datetime(value: DateTime<Utc>) -> String {
+    value.format("%b %d, %Y %H:%M UTC").to_string()
+}
+
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
 fn item_count_label(count: u32) -> String {
+    item_count_label_u64(count as u64)
+}
+
+fn item_count_label_u64(count: u64) -> String {
     format!("{count} item{}", if count == 1 { "" } else { "s" })
 }
 
