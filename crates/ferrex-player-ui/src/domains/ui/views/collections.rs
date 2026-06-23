@@ -5,28 +5,36 @@ use ferrex_core::{
         CollectionLimitPolicy, CollectionLimitWindow,
         CollectionMaterializationState, CollectionMediaKind,
         CollectionMediaScope, CollectionMember,
-        CollectionMemberAvailabilityStatus, CollectionPresentationMode,
-        CollectionRuleField, CollectionRuleOperator, CollectionRulePredicate,
-        CollectionRuleValue, CollectionSortDirection, CollectionSortKey,
-        CollectionSortPolicy, CollectionSource, CollectionSummary,
-        CollectionVisibility, DynamicCollectionRule, ShelfPlacement,
+        CollectionMemberAvailabilityStatus, CollectionMemberKey,
+        CollectionPresentationMode, CollectionRuleField,
+        CollectionRuleOperator, CollectionRulePredicate, CollectionRuleValue,
+        CollectionSortDirection, CollectionSortKey, CollectionSortPolicy,
+        CollectionSource, CollectionSummary, CollectionVisibility,
+        DynamicCollectionRule, ShelfPlacement,
     },
     player_prelude::{EpisodeID, MovieID, SeriesID},
 };
 use ferrex_model::MediaID;
 use iced::{
     Element, Length,
-    widget::{Space, button, column, container, row, scrollable, text},
+    widget::{
+        Space, button, column, container, pick_list, row, scrollable, text,
+        text_input,
+    },
 };
 
 use crate::{
     domains::ui::{
-        collections::{self, CollectionsMessage},
+        collections::{self, CollectionItemMoveDirection, CollectionsMessage},
         messages::UiMessage,
         shell_ui::UiShellMessage,
         tabs::{
-            CollectionDetailLoadState, CollectionItemsLoadState,
-            CollectionItemsState, CollectionRefreshState, CollectionsLoadState,
+            CollectionCreateFormState, CollectionDetailLoadState,
+            CollectionEditFormState, CollectionItemActionState,
+            CollectionItemMutationKind, CollectionItemsLoadState,
+            CollectionItemsState, CollectionMediaPickerState,
+            CollectionMediaScopeChoice, CollectionPickerItem,
+            CollectionRefreshState, CollectionsLoadState,
         },
         theme,
     },
@@ -102,6 +110,7 @@ impl CollectionItemAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectionItemRow {
+    pub item_key: CollectionMemberKey,
     pub position: u32,
     pub title: String,
     pub subtitle: String,
@@ -148,6 +157,7 @@ pub fn collection_item_rows(
     visible
         .into_iter()
         .map(|item| CollectionItemRow {
+            item_key: item.item_key.clone(),
             position: item.position,
             title: item.title.clone(),
             subtitle: item.subtitle.clone().unwrap_or_else(|| {
@@ -233,7 +243,7 @@ pub fn collection_status_summary(
     CollectionStatusSummary {
         source_summary: source_summary(summary),
         provenance_summary: provenance_summary(summary),
-        rule_summary: rule_summary(detail.rule.as_ref()),
+        rule_summary: rule_summary(summary, detail.rule.as_ref()),
         materialization_summary: materialization_summary(materialization),
         refresh_available,
         refresh_label,
@@ -256,6 +266,12 @@ pub fn view_collections(state: &State) -> Element<'_, UiMessage> {
 
     if let CollectionsLoadState::Error(message) = &load_state {
         body = body.push(error_banner(message.clone()));
+    }
+
+    if let Some(create_form) = tab.map(|tab| &tab.create_form)
+        && create_form.is_open
+    {
+        body = body.push(collection_create_form(create_form, fonts));
     }
 
     body = match &load_state {
@@ -392,6 +408,9 @@ fn collections_header(state: &State) -> Element<'_, UiMessage> {
             ]
             .spacing(6),
             Space::new().width(Length::Fill),
+            button("New manual collection")
+                .on_press(CollectionsMessage::ToggleCreateForm.into())
+                .style(theme::Button::Primary.style()),
             button(if loading { "Refreshing…" } else { "Refresh" })
                 .on_press(CollectionsMessage::Refresh.into())
                 .style(theme::Button::Secondary.style()),
@@ -400,6 +419,77 @@ fn collections_header(state: &State) -> Element<'_, UiMessage> {
     )
     .width(Length::Fill)
     .into()
+}
+
+fn collection_create_form<'a>(
+    form: &'a CollectionCreateFormState,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let mut submit = button(if form.submitting {
+        "Creating…"
+    } else {
+        "Create manual collection"
+    })
+    .style(theme::Button::Primary.style());
+    if !form.submitting {
+        submit = submit.on_press(CollectionsMessage::SubmitCreate.into());
+    }
+
+    let mut fields = column![
+        text("Create manual collection")
+            .size(fonts.subtitle)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+        text("Start with editable metadata and a default media scope. Dynamic rule builders stay out of this flow.")
+            .size(fonts.caption)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        text_input("Collection title", &form.title)
+            .padding(12)
+            .size(fonts.body)
+            .style(theme::TextInput::style())
+            .on_input(|value| CollectionsMessage::CreateTitleChanged(value).into())
+            .on_submit(CollectionsMessage::SubmitCreate.into()),
+        text_input("Description (optional)", &form.description)
+            .padding(12)
+            .size(fonts.body)
+            .style(theme::TextInput::style())
+            .on_input(|value| CollectionsMessage::CreateDescriptionChanged(value).into()),
+        row![
+            column![
+                text("Media scope default")
+                    .size(fonts.caption)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                pick_list(
+                    CollectionMediaScopeChoice::OPTIONS,
+                    Some(form.media_scope),
+                    |scope| CollectionsMessage::CreateScopeChanged(scope).into(),
+                )
+                .placeholder("Media scope")
+                .width(Length::Fixed(220.0)),
+            ]
+            .spacing(6),
+            Space::new().width(Length::Fill),
+            submit,
+            button("Cancel")
+                .on_press(CollectionsMessage::ToggleCreateForm.into())
+                .style(theme::Button::Secondary.style()),
+        ]
+        .align_y(iced::Alignment::End)
+        .spacing(12),
+    ]
+    .spacing(12);
+
+    if let Some(error) = form.error.as_deref() {
+        fields = fields.push(
+            text(error)
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::ERROR),
+        );
+    }
+
+    container(fields)
+        .padding(18)
+        .style(theme::Container::Card.style())
+        .into()
 }
 
 fn collection_card<'a>(
@@ -588,33 +678,56 @@ fn collection_detail_content<'a>(
     let items_model =
         collection_items_view_model(item_state, summary.item_count);
     let collection_id = summary.identity.id;
+    let can_edit = collections::is_manual_collection(summary);
+    let tab = collections::collections_tab(state);
+    let edit_form = tab.and_then(|tab| tab.edit_forms.get(&collection_id));
+    let picker_state =
+        tab.and_then(|tab| tab.picker_states.get(&collection_id));
+    let item_action_state =
+        tab.and_then(|tab| tab.item_action_states.get(&collection_id));
 
-    detail_shell(
-        row_model.title.clone(),
-        column![
-            collection_detail_header_card(row_model.clone(), fonts),
-            collection_status_cards(
-                status,
-                detail,
+    let mut content = column![
+        collection_detail_header_card(row_model.clone(), can_edit, fonts),
+        collection_status_cards(
+            status,
+            detail,
+            collection_id,
+            refresh_state,
+            fonts,
+        ),
+    ]
+    .spacing(18);
+
+    content = if can_edit {
+        if let Some(edit_form) = edit_form {
+            content.push(collection_manual_editing_section(
                 collection_id,
-                refresh_state,
+                edit_form,
+                picker_state,
                 fonts,
-            ),
-            collection_items_section(
-                items_model,
-                item_state,
-                collection_id,
-                fonts,
-            ),
-        ]
-        .spacing(18)
-        .into(),
+            ))
+        } else {
+            content.push(collection_editor_state_notice(fonts))
+        }
+    } else {
+        content.push(collection_read_only_notice(summary, fonts))
+    };
+
+    content = content.push(collection_items_section(
+        items_model,
+        item_state,
+        collection_id,
+        can_edit,
+        item_action_state,
         fonts,
-    )
+    ));
+
+    detail_shell(row_model.title.clone(), content.into(), fonts)
 }
 
 fn collection_detail_header_card<'a>(
     row_model: CollectionSummaryRow,
+    editable: bool,
     fonts: &crate::infra::design_tokens::fonts::FontTokens,
 ) -> Element<'a, UiMessage> {
     container(
@@ -633,7 +746,14 @@ fn collection_detail_header_card<'a>(
                     badge(row_model.source.clone(), fonts.caption),
                     badge(row_model.visibility.clone(), fonts.caption),
                     badge(row_model.status.clone(), fonts.caption),
-                    badge("Read-only", fonts.caption),
+                    badge(
+                        if editable {
+                            "Manual editing enabled"
+                        } else {
+                            "Read-only"
+                        },
+                        fonts.caption,
+                    ),
                 ])
                 .spacing(8),
                 text(row_model.media_scope.clone())
@@ -685,8 +805,13 @@ fn collection_status_cards<'a>(
                 .into()
         };
 
+    let source_heading = if collections::is_manual_collection(&detail.summary) {
+        "Collection source"
+    } else {
+        "Read-only source"
+    };
     let mut source_card = column![
-        text("Read-only source")
+        text(source_heading)
             .size(fonts.subtitle)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         text(status.source_summary.clone())
@@ -754,12 +879,367 @@ fn metadata_tile<'a>(
     .into()
 }
 
+fn collection_read_only_notice<'a>(
+    summary: &CollectionSummary,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    container(
+        column![
+            text("Read-only collection")
+                .size(fonts.subtitle)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            text(format!(
+                "{} collections are intentionally locked in the desktop editor.",
+                source_label(summary.source)
+            ))
+            .size(fonts.body)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            text("Manual metadata, membership, and ordering controls are available only for manual collections. Dynamic rule-builder UI is intentionally out of scope here.")
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        ]
+        .spacing(8),
+    )
+    .padding(18)
+    .style(theme::Container::Card.style())
+    .into()
+}
+
+fn collection_editor_state_notice<'a>(
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    container(
+        text("Manual editor state is loading. Reopen the collection or refresh if controls do not appear.")
+            .size(fonts.caption)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+    )
+    .padding(18)
+    .style(theme::Container::Card.style())
+    .into()
+}
+
+fn collection_manual_editing_section<'a>(
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    form: &'a CollectionEditFormState,
+    picker: Option<&'a CollectionMediaPickerState>,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let mut section = column![
+        row![
+            column![
+                text("Manual collection editor")
+                    .size(fonts.subtitle)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                text("Update metadata, archive the collection, and add existing media. Dynamic rule-builder controls are not part of this manual flow.")
+                    .size(fonts.caption)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            ]
+            .spacing(4),
+            Space::new().width(Length::Fill),
+            badge("Manual only", fonts.caption),
+        ]
+        .align_y(iced::Alignment::Center),
+        row![
+            collection_metadata_editor(collection_id, form, fonts),
+            collection_media_picker(collection_id, picker, fonts),
+        ]
+        .spacing(12),
+    ]
+    .spacing(12);
+
+    if form.conflict || picker.is_some_and(|picker| picker.conflict) {
+        section = section.push(conflict_recovery_banner(collection_id, fonts));
+    }
+
+    container(section)
+        .padding(18)
+        .style(theme::Container::Card.style())
+        .into()
+}
+
+fn collection_metadata_editor<'a>(
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    form: &'a CollectionEditFormState,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let busy = form.saving || form.archiving;
+    let mut save = button(if form.saving {
+        "Saving…"
+    } else {
+        "Save metadata"
+    })
+    .style(theme::Button::Primary.style());
+    if form.is_dirty && !busy {
+        save = save
+            .on_press(CollectionsMessage::SaveMetadata(collection_id).into());
+    }
+
+    let mut archive = button(if form.archiving {
+        "Archiving…"
+    } else {
+        "Archive collection"
+    })
+    .style(theme::Button::Destructive.style());
+    if !busy {
+        archive =
+            archive.on_press(CollectionsMessage::Archive(collection_id).into());
+    }
+
+    let mut content = column![
+        text("Metadata")
+            .size(fonts.body)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+        text_input("Collection title", &form.title)
+            .padding(12)
+            .size(fonts.body)
+            .style(theme::TextInput::style())
+            .on_input(move |value| CollectionsMessage::EditTitleChanged(
+                collection_id,
+                value
+            )
+            .into())
+            .on_submit(CollectionsMessage::SaveMetadata(collection_id).into()),
+        text_input("Description", &form.description)
+            .padding(12)
+            .size(fonts.body)
+            .style(theme::TextInput::style())
+            .on_input(move |value| CollectionsMessage::EditDescriptionChanged(
+                collection_id,
+                value
+            )
+            .into()),
+        row![
+            column![
+                text("Media scope")
+                    .size(fonts.caption)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                pick_list(
+                    CollectionMediaScopeChoice::OPTIONS,
+                    Some(form.media_scope),
+                    move |scope| CollectionsMessage::EditScopeChanged(
+                        collection_id,
+                        scope
+                    )
+                    .into(),
+                )
+                .placeholder("Media scope")
+                .width(Length::Fixed(220.0)),
+            ]
+            .spacing(6),
+            Space::new().width(Length::Fill),
+            save,
+            archive,
+        ]
+        .align_y(iced::Alignment::End)
+        .spacing(10),
+    ]
+    .spacing(10)
+    .width(Length::FillPortion(1));
+
+    if let Some(error) = form.error.as_deref() {
+        content = content.push(
+            text(error)
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::ERROR),
+        );
+    }
+
+    if form.conflict {
+        content = content.push(
+            text("The server has a newer revision. Reload latest, review the recovered values, then retry your change.")
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::WARNING),
+        );
+    }
+
+    container(content)
+        .padding(14)
+        .width(Length::FillPortion(1))
+        .style(theme::Container::HeaderAccent.style())
+        .into()
+}
+
+fn collection_media_picker<'a>(
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    picker: Option<&'a CollectionMediaPickerState>,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let query = picker.map(|picker| picker.query.as_str()).unwrap_or("");
+    let searching = picker.is_some_and(|picker| picker.searching);
+    let adding = picker.and_then(|picker| picker.adding);
+    let busy = searching || adding.is_some();
+    let mut search = button(if searching { "Searching…" } else { "Search" })
+        .style(theme::Button::Secondary.style());
+    if !searching {
+        search = search
+            .on_press(CollectionsMessage::SearchPicker(collection_id).into());
+    }
+
+    let mut content = column![
+        text("Add media")
+            .size(fonts.body)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+        row![
+            text_input("Search existing media by title", query)
+                .padding(12)
+                .size(fonts.body)
+                .style(theme::TextInput::style())
+                .on_input(move |value| CollectionsMessage::PickerQueryChanged(
+                    collection_id,
+                    value
+                )
+                .into())
+                .on_submit(
+                    CollectionsMessage::SearchPicker(collection_id).into()
+                ),
+            search,
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(10)
+    .width(Length::FillPortion(1));
+
+    if let Some(error) = picker.and_then(|picker| picker.error.as_deref()) {
+        content = content.push(
+            text(error)
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::ERROR),
+        );
+    }
+
+    if picker.is_some_and(|picker| picker.conflict) {
+        content = content.push(
+            text("Membership changed on the server. Reload latest before retrying this add.")
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::WARNING),
+        );
+    }
+
+    if picker.is_none_or(|picker| picker.results.is_empty())
+        && !query.trim().is_empty()
+        && !searching
+    {
+        content = content.push(
+            text("No picker results loaded yet. Search to browse matching server media.")
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        );
+    } else {
+        for item in picker
+            .map(|picker| picker.results.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .take(6)
+            .cloned()
+        {
+            content = content.push(collection_picker_result_card(
+                collection_id,
+                item,
+                busy,
+                adding,
+                fonts,
+            ));
+        }
+    }
+
+    container(content)
+        .padding(14)
+        .width(Length::FillPortion(1))
+        .style(theme::Container::HeaderAccent.style())
+        .into()
+}
+
+fn collection_picker_result_card<'a>(
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    item: CollectionPickerItem,
+    busy: bool,
+    adding: Option<MediaID>,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let title = item.title.clone();
+    let media_kind = item.media_kind;
+    let subtitle = item
+        .subtitle
+        .clone()
+        .unwrap_or_else(|| media_kind_label(media_kind).to_string());
+    let adding_this = adding == Some(item.media_id);
+    let mut add = button(if adding_this { "Adding…" } else { "Add" })
+        .style(theme::Button::Primary.style());
+    if !busy {
+        add = add.on_press(
+            CollectionsMessage::AddPickerItem {
+                collection_id,
+                item,
+            }
+            .into(),
+        );
+    }
+
+    container(
+        row![
+            column![
+                text(title)
+                    .size(fonts.body)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                text(format!(
+                    "{} · {}",
+                    media_kind_label(media_kind),
+                    subtitle
+                ))
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            ]
+            .spacing(4)
+            .width(Length::Fill),
+            add,
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding(10)
+    .style(theme::Container::Card.style())
+    .into()
+}
+
+fn conflict_recovery_banner<'a>(
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    container(
+        row![
+            text("A stale-version conflict was detected. Reload the latest collection state, then retry the action.")
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::WARNING),
+            Space::new().width(Length::Fill),
+            button("Reload latest")
+                .on_press(CollectionsMessage::ReloadAfterConflict(collection_id).into())
+                .style(theme::Button::Secondary.style()),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding(12)
+    .style(theme::Container::HeaderAccent.style())
+    .into()
+}
+
 fn collection_items_section<'a>(
     model: CollectionItemsViewModel,
     item_state: Option<&'a CollectionItemsState>,
     collection_id: ferrex_core::api::types::collections::CollectionId,
+    editable: bool,
+    action_state: Option<&'a CollectionItemActionState>,
     fonts: &crate::infra::design_tokens::fonts::FontTokens,
 ) -> Element<'a, UiMessage> {
+    let order_help = if editable && model.can_load_more {
+        "Load all items before reordering so the saved order is stable"
+    } else if editable {
+        "Move up/down controls save an explicit stable order"
+    } else {
+        "Stable collection order"
+    };
+
     let mut section = column![
         row![
             column![
@@ -772,7 +1252,7 @@ fn collection_items_section<'a>(
             ]
             .spacing(4),
             Space::new().width(Length::Fill),
-            text("Stable collection order")
+            text(order_help)
                 .size(fonts.caption)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
         ]
@@ -792,6 +1272,18 @@ fn collection_items_section<'a>(
         item_state.map(|state| &state.load_state)
     {
         section = section.push(item_error_banner(collection_id, message));
+    }
+
+    if let Some(message) = action_state.and_then(|state| state.error.as_deref())
+    {
+        section = section.push(item_action_banner(
+            collection_id,
+            message,
+            action_state.is_some_and(|state| state.conflict),
+            fonts,
+        ));
+    } else if action_state.is_some_and(|state| state.conflict) {
+        section = section.push(conflict_recovery_banner(collection_id, fonts));
     }
 
     if model.rows.is_empty() {
@@ -819,13 +1311,23 @@ fn collection_items_section<'a>(
         } else {
             center_panel(
                 "No items in this collection",
-                "The API did not return visible materialized members for this collection.",
+                if editable {
+                    "Search for existing media above to add the first manual item."
+                } else {
+                    "The API did not return visible materialized members for this collection."
+                },
                 None,
                 fonts,
             )
         });
     } else {
-        section = section.push(collection_item_grid(model.rows.clone(), fonts));
+        section = section.push(collection_item_grid(
+            model.rows.clone(),
+            collection_id,
+            editable,
+            action_state,
+            fonts,
+        ));
     }
 
     if model.can_load_more {
@@ -878,15 +1380,63 @@ fn item_error_banner<'a>(
     .into()
 }
 
-fn collection_item_grid<'a>(
-    rows: Vec<CollectionItemRow>,
+fn item_action_banner<'a>(
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    message: &'a str,
+    conflict: bool,
     fonts: &crate::infra::design_tokens::fonts::FontTokens,
 ) -> Element<'a, UiMessage> {
+    let action = if conflict {
+        button("Reload latest")
+            .on_press(
+                CollectionsMessage::ReloadAfterConflict(collection_id).into(),
+            )
+            .style(theme::Button::Secondary.style())
+    } else {
+        button("Retry items")
+            .on_press(
+                CollectionsMessage::RetryDetailItems(collection_id).into(),
+            )
+            .style(theme::Button::Text.style())
+    };
+
+    container(
+        row![
+            text(message)
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::ERROR),
+            Space::new().width(Length::Fill),
+            action,
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding(12)
+    .style(theme::Container::HeaderAccent.style())
+    .into()
+}
+
+fn collection_item_grid<'a>(
+    rows: Vec<CollectionItemRow>,
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    editable: bool,
+    action_state: Option<&'a CollectionItemActionState>,
+    fonts: &crate::infra::design_tokens::fonts::FontTokens,
+) -> Element<'a, UiMessage> {
+    let total = rows.len();
     let mut grid = column![].spacing(12);
-    for chunk in rows.chunks(3) {
+    for (chunk_index, chunk) in rows.chunks(3).enumerate() {
         let mut cards = Vec::new();
-        for row_model in chunk {
-            cards.push(collection_item_card(row_model.clone(), fonts));
+        for (offset, row_model) in chunk.iter().enumerate() {
+            cards.push(collection_item_card(
+                row_model.clone(),
+                collection_id,
+                editable,
+                chunk_index * 3 + offset,
+                total,
+                action_state,
+                fonts,
+            ));
         }
         for _ in chunk.len()..3 {
             cards.push(Space::new().width(Length::FillPortion(1)).into());
@@ -898,36 +1448,53 @@ fn collection_item_grid<'a>(
 
 fn collection_item_card<'a>(
     row_model: CollectionItemRow,
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    editable: bool,
+    index: usize,
+    total: usize,
+    action_state: Option<&'a CollectionItemActionState>,
     fonts: &crate::infra::design_tokens::fonts::FontTokens,
 ) -> Element<'a, UiMessage> {
-    let content = container(
-        column![
-            row![
-                text(format!("#{:02}", row_model.position))
-                    .size(fonts.caption)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::new().width(Length::Fill),
-                badge(row_model.media_kind.clone(), fonts.caption),
-            ]
-            .align_y(iced::Alignment::Center),
-            text(row_model.title.clone())
-                .size(fonts.body)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            text(row_model.subtitle.clone())
+    let mut body = column![
+        row![
+            text(format!("#{:02}", row_model.position))
                 .size(fonts.caption)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            text(row_model.availability.clone())
-                .size(fonts.caption)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            Space::new().width(Length::Fill),
+            badge(row_model.media_kind.clone(), fonts.caption),
         ]
-        .spacing(8),
-    )
-    .padding(14)
-    .width(Length::Fill)
-    .height(Length::Fixed(154.0))
-    .style(theme::Container::HeaderAccent.style());
+        .align_y(iced::Alignment::Center),
+        text(row_model.title.clone())
+            .size(fonts.body)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+        text(row_model.subtitle.clone())
+            .size(fonts.caption)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        text(row_model.availability.clone())
+            .size(fonts.caption)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+    ]
+    .spacing(8);
 
-    if let Some(action) = row_model.action {
+    if editable {
+        body = body.push(collection_item_controls(
+            collection_id,
+            &row_model,
+            index,
+            total,
+            action_state,
+        ));
+    }
+
+    let content = container(body)
+        .padding(14)
+        .width(Length::Fill)
+        .height(Length::Fixed(if editable { 214.0 } else { 154.0 }))
+        .style(theme::Container::HeaderAccent.style());
+
+    if editable {
+        content.width(Length::FillPortion(1)).into()
+    } else if let Some(action) = row_model.action {
         button(content)
             .on_press(action.shell_message().into())
             .style(theme::Button::MediaCard.style())
@@ -936,6 +1503,82 @@ fn collection_item_card<'a>(
     } else {
         content.width(Length::FillPortion(1)).into()
     }
+}
+
+fn collection_item_controls<'a>(
+    collection_id: ferrex_core::api::types::collections::CollectionId,
+    row_model: &CollectionItemRow,
+    index: usize,
+    total: usize,
+    action_state: Option<&'a CollectionItemActionState>,
+) -> Element<'a, UiMessage> {
+    let in_flight = action_state.and_then(|state| state.in_flight.as_ref());
+    let busy = in_flight.is_some();
+    let removing_this = matches!(
+        in_flight,
+        Some(CollectionItemMutationKind::Removing(key)) if key == &row_model.item_key
+    );
+    let moving_this = matches!(
+        in_flight,
+        Some(CollectionItemMutationKind::Reordering(key)) if key == &row_model.item_key
+    );
+
+    let mut controls = row![].spacing(6).align_y(iced::Alignment::Center);
+    if let Some(action) = row_model.action {
+        controls = controls.push(
+            button("Open")
+                .on_press(action.shell_message().into())
+                .style(theme::Button::Text.style()),
+        );
+    }
+
+    let mut move_up = button(if moving_this { "Moving…" } else { "Move up" })
+        .style(theme::Button::Secondary.style());
+    if !busy && index > 0 {
+        move_up = move_up.on_press(
+            CollectionsMessage::MoveItem {
+                collection_id,
+                item_key: row_model.item_key.clone(),
+                direction: CollectionItemMoveDirection::Up,
+            }
+            .into(),
+        );
+    }
+
+    let mut move_down = button(if moving_this {
+        "Moving…"
+    } else {
+        "Move down"
+    })
+    .style(theme::Button::Secondary.style());
+    if !busy && index + 1 < total {
+        move_down = move_down.on_press(
+            CollectionsMessage::MoveItem {
+                collection_id,
+                item_key: row_model.item_key.clone(),
+                direction: CollectionItemMoveDirection::Down,
+            }
+            .into(),
+        );
+    }
+
+    let mut remove = button(if removing_this {
+        "Removing…"
+    } else {
+        "Remove"
+    })
+    .style(theme::Button::Destructive.style());
+    if !busy {
+        remove = remove.on_press(
+            CollectionsMessage::RemoveItem {
+                collection_id,
+                item_key: row_model.item_key.clone(),
+            }
+            .into(),
+        );
+    }
+
+    controls.push(move_up).push(move_down).push(remove).into()
 }
 
 fn detail_shell<'a>(
@@ -1037,7 +1680,10 @@ fn provenance_summary(summary: &CollectionSummary) -> String {
     parts.join(" · ")
 }
 
-fn rule_summary(rule: Option<&DynamicCollectionRule>) -> String {
+fn rule_summary(
+    summary: &CollectionSummary,
+    rule: Option<&DynamicCollectionRule>,
+) -> String {
     rule.map(|rule| {
         format!(
             "Schema v{} · {} · {} · {}",
@@ -1048,7 +1694,12 @@ fn rule_summary(rule: Option<&DynamicCollectionRule>) -> String {
         )
     })
     .unwrap_or_else(|| {
-        "No dynamic rule attached; membership is read-only here".to_string()
+        if collections::is_manual_collection(summary) {
+            "No dynamic rule attached; membership is managed manually"
+                .to_string()
+        } else {
+            "No dynamic rule attached; membership is read-only here".to_string()
+        }
     })
 }
 

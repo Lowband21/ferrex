@@ -9,7 +9,8 @@ use crate::infra::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::{
     api::types::collections::{
         CollectionDetail, CollectionId, CollectionMaterializationStatus,
-        CollectionMember, CollectionPageInfo, CollectionSummary,
+        CollectionMediaKind, CollectionMediaScope, CollectionMember,
+        CollectionMemberKey, CollectionPageInfo, CollectionSummary,
         CollectionVersion,
     },
     player_prelude::{
@@ -20,8 +21,8 @@ use ferrex_core::{
     },
 };
 use iced::widget::Id;
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::{cmp::Ordering, fmt};
 use uuid::Uuid;
 
 /// State for an individual tab
@@ -556,6 +557,203 @@ impl Default for CollectionRefreshState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum CollectionMediaScopeChoice {
+    #[default]
+    All,
+    Movies,
+    Series,
+    Seasons,
+    Episodes,
+    MoviesAndSeries,
+}
+
+impl CollectionMediaScopeChoice {
+    pub const OPTIONS: [Self; 6] = [
+        Self::All,
+        Self::Movies,
+        Self::Series,
+        Self::Seasons,
+        Self::Episodes,
+        Self::MoviesAndSeries,
+    ];
+
+    pub fn as_scope(self) -> CollectionMediaScope {
+        match self {
+            Self::All => CollectionMediaScope::All,
+            Self::Movies => CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Movie],
+            },
+            Self::Series => CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Series],
+            },
+            Self::Seasons => CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Season],
+            },
+            Self::Episodes => CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Episode],
+            },
+            Self::MoviesAndSeries => CollectionMediaScope::Types {
+                media_types: vec![
+                    CollectionMediaKind::Movie,
+                    CollectionMediaKind::Series,
+                ],
+            },
+        }
+    }
+
+    pub fn from_scope(scope: &CollectionMediaScope) -> Self {
+        match scope {
+            CollectionMediaScope::All => Self::All,
+            CollectionMediaScope::Types { media_types } => {
+                let has = |kind| media_types.contains(&kind);
+                match media_types.len() {
+                    1 if has(CollectionMediaKind::Movie) => Self::Movies,
+                    1 if has(CollectionMediaKind::Series) => Self::Series,
+                    1 if has(CollectionMediaKind::Season) => Self::Seasons,
+                    1 if has(CollectionMediaKind::Episode) => Self::Episodes,
+                    2 if has(CollectionMediaKind::Movie)
+                        && has(CollectionMediaKind::Series) =>
+                    {
+                        Self::MoviesAndSeries
+                    }
+                    _ => Self::All,
+                }
+            }
+            CollectionMediaScope::Library { media_types, .. } => {
+                if media_types.is_empty() {
+                    Self::All
+                } else {
+                    Self::from_scope(&CollectionMediaScope::Types {
+                        media_types: media_types.clone(),
+                    })
+                }
+            }
+            CollectionMediaScope::ExplicitItems { .. } => Self::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All media",
+            Self::Movies => "Movies only",
+            Self::Series => "Series only",
+            Self::Seasons => "Seasons only",
+            Self::Episodes => "Episodes only",
+            Self::MoviesAndSeries => "Movies and series",
+        }
+    }
+}
+
+impl fmt::Display for CollectionMediaScopeChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionCreateFormState {
+    pub is_open: bool,
+    pub title: String,
+    pub description: String,
+    pub media_scope: CollectionMediaScopeChoice,
+    pub submitting: bool,
+    pub error: Option<String>,
+}
+
+impl Default for CollectionCreateFormState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            title: String::new(),
+            description: String::new(),
+            media_scope: CollectionMediaScopeChoice::All,
+            submitting: false,
+            error: None,
+        }
+    }
+}
+
+impl CollectionCreateFormState {
+    pub fn reset_after_success(&mut self) {
+        let was_open = self.is_open;
+        *self = Self::default();
+        self.is_open = was_open;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionEditFormState {
+    pub title: String,
+    pub description: String,
+    pub media_scope: CollectionMediaScopeChoice,
+    pub is_dirty: bool,
+    pub saving: bool,
+    pub archiving: bool,
+    pub error: Option<String>,
+    pub conflict: bool,
+}
+
+impl Default for CollectionEditFormState {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            description: String::new(),
+            media_scope: CollectionMediaScopeChoice::All,
+            is_dirty: false,
+            saving: false,
+            archiving: false,
+            error: None,
+            conflict: false,
+        }
+    }
+}
+
+impl CollectionEditFormState {
+    pub fn from_summary(summary: &CollectionSummary) -> Self {
+        Self {
+            title: summary.title.clone(),
+            description: summary.description.clone().unwrap_or_default(),
+            media_scope: CollectionMediaScopeChoice::from_scope(
+                &summary.media_scope,
+            ),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionPickerItem {
+    pub media_id: MediaID,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub media_kind: CollectionMediaKind,
+    pub library_id: Option<LibraryId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CollectionMediaPickerState {
+    pub query: String,
+    pub searching: bool,
+    pub results: Vec<CollectionPickerItem>,
+    pub adding: Option<MediaID>,
+    pub error: Option<String>,
+    pub conflict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionItemMutationKind {
+    Removing(CollectionMemberKey),
+    Reordering(CollectionMemberKey),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CollectionItemActionState {
+    pub in_flight: Option<CollectionItemMutationKind>,
+    pub error: Option<String>,
+    pub conflict: bool,
+}
+
 /// State for the desktop Collections tab and detail cache.
 #[derive(Debug)]
 pub struct CollectionsTabState {
@@ -579,6 +777,18 @@ pub struct CollectionsTabState {
 
     /// Per-collection refresh affordance state.
     pub refresh_states: HashMap<CollectionId, CollectionRefreshState>,
+
+    /// Manual collection creation form shown from the Collections tab.
+    pub create_form: CollectionCreateFormState,
+
+    /// Per-collection metadata editing forms, seeded from loaded details.
+    pub edit_forms: HashMap<CollectionId, CollectionEditFormState>,
+
+    /// Per-collection media picker/search state for manual additions.
+    pub picker_states: HashMap<CollectionId, CollectionMediaPickerState>,
+
+    /// Per-collection item mutation state for remove/reorder controls.
+    pub item_action_states: HashMap<CollectionId, CollectionItemActionState>,
 }
 
 impl CollectionsTabState {
@@ -591,6 +801,10 @@ impl CollectionsTabState {
             detail_states: HashMap::new(),
             item_states: HashMap::new(),
             refresh_states: HashMap::new(),
+            create_form: CollectionCreateFormState::default(),
+            edit_forms: HashMap::new(),
+            picker_states: HashMap::new(),
+            item_action_states: HashMap::new(),
         }
     }
 
@@ -646,6 +860,7 @@ impl CollectionsTabState {
         {
             *summary = detail.summary.clone();
         }
+        self.sync_edit_form_from_detail(&detail);
         self.detail_states
             .insert(collection_id, CollectionDetailLoadState::Loaded(detail));
     }
@@ -669,6 +884,117 @@ impl CollectionsTabState {
             .get(&collection_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    pub fn sync_edit_form_from_detail(&mut self, detail: &CollectionDetail) {
+        let collection_id = detail.summary.identity.id;
+        let should_replace = self
+            .edit_forms
+            .get(&collection_id)
+            .map(|form| !form.is_dirty || form.conflict)
+            .unwrap_or(true);
+        if should_replace {
+            self.edit_forms.insert(
+                collection_id,
+                CollectionEditFormState::from_summary(&detail.summary),
+            );
+        }
+    }
+
+    pub fn ensure_edit_form(
+        &mut self,
+        collection_id: CollectionId,
+    ) -> &mut CollectionEditFormState {
+        if !self.edit_forms.contains_key(&collection_id) {
+            let form = self
+                .detail_states
+                .get(&collection_id)
+                .and_then(|state| match state {
+                    CollectionDetailLoadState::Loaded(detail) => Some(
+                        CollectionEditFormState::from_summary(&detail.summary),
+                    ),
+                    CollectionDetailLoadState::NotLoaded
+                    | CollectionDetailLoadState::Loading
+                    | CollectionDetailLoadState::Error(_) => None,
+                })
+                .or_else(|| {
+                    self.summary(collection_id)
+                        .map(CollectionEditFormState::from_summary)
+                })
+                .unwrap_or_default();
+            self.edit_forms.insert(collection_id, form);
+        }
+        self.edit_forms
+            .get_mut(&collection_id)
+            .expect("edit form inserted")
+    }
+
+    pub fn picker_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionMediaPickerState {
+        self.picker_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn picker_state_mut(
+        &mut self,
+        collection_id: CollectionId,
+    ) -> &mut CollectionMediaPickerState {
+        self.picker_states.entry(collection_id).or_default()
+    }
+
+    pub fn item_action_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionItemActionState {
+        self.item_action_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn item_action_state_mut(
+        &mut self,
+        collection_id: CollectionId,
+    ) -> &mut CollectionItemActionState {
+        self.item_action_states.entry(collection_id).or_default()
+    }
+
+    pub fn apply_collection_version(
+        &mut self,
+        collection_id: CollectionId,
+        version: CollectionVersion,
+    ) {
+        if let Some(summary) = self
+            .summaries
+            .iter_mut()
+            .find(|summary| summary.identity.id == collection_id)
+        {
+            summary.version = version.clone();
+        }
+
+        if let Some(CollectionDetailLoadState::Loaded(detail)) =
+            self.detail_states.get_mut(&collection_id)
+        {
+            detail.summary.version = version;
+        }
+    }
+
+    pub fn remove_collection(&mut self, collection_id: CollectionId) {
+        self.summaries
+            .retain(|summary| summary.identity.id != collection_id);
+        self.detail_states.remove(&collection_id);
+        self.item_states.remove(&collection_id);
+        self.refresh_states.remove(&collection_id);
+        self.edit_forms.remove(&collection_id);
+        self.picker_states.remove(&collection_id);
+        self.item_action_states.remove(&collection_id);
+        if self.summaries.is_empty() && self.load_state.is_ready() {
+            self.load_state = CollectionsLoadState::Empty;
+        }
     }
 
     pub fn item_state(

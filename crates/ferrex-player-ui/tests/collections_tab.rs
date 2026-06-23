@@ -3,21 +3,34 @@ use std::sync::Arc;
 use chrono::Utc;
 use ferrex_core::{
     api::types::collections::{
-        CollectionMaterializationState, CollectionMember,
+        ArchiveCollectionRequest, CollectionDuplicatePolicy, CollectionKind,
+        CollectionManualAddItem, CollectionManualAddStatus,
+        CollectionManualOrder, CollectionMaterializationState,
+        CollectionMediaKind, CollectionMediaScope, CollectionMember,
         CollectionMemberAvailability, CollectionMemberAvailabilityStatus,
-        CollectionPageInfo, DynamicCollectionRule,
+        CollectionPageInfo, CollectionSource, CreateCollectionRequest,
+        DynamicCollectionRule, ManualAddCollectionItemsRequest,
+        ManualRemoveCollectionItemsRequest,
+        ManualReorderCollectionItemsRequest, UpdateCollectionRequest,
     },
-    player_prelude::{EpisodeID, MovieID, SeriesID},
+    player_prelude::{EpisodeID, LibraryId, MovieID, SeriesID},
 };
 use ferrex_model::MediaID;
 use ferrex_player_api::{services::api::ApiService, testing::TestApiService};
 use ferrex_player_ui::{
     domains::ui::{
-        collections::{load_collection_items, load_collection_summaries},
+        collections::{
+            CollectionsMessage, add_manual_collection_item, archive_collection,
+            create_manual_collection, load_collection_items,
+            load_collection_summaries, remove_manual_collection_item,
+            reorder_manual_collection_items, update_collection_metadata,
+            update_collections_ui, validate_media_scope_for_picker,
+        },
         shell_ui::{Scope, UiShellMessage, update_shell_ui},
         tabs::{
-            CollectionItemsLoadState, CollectionItemsState,
-            CollectionRefreshState, CollectionsLoadState, TabId, TabState,
+            CollectionItemMutationKind, CollectionItemsLoadState,
+            CollectionItemsState, CollectionPickerItem, CollectionRefreshState,
+            CollectionsLoadState, TabId, TabState,
         },
         types::ViewState,
         views::collections::{
@@ -32,6 +45,27 @@ use uuid::Uuid;
 
 fn test_state() -> State {
     State::new("http://localhost:3000".to_string())
+}
+
+fn manual_create_request(title: &str) -> CreateCollectionRequest {
+    CreateCollectionRequest {
+        title: title.to_string(),
+        description: Some("Editable from desktop".to_string()),
+        kind: CollectionKind::Manual,
+        source: CollectionSource::Manual,
+        owner: Default::default(),
+        scope: Default::default(),
+        visibility: Default::default(),
+        presentation: Default::default(),
+        media_scope: CollectionMediaScope::Types {
+            media_types: vec![CollectionMediaKind::Movie],
+        },
+        duplicate_policy: CollectionDuplicatePolicy::DeduplicateMedia,
+        artwork: Default::default(),
+        theme: Default::default(),
+        provenance: None,
+        rule: None,
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -160,6 +194,28 @@ async fn collection_detail_loads_paginated_items_in_stable_order() {
         rows[0].action,
         Some(CollectionItemAction::ViewMovie(_))
     ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn picker_scope_validation_surfaces_media_scope_errors() {
+    let api = TestApiService::default();
+    let api_service: Arc<dyn ApiService> = Arc::new(api);
+    let payload = load_collection_summaries(api_service).await.unwrap();
+    let summary = &payload.summaries[0];
+
+    let series_item = CollectionPickerItem {
+        media_id: MediaID::Series(SeriesID(Uuid::from_u128(
+            0x6490000000000010,
+        ))),
+        title: "Sample Series".to_string(),
+        subtitle: None,
+        media_kind: CollectionMediaKind::Series,
+        library_id: None,
+    };
+
+    let error = validate_media_scope_for_picker(summary, &series_item)
+        .expect_err("series should be rejected by movie-only scope");
+    assert!(error.contains("accepts movies"));
 }
 
 #[test]
@@ -307,4 +363,287 @@ async fn collection_detail_view_renders_item_error_retry_state() {
     }
 
     let _ = view_collection_detail(&state, collection_id);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn manual_collection_api_flows_cover_editing_actions() {
+    let api = TestApiService::default();
+    let api_service: Arc<dyn ApiService> = Arc::new(api);
+
+    let created = create_manual_collection(
+        api_service.clone(),
+        manual_create_request("Road Trip Queue"),
+    )
+    .await
+    .unwrap();
+    let collection_id = created.summary.identity.id;
+    assert_eq!(created.summary.title, "Road Trip Queue");
+    assert_eq!(
+        created.summary.media_scope,
+        CollectionMediaScope::Types {
+            media_types: vec![CollectionMediaKind::Movie],
+        }
+    );
+
+    let updated = update_collection_metadata(
+        api_service.clone(),
+        collection_id,
+        UpdateCollectionRequest {
+            title: Some("Road Trip Queue (edited)".to_string()),
+            description: Some("Now with ordering".to_string()),
+            media_scope: Some(CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Movie],
+            }),
+            expected_revision: Some(created.summary.version.revision),
+            ..UpdateCollectionRequest::default()
+        },
+    )
+    .await
+    .unwrap()
+    .collection;
+    assert_eq!(updated.summary.title, "Road Trip Queue (edited)");
+
+    let first = MediaID::Movie(MovieID(Uuid::from_u128(0x6490000000000001)));
+    let second = MediaID::Movie(MovieID(Uuid::from_u128(0x6490000000000002)));
+    let add = add_manual_collection_item(
+        api_service.clone(),
+        collection_id,
+        ManualAddCollectionItemsRequest {
+            items: vec![
+                CollectionManualAddItem {
+                    media_id: first,
+                    title_override: Some("First Road Movie".to_string()),
+                    position: None,
+                },
+                CollectionManualAddItem {
+                    media_id: second,
+                    title_override: Some("Second Road Movie".to_string()),
+                    position: None,
+                },
+            ],
+            duplicate_policy: None,
+            expected_revision: Some(updated.summary.version.revision),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(add.results.len(), 2);
+    assert!(
+        add.results
+            .iter()
+            .all(|result| result.status == CollectionManualAddStatus::Added)
+    );
+
+    let duplicate = add_manual_collection_item(
+        api_service.clone(),
+        collection_id,
+        ManualAddCollectionItemsRequest {
+            items: vec![CollectionManualAddItem {
+                media_id: first,
+                title_override: Some("Duplicate Road Movie".to_string()),
+                position: None,
+            }],
+            duplicate_policy: None,
+            expected_revision: Some(add.version.revision),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        duplicate.results[0].status,
+        CollectionManualAddStatus::DuplicateSkipped
+    );
+    assert!(
+        duplicate.results[0]
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("already present")
+    );
+
+    let first_key = add.results[0].item_key.clone();
+    let second_key = add.results[1].item_key.clone();
+    let reordered = reorder_manual_collection_items(
+        api_service.clone(),
+        collection_id,
+        ManualReorderCollectionItemsRequest {
+            ordering: vec![
+                CollectionManualOrder {
+                    item_key: second_key.clone(),
+                    position: 1,
+                },
+                CollectionManualOrder {
+                    item_key: first_key.clone(),
+                    position: 2,
+                },
+            ],
+            expected_revision: Some(duplicate.version.revision),
+        },
+    )
+    .await
+    .unwrap();
+
+    let items = load_collection_items(api_service.clone(), collection_id, None)
+        .await
+        .unwrap();
+    assert_eq!(items.items[0].item_key, second_key);
+    assert_eq!(items.items[1].item_key, first_key);
+
+    let removed = remove_manual_collection_item(
+        api_service.clone(),
+        collection_id,
+        ManualRemoveCollectionItemsRequest {
+            item_keys: vec![first_key],
+            expected_revision: Some(reordered.version.revision),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(removed.removed_item_keys.len(), 1);
+
+    let stale = update_collection_metadata(
+        api_service.clone(),
+        collection_id,
+        UpdateCollectionRequest {
+            title: Some("Stale edit".to_string()),
+            expected_revision: Some(created.summary.version.revision),
+            ..UpdateCollectionRequest::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(stale.contains("version conflict"));
+
+    let archived = archive_collection(
+        api_service,
+        collection_id,
+        ArchiveCollectionRequest {
+            expected_revision: Some(removed.version.revision),
+            ..ArchiveCollectionRequest::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(archived.archived_at.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn manual_collection_editing_view_renders_recovery_states() {
+    let api = TestApiService::default();
+    let api_service: Arc<dyn ApiService> = Arc::new(api);
+    let payload = load_collection_summaries(api_service.clone())
+        .await
+        .unwrap();
+    let collection_id = payload.summaries[0].identity.id;
+    let detail = api_service
+        .get_collection_detail(
+            collection_id,
+            ferrex_core::api::types::collections::GetCollectionDetailRequest {
+                include_rule: true,
+                include_items_preview: true,
+                include_shelf_placements: true,
+            },
+        )
+        .await
+        .unwrap()
+        .collection;
+    let items = load_collection_items(api_service.clone(), collection_id, None)
+        .await
+        .unwrap();
+    let first_key = items.items[0].item_key.clone();
+
+    let mut state = test_state();
+    state.domains.ui.state.scope = Scope::Collections;
+    state.domains.ui.state.view = ViewState::CollectionDetail { collection_id };
+    if let TabState::Collections(tab) =
+        state.tab_manager.get_or_create_tab(TabId::Collections)
+    {
+        tab.mark_loaded(payload.summaries, payload.page);
+        tab.create_form.is_open = true;
+        tab.create_form.error = Some("Server is offline".to_string());
+        tab.mark_detail_loaded(detail.clone());
+        tab.mark_items_loaded(
+            collection_id,
+            items.items.clone(),
+            items.page.clone(),
+            items.materialization.clone(),
+            false,
+        );
+        let form = tab.ensure_edit_form(collection_id);
+        form.title = "Edited title".to_string();
+        form.is_dirty = true;
+        form.error = Some(
+            "Collection version conflict: expected revision 0, found 1"
+                .to_string(),
+        );
+        form.conflict = true;
+        let picker = tab.picker_state_mut(collection_id);
+        picker.query = "sample".to_string();
+        picker.error = Some(
+            "First Sample Movie is already in this collection.".to_string(),
+        );
+        picker.conflict = true;
+        picker.results.push(CollectionPickerItem {
+            media_id: MediaID::Movie(MovieID(Uuid::from_u128(
+                0x6490000000000003,
+            ))),
+            title: "Third Sample Movie".to_string(),
+            subtitle: Some("2026".to_string()),
+            media_kind: CollectionMediaKind::Movie,
+            library_id: Some(LibraryId(Uuid::from_u128(0x6490000000000004))),
+        });
+        let action = tab.item_action_state_mut(collection_id);
+        action.in_flight =
+            Some(CollectionItemMutationKind::Reordering(first_key.clone()));
+        action.error = Some(
+            "Collection version conflict: expected revision 0, found 1"
+                .to_string(),
+        );
+        action.conflict = true;
+    }
+
+    let _ = view_collections(&state);
+    let _ = view_collection_detail(&state, collection_id);
+
+    let _ = update_collections_ui(
+        &mut state,
+        CollectionsMessage::ReloadAfterConflict(collection_id),
+    );
+    let _ = update_collections_ui(
+        &mut state,
+        CollectionsMessage::DetailLoaded {
+            collection_id,
+            result: Ok(detail),
+        },
+    );
+    let _ = update_collections_ui(
+        &mut state,
+        CollectionsMessage::ItemsLoaded {
+            collection_id,
+            append: false,
+            result: Ok(ferrex_player_ui::domains::ui::collections::CollectionItemsPayload {
+                items: items.items,
+                page: items.page,
+                materialization: items.materialization,
+            }),
+        },
+    );
+
+    let Some(TabState::Collections(tab)) =
+        state.tab_manager.get_tab(TabId::Collections)
+    else {
+        panic!("collections tab should exist");
+    };
+    let form = tab.edit_forms.get(&collection_id).unwrap();
+    assert!(!form.conflict);
+    assert!(
+        tab.picker_states
+            .get(&collection_id)
+            .is_some_and(|picker| !picker.conflict)
+    );
+    assert!(
+        tab.item_action_states
+            .get(&collection_id)
+            .is_some_and(|action| !action.conflict)
+    );
 }
