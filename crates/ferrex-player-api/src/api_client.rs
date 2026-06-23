@@ -884,6 +884,19 @@ impl ApiClient {
         let request = self.build_request(request).await;
         self.execute_request(request).await
     }
+
+    /// DELETE request with a JSON body.
+    pub async fn delete_with_body<T: Serialize, R: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<R> {
+        let url = self.build_url(path);
+
+        let request = self.client.delete(&url).json(body);
+        let request = self.build_request(request).await;
+        self.execute_request(request).await
+    }
 }
 
 impl ApiClient {
@@ -947,6 +960,16 @@ impl ApiClient {
         let path =
             Self::collection_path(v1::collections::ARCHIVE, collection_id);
         self.post(&path, request).await
+    }
+
+    /// Delete a collection definition.
+    pub async fn delete_collection(
+        &self,
+        collection_id: CollectionId,
+        request: &DeleteCollectionRequest,
+    ) -> Result<DeleteCollectionResponse> {
+        let path = Self::collection_path(v1::collections::ITEM, collection_id);
+        self.delete_with_body(&path, request).await
     }
 
     /// Add items to a manual collection.

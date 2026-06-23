@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT item_key\n            FROM collection_manual_memberships\n            WHERE collection_id = $1\n              AND item_key = ANY($2::text[])\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_key",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "624ac7b51e763208fe2fb3be3cf3cab62bb5b42228e1d4bd58534cff4ba154fc"
+}

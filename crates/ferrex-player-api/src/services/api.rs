@@ -309,6 +309,13 @@ pub trait ApiService: Send + Sync + Debug {
         request: ArchiveCollectionRequest,
     ) -> RepositoryResult<ArchiveCollectionResponse>;
 
+    /// Delete a collection definition.
+    async fn delete_collection(
+        &self,
+        collection_id: CollectionId,
+        request: DeleteCollectionRequest,
+    ) -> RepositoryResult<DeleteCollectionResponse>;
+
     /// Add items to a manual collection.
     async fn manual_add_collection_items(
         &self,

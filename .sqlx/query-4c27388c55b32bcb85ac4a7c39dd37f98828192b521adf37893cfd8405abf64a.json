@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                mcm.movie_id,\n                mcm.name,\n                mcm.poster_path,\n                mcm.backdrop_path,\n                mr.title AS \"movie_title!\"\n            FROM movie_collection_membership mcm\n            JOIN movie_references mr\n              ON mr.id = mcm.movie_id\n             AND mr.library_id = mcm.library_id\n             AND mr.batch_id = mcm.batch_id\n            WHERE mcm.collection_id = $1\n            ORDER BY mr.title, mcm.movie_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "movie_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "poster_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "backdrop_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "movie_title!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "4c27388c55b32bcb85ac4a7c39dd37f98828192b521adf37893cfd8405abf64a"
+}

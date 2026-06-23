@@ -734,6 +734,7 @@ pub struct ListCollectionItemsResponse {
     pub items: Vec<CollectionMember>,
     pub page: CollectionPageInfo,
     pub materialization: CollectionMaterializationStatus,
+    pub version: CollectionVersion,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

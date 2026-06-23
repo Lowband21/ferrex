@@ -696,6 +696,17 @@ impl ApiService for ApiClientAdapter {
             .map_err(map_collection_update_error)
     }
 
+    async fn delete_collection(
+        &self,
+        collection_id: CollectionId,
+        request: DeleteCollectionRequest,
+    ) -> RepositoryResult<DeleteCollectionResponse> {
+        self.client
+            .delete_collection(collection_id, &request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
     async fn manual_add_collection_items(
         &self,
         collection_id: CollectionId,

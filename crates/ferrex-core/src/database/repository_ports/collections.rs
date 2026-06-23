@@ -412,13 +412,14 @@ pub mod test_support {
                 .iter()
                 .filter(|item| {
                     let status = item.availability.status;
-                    if !mode.exposes_preserved_membership()
-                        && status
-                            != CollectionMemberAvailabilityStatus::Available
-                    {
-                        return false;
+                    match availability {
+                        Some(expected) => expected == status,
+                        None => {
+                            mode.exposes_preserved_membership()
+                                || status
+                                    == CollectionMemberAvailabilityStatus::Available
+                        }
                     }
-                    availability.is_none_or(|expected| expected == status)
                 })
                 .cloned()
                 .collect()
@@ -664,6 +665,11 @@ pub mod test_support {
                 parse_collection_cursor(request.page.cursor.as_deref())?;
             let limit = clamp_collection_page_limit(request.page.limit);
             let state = self.state.lock().expect("collection state lock");
+            let version = state
+                .collections
+                .get(id.as_uuid())
+                .map(|detail| detail.summary.version.clone())
+                .unwrap_or_default();
             let items =
                 state.items.get(id.as_uuid()).cloned().unwrap_or_default();
             let filtered =
@@ -678,6 +684,7 @@ pub mod test_support {
                     .collect(),
                 page: page_info_for_slice(offset, limit, total),
                 materialization: CollectionMaterializationStatus::default(),
+                version,
             })
         }
 

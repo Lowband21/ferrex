@@ -1,5 +1,4 @@
-use std::collections::{HashMap, hash_map::DefaultHasher};
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -361,58 +360,16 @@ fn collection_rule_hash(
     let input = rule.rule_hash_input_json().map_err(|error| {
         RepositoryError::SerializationError(error.to_string())
     })?;
-    let mut hasher = DefaultHasher::new();
-    input.hash(&mut hasher);
-    Ok((input, format!("{:016x}", hasher.finish())))
+    let hash = rule.rule_hash().map_err(|error| {
+        RepositoryError::SerializationError(error.to_string())
+    })?;
+    Ok((input, hash))
 }
 
 fn validate_rule(
     rule: &DynamicCollectionRule,
 ) -> RepositoryResult<ValidateCollectionRuleResponse> {
-    let (rule_hash_input, rule_hash) = collection_rule_hash(rule)?;
-    let mut errors = Vec::new();
-
-    if rule.schema_version != COLLECTION_RULE_SCHEMA_VERSION {
-        errors.push(CollectionRuleValidationError {
-            path: "schema_version".into(),
-            message: format!(
-                "Unsupported collection rule schema version {}",
-                rule.schema_version
-            ),
-        });
-    }
-    if rule.sort.schema_version != COLLECTION_SORT_SCHEMA_VERSION {
-        errors.push(CollectionRuleValidationError {
-            path: "sort.schema_version".into(),
-            message: format!(
-                "Unsupported collection sort schema version {}",
-                rule.sort.schema_version
-            ),
-        });
-    }
-    if rule.limit.schema_version != COLLECTION_LIMIT_SCHEMA_VERSION {
-        errors.push(CollectionRuleValidationError {
-            path: "limit.schema_version".into(),
-            message: format!(
-                "Unsupported collection limit schema version {}",
-                rule.limit.schema_version
-            ),
-        });
-    }
-    if rule.limit.max_items == Some(0) {
-        errors.push(CollectionRuleValidationError {
-            path: "limit.max_items".into(),
-            message: "max_items must be greater than zero".into(),
-        });
-    }
-
-    let valid = errors.is_empty();
-    Ok(ValidateCollectionRuleResponse {
-        valid,
-        errors,
-        rule_hash_input,
-        rule_hash: valid.then_some(rule_hash),
-    })
+    Ok(ValidateCollectionRuleResponse::from_rule(rule))
 }
 
 fn apply_rule_limit(
@@ -1029,6 +986,7 @@ impl ApiService for TestApiService {
             items,
             page,
             materialization: record.detail.summary.materialization.clone(),
+            version: record.detail.summary.version.clone(),
         })
     }
 
@@ -1140,6 +1098,41 @@ impl ApiService for TestApiService {
             collection_id,
             archived_at,
             version: record.detail.summary.version.clone(),
+        })
+    }
+
+    async fn delete_collection(
+        &self,
+        collection_id: CollectionId,
+        request: DeleteCollectionRequest,
+    ) -> RepositoryResult<DeleteCollectionResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let deleted_at = Utc::now();
+        let version = {
+            let record = guard.collection_record_mut(collection_id)?;
+            ensure_expected_revision(
+                &record.detail.summary,
+                request.expected_revision,
+            )?;
+            bump_collection_version(&mut record.detail.summary);
+            record.detail.summary.version.clone()
+        };
+        guard.collections.remove(&collection_id);
+        guard
+            .collection_order
+            .retain(|candidate| *candidate != collection_id);
+        guard
+            .shelf_placements
+            .retain(|placement| placement.collection_id != collection_id);
+
+        Ok(DeleteCollectionResponse {
+            collection_id,
+            deleted_at,
+            version,
         })
     }
 
@@ -2236,6 +2229,29 @@ mod tests {
             .await
             .expect_err("stale revision should fail");
         assert!(stale_update.to_string().contains("version conflict"));
+
+        let deleted = service
+            .delete_collection(
+                collection_id,
+                DeleteCollectionRequest {
+                    reason: Some("stub cleanup".into()),
+                    expected_revision: Some(2),
+                },
+            )
+            .await
+            .expect("delete collection");
+        assert_eq!(deleted.collection_id, collection_id);
+        assert_eq!(deleted.version.revision, 3);
+        let remaining = service
+            .list_collections(ListCollectionsRequest::default())
+            .await
+            .expect("list after delete");
+        assert!(
+            remaining
+                .collections
+                .iter()
+                .all(|summary| summary.identity.id != collection_id)
+        );
     }
 
     #[tokio::test]

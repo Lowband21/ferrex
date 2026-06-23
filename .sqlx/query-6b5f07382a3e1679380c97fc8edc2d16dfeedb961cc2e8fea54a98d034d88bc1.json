@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO collection_shelf_placements (\n                collection_id,\n                collection_stable_key,\n                surface,\n                shelf_key,\n                placement_scope,\n                placement_scope_key,\n                visibility,\n                presentation,\n                pinned,\n                pinned_at,\n                pinned_by,\n                position,\n                position_key,\n                hidden_at,\n                updated_at\n            ) VALUES (\n                $1, $2, $3::varchar, $4, 'global', 'global', $5::varchar,\n                $6::varchar, $7, CASE WHEN $7 THEN NOW() ELSE NULL END,\n                CASE WHEN $7 THEN $8::uuid ELSE NULL END,\n                $9, ($10::text)::numeric,\n                CASE WHEN $7 THEN NULL ELSE NOW() END,\n                NOW()\n            )\n            ON CONFLICT (surface, shelf_key, placement_scope, placement_scope_key, collection_id)\n            DO UPDATE SET\n                pinned = EXCLUDED.pinned,\n                pinned_at = CASE WHEN EXCLUDED.pinned THEN NOW() ELSE NULL END,\n                pinned_by = CASE WHEN EXCLUDED.pinned THEN $8::uuid ELSE NULL END,\n                position = EXCLUDED.position,\n                position_key = EXCLUDED.position_key,\n                visibility = EXCLUDED.visibility,\n                presentation = EXCLUDED.presentation,\n                hidden_at = CASE WHEN EXCLUDED.pinned THEN NULL ELSE NOW() END,\n                updated_at = NOW()\n            RETURNING\n                id,\n                schema_version,\n                collection_id,\n                surface::text AS \"surface!\",\n                shelf_key,\n                position,\n                pinned,\n                presentation::text AS \"presentation!\",\n                visibility::text AS \"visibility!\",\n                created_at,\n                updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "schema_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "collection_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "surface!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "shelf_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "pinned",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "presentation!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "visibility!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Varchar",
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Uuid",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "6b5f07382a3e1679380c97fc8edc2d16dfeedb961cc2e8fea54a98d034d88bc1"
+}

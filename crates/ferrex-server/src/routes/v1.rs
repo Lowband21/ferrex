@@ -242,11 +242,11 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             v1::collections::tmdb::LIST,
-            post(collection_media_handlers::tmdb_list_collections_handler),
+            get(collection_media_handlers::tmdb_list_collections_handler),
         )
         .route(
             v1::shelves::PLACEMENTS,
-            post(collection_media_handlers::list_shelf_placements_handler),
+            get(collections::list_shelf_placements_handler),
         )
         .route(
             v1::shelves::PIN_PLACEMENT,

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        SELECT COALESCE(MAX(position), -1) + 1 AS \"next_position!\"\n                        FROM collection_shelf_placements\n                        WHERE surface = $1::varchar\n                          AND shelf_key = $2\n                          AND placement_scope = 'global'\n                          AND placement_scope_key = 'global'\n                          AND hidden_at IS NULL\n                        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "next_position!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f70382cd23ad090bfd274b0fd50f2178f9ae74aa8e60aff888fe37105f90aa68"
+}

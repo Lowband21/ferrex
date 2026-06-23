@@ -393,55 +393,56 @@ impl<'a> DynamicCollectionEvaluator<'a> {
         watch_user_id: Option<Uuid>,
     ) -> Result<Vec<DynamicCollectionCandidate>> {
         let episode_media_type = CollectionMediaKind::Episode.media_type_code();
-        let rows = sqlx::query_as::<_, SeriesCandidateRow>(
+        let rows = sqlx::query_as!(
+            SeriesCandidateRow,
             r#"
             SELECT
                 s.id,
                 s.library_id,
-                s.title::text AS title,
-                sm.overview AS overview,
-                sm.first_air_date AS release_date,
-                s.discovered_at AS discovered_at,
-                s.discovered_at AS added_at,
-                s.created_at AS created_at,
-                s.updated_at AS updated_at,
-                NULL::integer AS runtime_minutes,
-                sm.vote_average::double precision AS rating,
-                sm.popularity::double precision AS popularity,
-                sm.primary_content_rating AS content_rating,
-                s.tmdb_id AS tmdb_id,
-                availability.file_size_bytes AS file_size_bytes,
-                (availability.available_episode_count > 0) AS is_available,
+                s.title::text AS "title!",
+                sm.overview AS "overview?",
+                sm.first_air_date AS "release_date?",
+                s.discovered_at AS "discovered_at!",
+                s.discovered_at AS "added_at!",
+                s.created_at AS "created_at?",
+                s.updated_at AS "updated_at!",
+                NULL::integer AS "runtime_minutes?",
+                sm.vote_average::double precision AS "rating?",
+                sm.popularity::double precision AS "popularity?",
+                sm.primary_content_rating AS "content_rating?",
+                s.tmdb_id AS "tmdb_id?",
+                availability.file_size_bytes AS "file_size_bytes?",
+                (availability.available_episode_count > 0) AS "is_available!",
                 CASE
                     WHEN availability.episode_count = 0 THEN 'series has no episodes'
                     WHEN availability.available_episode_count = 0 THEN 'series has no available episodes'
                     ELSE NULL
-                END AS tombstone_reason,
+                END AS "tombstone_reason?",
                 ARRAY(
                     SELECT lower(sg.name)
                     FROM series_genres sg
                     WHERE sg.series_id = s.id
                     ORDER BY lower(sg.name), sg.genre_id
-                ) AS genres,
+                ) AS "genres!",
                 ARRAY(
                     SELECT lower(sk.name)
                     FROM series_keywords sk
                     WHERE sk.series_id = s.id
                     ORDER BY lower(sk.name), sk.keyword_id
-                ) AS keywords,
+                ) AS "keywords!",
                 ARRAY(
                     SELECT lower(p.name)
                     FROM series_cast sc
                     JOIN persons p ON p.id = sc.person_id
                     WHERE sc.series_id = s.id
                     ORDER BY lower(p.name), sc.person_tmdb_id
-                ) AS actor_names,
+                ) AS "actor_names!",
                 ARRAY(
                     SELECT sc.person_tmdb_id
                     FROM series_cast sc
                     WHERE sc.series_id = s.id
                     ORDER BY sc.person_tmdb_id
-                ) AS actor_tmdb_ids,
+                ) AS "actor_tmdb_ids!",
                 ARRAY(
                     SELECT lower(p.name)
                     FROM series_crew sc
@@ -449,20 +450,20 @@ impl<'a> DynamicCollectionEvaluator<'a> {
                     WHERE sc.series_id = s.id
                       AND lower(sc.job) = 'director'
                     ORDER BY lower(p.name), sc.person_tmdb_id
-                ) AS director_names,
+                ) AS "director_names!",
                 ARRAY(
                     SELECT sc.person_tmdb_id
                     FROM series_crew sc
                     WHERE sc.series_id = s.id
                       AND lower(sc.job) = 'director'
                     ORDER BY sc.person_tmdb_id
-                ) AS director_tmdb_ids,
-                progress.position::double precision AS watch_position,
-                progress.duration::double precision AS watch_duration,
-                activity.last_watched AS last_watched,
-                activity.completed_count,
-                activity.in_progress_count,
-                availability.available_episode_count
+                ) AS "director_tmdb_ids!",
+                progress.position::double precision AS "watch_position?",
+                progress.duration::double precision AS "watch_duration?",
+                activity.last_watched AS "last_watched?",
+                activity.completed_count AS "completed_count!",
+                activity.in_progress_count AS "in_progress_count!",
+                availability.available_episode_count AS "available_episode_count!"
             FROM series s
             LEFT JOIN series_metadata sm ON sm.series_id = s.id
             LEFT JOIN LATERAL (
@@ -518,9 +519,9 @@ impl<'a> DynamicCollectionEvaluator<'a> {
             ) progress ON TRUE
             ORDER BY s.id
             "#,
+            watch_user_id,
+            episode_media_type,
         )
-        .bind(watch_user_id)
-        .bind(episode_media_type)
         .fetch_all(self.pool)
         .await
         .map_err(|e| {

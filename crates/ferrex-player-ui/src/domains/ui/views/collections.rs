@@ -1606,6 +1606,7 @@ fn is_collection_member_visible(item: &CollectionMember) -> bool {
         item.availability.status,
         CollectionMemberAvailabilityStatus::Missing
             | CollectionMemberAvailabilityStatus::Unavailable
+            | CollectionMemberAvailabilityStatus::Tombstoned
             | CollectionMemberAvailabilityStatus::Archived
     )
 }
@@ -1635,6 +1636,7 @@ fn availability_label(
         CollectionMemberAvailabilityStatus::Pending => "Pending availability",
         CollectionMemberAvailabilityStatus::Missing => "Missing",
         CollectionMemberAvailabilityStatus::Unavailable => "Unavailable",
+        CollectionMemberAvailabilityStatus::Tombstoned => "Tombstoned",
         CollectionMemberAvailabilityStatus::Archived => "Archived",
     }
 }
@@ -1819,6 +1821,9 @@ fn limit_policy_summary(limit: &CollectionLimitPolicy) -> String {
         CollectionLimitWindow::RecentlyAdded => {
             "recently added window".to_string()
         }
+        CollectionLimitWindow::RecentlyReleased => {
+            "recently released window".to_string()
+        }
         CollectionLimitWindow::RecentlyUpdated => {
             "recently updated window".to_string()
         }
@@ -1832,18 +1837,39 @@ fn rule_field_label(field: CollectionRuleField) -> &'static str {
         CollectionRuleField::LibraryId => "library",
         CollectionRuleField::Title => "title",
         CollectionRuleField::SortTitle => "sort title",
+        CollectionRuleField::Overview => "overview",
+        CollectionRuleField::SearchText => "search text",
         CollectionRuleField::Genre => "genre",
+        CollectionRuleField::Keyword => "keyword",
+        CollectionRuleField::Person => "person",
         CollectionRuleField::ReleaseYear => "release year",
+        CollectionRuleField::ReleaseDate => "release date",
         CollectionRuleField::AddedAt => "added date",
+        CollectionRuleField::DiscoveredAt => "discovered date",
+        CollectionRuleField::CreatedAt => "created date",
         CollectionRuleField::UpdatedAt => "updated date",
         CollectionRuleField::RuntimeMinutes => "runtime",
         CollectionRuleField::AudienceRating => "audience rating",
         CollectionRuleField::CriticRating => "critic rating",
+        CollectionRuleField::UserRating => "user rating",
+        CollectionRuleField::Rating => "rating",
+        CollectionRuleField::Popularity => "popularity",
+        CollectionRuleField::ContentRating => "content rating",
         CollectionRuleField::WatchStatus => "watch status",
+        CollectionRuleField::WatchProgress => "watch progress",
         CollectionRuleField::Availability => "availability",
         CollectionRuleField::TmdbId => "TMDB id",
         CollectionRuleField::ActorName => "actor",
         CollectionRuleField::DirectorName => "director",
+        CollectionRuleField::FileSizeBytes => "file size",
+        CollectionRuleField::BitrateKbps => "bitrate",
+        CollectionRuleField::ResolutionWidth => "resolution width",
+        CollectionRuleField::ResolutionHeight => "resolution height",
+        CollectionRuleField::VideoCodec => "video codec",
+        CollectionRuleField::AudioCodec => "audio codec",
+        CollectionRuleField::AudioChannelCount => "audio channels",
+        CollectionRuleField::SubtitleLanguage => "subtitle language",
+        CollectionRuleField::HasSubtitles => "has subtitles",
     }
 }
 
@@ -1854,6 +1880,9 @@ fn rule_operator_label(operator: CollectionRuleOperator) -> &'static str {
         CollectionRuleOperator::Contains => "contains",
         CollectionRuleOperator::StartsWith => "starts with",
         CollectionRuleOperator::In => "is in",
+        CollectionRuleOperator::NotIn => "is not in",
+        CollectionRuleOperator::ContainsAny => "contains any of",
+        CollectionRuleOperator::ContainsAll => "contains all of",
         CollectionRuleOperator::GreaterThan => "is greater than",
         CollectionRuleOperator::GreaterThanOrEqual => "is at least",
         CollectionRuleOperator::LessThan => "is less than",
@@ -1874,15 +1903,67 @@ fn rule_value_label(value: &CollectionRuleValue) -> String {
             .collect::<Vec<_>>()
             .join(", "),
         CollectionRuleValue::Decimal(value) => value.clone(),
+        CollectionRuleValue::Decimals(values) => values.join(", "),
         CollectionRuleValue::Boolean(value) => value.to_string(),
         CollectionRuleValue::Date(value) => value.clone(),
+        CollectionRuleValue::Dates(values) => values.join(", "),
         CollectionRuleValue::Uuid(value) => value.to_string(),
+        CollectionRuleValue::Uuids(values) => values
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
         CollectionRuleValue::MediaType(kind) => {
             media_kind_label(*kind).to_string()
         }
+        CollectionRuleValue::MediaTypes(kinds) => kinds
+            .iter()
+            .map(|kind| media_kind_label(*kind))
+            .collect::<Vec<_>>()
+            .join(", "),
         CollectionRuleValue::Availability(status) => {
             availability_label(*status).to_string()
         }
+        CollectionRuleValue::Person(person) => person_rule_value_label(person),
+        CollectionRuleValue::WatchStatus(value) => {
+            let statuses = value
+                .statuses
+                .iter()
+                .map(|status| format!("{status:?}").to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{} for user {}", statuses, value.user_id)
+        }
+        CollectionRuleValue::WatchProgress(value) => {
+            match (value.min_percent, value.max_percent) {
+                (Some(min), Some(max)) => {
+                    format!("{min}% to {max}% for user {}", value.user_id)
+                }
+                (Some(min), None) => {
+                    format!("at least {min}% for user {}", value.user_id)
+                }
+                (None, Some(max)) => {
+                    format!("at most {max}% for user {}", value.user_id)
+                }
+                (None, None) => {
+                    format!("any progress for user {}", value.user_id)
+                }
+            }
+        }
+    }
+}
+
+fn person_rule_value_label(
+    value: &ferrex_core::api::types::collections::CollectionPersonRuleValue,
+) -> String {
+    let role = format!("{:?}", value.role).to_ascii_lowercase();
+    match (value.name.as_deref(), value.tmdb_id) {
+        (Some(name), Some(tmdb_id)) => {
+            format!("{role} {name} (TMDB {tmdb_id})")
+        }
+        (Some(name), None) => format!("{role} {name}"),
+        (None, Some(tmdb_id)) => format!("{role} TMDB {tmdb_id}"),
+        (None, None) => role,
     }
 }
 

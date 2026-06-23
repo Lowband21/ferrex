@@ -80,7 +80,7 @@ pub mod v1 {
         pub const ITEM: &str = v1_path!("/collections/{collection_id}");
         pub const ITEMS: &str = v1_path!("/collections/{collection_id}/items");
         pub const ARCHIVE: &str =
-            v1_path!("/collections/{collection_id}:archive");
+            v1_path!("/collections/{collection_id}/archive");
         pub const MANUAL_ADD_ITEMS: &str =
             v1_path!("/collections/{collection_id}/items:manual-add");
         pub const MANUAL_REMOVE_ITEMS: &str =

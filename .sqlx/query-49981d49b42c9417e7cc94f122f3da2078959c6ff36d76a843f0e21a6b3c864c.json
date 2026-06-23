@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                surface::text AS \"surface!\",\n                shelf_key,\n                placement_scope,\n                placement_scope_key\n            FROM collection_shelf_placements\n            WHERE id = ANY($1::uuid[])\n              AND hidden_at IS NULL\n            FOR UPDATE\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "surface!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "shelf_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "placement_scope",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "placement_scope_key",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "49981d49b42c9417e7cc94f122f3da2078959c6ff36d76a843f0e21a6b3c864c"
+}

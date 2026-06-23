@@ -427,6 +427,15 @@ async fn collection_reads_filter_imported_shelves_and_items(
     let (admin_id, admin_token) = register_user(&server, "coll_admin").await?;
     grant_admin(&state, admin_id).await?;
 
+    let tmdb_lists = server
+        .get(routes::v1::collections::tmdb::LIST)
+        .add_query_param("limit", "1")
+        .add_header("Authorization", bearer(&admin_token))
+        .await;
+    tmdb_lists.assert_status_ok();
+    let body: Value = tmdb_lists.json();
+    assert!(body["data"]["collections"].as_array().unwrap().is_empty());
+
     let imported = state
         .unit_of_work()
         .collections
@@ -527,6 +536,11 @@ async fn collection_reads_filter_imported_shelves_and_items(
     assert_eq!(body["data"]["items"].as_array().unwrap().len(), 1);
     assert_eq!(body["data"]["page"]["total"], 1);
     assert!(body["data"]["version"]["revision"].as_u64().unwrap() >= 1);
+
+    sqlx::query("DELETE FROM movie_references WHERE id = $1")
+        .bind(movie_id)
+        .execute(&pool)
+        .await?;
 
     let admin_missing_items = server
         .get(&items_path)

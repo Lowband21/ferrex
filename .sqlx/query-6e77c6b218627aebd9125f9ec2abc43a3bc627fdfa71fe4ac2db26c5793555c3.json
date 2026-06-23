@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE collection_manual_memberships\n                SET position_key = ($3::text)::numeric, updated_at = NOW()\n                WHERE collection_id = $1\n                  AND item_key = $2\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6e77c6b218627aebd9125f9ec2abc43a3bc627fdfa71fe4ac2db26c5793555c3"
+}

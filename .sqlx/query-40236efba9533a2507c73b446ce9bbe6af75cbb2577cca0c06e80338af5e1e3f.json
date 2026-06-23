@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE collection_materializations cm\n            SET\n                state = 'stale',\n                stale_at = NOW(),\n                stale_reason = $1,\n                updated_at = NOW()\n            FROM collection_definitions cd\n            WHERE cm.collection_id = cd.id\n              AND cd.kind = 'system'\n              AND cd.source = 'system'\n              AND cd.deleted_at IS NULL\n              AND cm.state <> 'stale'\n              AND ($2::uuid IS NULL OR cd.library_id IS NULL OR cd.library_id = $2)\n              AND (\n                    $3::text <> 'watch_state'\n                    OR $4::uuid IS NULL\n                    OR cm.user_id = $4\n                  )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "40236efba9533a2507c73b446ce9bbe6af75cbb2577cca0c06e80338af5e1e3f"
+}

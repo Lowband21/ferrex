@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE collection_shelf_placements\n                SET position = $2,\n                    position_key = ($3::text)::numeric,\n                    reordered_at = NOW(),\n                    reordered_by = $4,\n                    reorder_revision = reorder_revision + 1,\n                    updated_at = NOW()\n                WHERE id = $1\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dde10af81c9c878b0b24c61dbdaa5ae1f723305f9407885ab1ecb237916db7f3"
+}

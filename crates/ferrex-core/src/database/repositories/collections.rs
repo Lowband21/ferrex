@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use ferrex_model::{EpisodeID, MediaID, MovieID, SeasonID, SeriesID};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::collection_rule_evaluator::{
@@ -179,6 +179,46 @@ struct ResolvedItemRow {
     subtitle: Option<String>,
     status: String,
     reason: Option<String>,
+}
+
+#[derive(Debug)]
+struct ShelfPlacementRow {
+    id: Uuid,
+    schema_version: i32,
+    collection_id: Uuid,
+    surface: String,
+    shelf_key: String,
+    position: i32,
+    pinned: bool,
+    presentation: String,
+    visibility: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+struct ShelfPlacementLockRow {
+    surface: String,
+    shelf_key: String,
+    placement_scope: String,
+    placement_scope_key: String,
+}
+
+#[derive(Debug)]
+struct LegacyTmdbCollectionRow {
+    movie_id: Uuid,
+    name: String,
+    poster_path: Option<String>,
+    backdrop_path: Option<String>,
+    movie_title: String,
+}
+
+#[derive(Debug)]
+struct TmdbCollectionListRow {
+    collection_id: i64,
+    name: String,
+    poster_path: Option<String>,
+    item_count: i64,
 }
 
 impl PostgresCollectionRepository {
@@ -514,84 +554,32 @@ impl PostgresCollectionRepository {
         }
     }
 
-    fn shelf_placement_from_row(row: &PgRow) -> Result<ShelfPlacement> {
-        let schema_version = u16::try_from(
-            row.try_get::<i32, _>("schema_version").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement schema version: {e}"
-                ))
-            })?,
-        )
-        .map_err(|_| {
-            MediaError::Internal(
-                "shelf placement schema version exceeds u16".to_string(),
-            )
-        })?;
-        let position =
-            u32::try_from(row.try_get::<i32, _>("position").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement position: {e}"
-                ))
-            })?)
-            .map_err(|_| {
+    fn shelf_placement_from_row(
+        row: &ShelfPlacementRow,
+    ) -> Result<ShelfPlacement> {
+        let schema_version =
+            u16::try_from(row.schema_version).map_err(|_| {
                 MediaError::Internal(
-                    "shelf placement position is negative".to_string(),
+                    "shelf placement schema version exceeds u16".to_string(),
                 )
             })?;
-        let surface: String = row.try_get("surface").map_err(|e| {
-            MediaError::Internal(format!(
-                "failed to decode shelf placement surface: {e}"
-            ))
-        })?;
-        let presentation: String =
-            row.try_get("presentation").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement presentation: {e}"
-                ))
-            })?;
-        let visibility: String = row.try_get("visibility").map_err(|e| {
-            MediaError::Internal(format!(
-                "failed to decode shelf placement visibility: {e}"
-            ))
+        let position = u32::try_from(row.position).map_err(|_| {
+            MediaError::Internal(
+                "shelf placement position is negative".to_string(),
+            )
         })?;
         Ok(ShelfPlacement {
             schema_version,
-            id: ShelfPlacementId(row.try_get("id").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement id: {e}"
-                ))
-            })?),
-            collection_id: CollectionId(row.try_get("collection_id").map_err(
-                |e| {
-                    MediaError::Internal(format!(
-                        "failed to decode shelf placement collection id: {e}"
-                    ))
-                },
-            )?),
-            surface: Self::decode_shelf_surface(&surface)?,
-            shelf_key: row.try_get("shelf_key").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement key: {e}"
-                ))
-            })?,
+            id: ShelfPlacementId(row.id),
+            collection_id: CollectionId(row.collection_id),
+            surface: Self::decode_shelf_surface(&row.surface)?,
+            shelf_key: row.shelf_key.clone(),
             position,
-            pinned: row.try_get("pinned").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement pinned flag: {e}"
-                ))
-            })?,
-            presentation: Self::decode_presentation(&presentation)?,
-            visibility: Self::decode_visibility(&visibility)?,
-            created_at: row.try_get("created_at").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement created_at: {e}"
-                ))
-            })?,
-            updated_at: row.try_get("updated_at").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement updated_at: {e}"
-                ))
-            })?,
+            pinned: row.pinned,
+            presentation: Self::decode_presentation(&row.presentation)?,
+            visibility: Self::decode_visibility(&row.visibility)?,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         })
     }
 
@@ -1412,30 +1400,6 @@ impl PostgresCollectionRepository {
         matches!(kind, CollectionKind::DynamicRule | CollectionKind::System)
     }
 
-    async fn load_collection_kind(
-        &self,
-        id: CollectionId,
-    ) -> Result<Option<CollectionKind>> {
-        let row = sqlx::query!(
-            r#"
-            SELECT kind::text AS "kind!"
-            FROM collection_definitions
-            WHERE id = $1
-              AND deleted_at IS NULL
-            "#,
-            id.to_uuid(),
-        )
-        .fetch_optional(self.pool())
-        .await
-        .map_err(|e| {
-            MediaError::Internal(format!(
-                "failed to load collection {id} kind: {e}"
-            ))
-        })?;
-
-        row.map(|row| Self::decode_kind(&row.kind)).transpose()
-    }
-
     fn materialization_identity_for_rule(
         rule: &DynamicCollectionRule,
     ) -> Result<(&'static str, String, Option<Uuid>)> {
@@ -1517,6 +1481,7 @@ impl PostgresCollectionRepository {
         id: CollectionId,
         request: ListCollectionItemsRequest,
         mode: CollectionReadMode,
+        version: CollectionVersion,
     ) -> Result<ListCollectionItemsResponse> {
         let offset = parse_collection_cursor(request.page.cursor.as_deref())?;
         let limit = clamp_collection_page_limit(request.page.limit);
@@ -1553,6 +1518,7 @@ impl PostgresCollectionRepository {
                 items: Vec::new(),
                 page: page_info_for_materialized_slice(offset, limit, 0),
                 materialization: CollectionMaterializationStatus::default(),
+                version,
             });
         };
         let materialization_id = status_row.id;
@@ -1616,18 +1582,12 @@ impl PostgresCollectionRepository {
                     }),
                     checked_at: Some(Utc::now()),
                 });
-            let keep = if mode.exposes_preserved_membership() {
-                request
-                    .availability
-                    .is_none_or(|expected| expected == availability.status)
-            } else {
-                row.visible
-                    && availability.status
-                        == CollectionMemberAvailabilityStatus::Available
-                    && request.availability.is_none_or(|expected| {
-                        expected
-                            == CollectionMemberAvailabilityStatus::Available
-                    })
+            let keep = match request.availability {
+                Some(expected) => expected == availability.status,
+                None => mode.exposes_preserved_membership()
+                    || (row.visible
+                        && availability.status
+                            == CollectionMemberAvailabilityStatus::Available),
             };
             if !keep {
                 continue;
@@ -1667,6 +1627,7 @@ impl PostgresCollectionRepository {
             items: page_items,
             page: page_info_for_materialized_slice(offset, limit, total),
             materialization,
+            version,
         })
     }
 
@@ -1957,7 +1918,7 @@ impl PostgresCollectionRepository {
         let library_id = definition.library_id().map(|id| id.to_uuid());
         let contract_version = i32::from(COLLECTION_CONTRACT_VERSION);
 
-        let id = sqlx::query_scalar::<_, Uuid>(
+        let id = sqlx::query_scalar!(
             r#"
             WITH resolved AS (
                 SELECT COALESCE(
@@ -2062,19 +2023,19 @@ impl PostgresCollectionRepository {
                     )
                 RETURNING id
             )
-            SELECT id FROM upsert
+            SELECT id AS "id!" FROM upsert
             "#,
+            &definition.stable_key,
+            &definition.title,
+            definition.description(),
+            Self::encode_scope(definition.scope),
+            library_id,
+            media_scope,
+            artwork,
+            theme,
+            provenance,
+            contract_version,
         )
-        .bind(&definition.stable_key)
-        .bind(&definition.title)
-        .bind(definition.description())
-        .bind(Self::encode_scope(definition.scope))
-        .bind(library_id)
-        .bind(media_scope)
-        .bind(artwork)
-        .bind(theme)
-        .bind(provenance)
-        .bind(contract_version)
         .fetch_one(self.pool())
         .await
         .map_err(|e| {
@@ -2109,7 +2070,7 @@ impl PostgresCollectionRepository {
         })?;
         let position_key = placement.position.to_string();
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO collection_shelf_placements (
                 collection_id,
@@ -2157,19 +2118,19 @@ impl PostgresCollectionRepository {
                 metadata = EXCLUDED.metadata,
                 updated_at = NOW()
             "#,
+            collection_id.to_uuid(),
+            &definition.stable_key,
+            Self::encode_shelf_surface(placement.surface),
+            &placement.shelf_key,
+            placement.scope.placement_scope(),
+            placement.scope.placement_scope_key(),
+            scope_user_id,
+            scope_library_id,
+            placement.pinned,
+            position,
+            position_key,
+            metadata,
         )
-        .bind(collection_id.to_uuid())
-        .bind(&definition.stable_key)
-        .bind(Self::encode_shelf_surface(placement.surface))
-        .bind(&placement.shelf_key)
-        .bind(placement.scope.placement_scope())
-        .bind(placement.scope.placement_scope_key())
-        .bind(scope_user_id)
-        .bind(scope_library_id)
-        .bind(placement.pinned)
-        .bind(position)
-        .bind(position_key)
-        .bind(metadata)
         .execute(self.pool())
         .await
         .map_err(|e| {
@@ -2597,7 +2558,7 @@ impl CollectionRepository for PostgresCollectionRepository {
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned);
 
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             UPDATE collection_definitions
             SET
@@ -2610,13 +2571,17 @@ impl CollectionRepository for PostgresCollectionRepository {
             WHERE id = $1
               AND deleted_at IS NULL
               AND ($4::bigint IS NULL OR revision = $4)
-            RETURNING deleted_at, contract_version, revision, etag
+            RETURNING
+                deleted_at AS "deleted_at!",
+                contract_version,
+                revision,
+                etag
             "#,
+            id.to_uuid(),
+            deleted_by,
+            reason,
+            expected_revision,
         )
-        .bind(id.to_uuid())
-        .bind(deleted_by)
-        .bind(reason)
-        .bind(expected_revision)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -2633,29 +2598,11 @@ impl CollectionRepository for PostgresCollectionRepository {
 
         Ok(DeleteCollectionResponse {
             collection_id: id,
-            deleted_at: row.try_get::<DateTime<Utc>, _>("deleted_at").map_err(
-                |e| {
-                    MediaError::Internal(format!(
-                        "failed to decode collection {id} deleted_at: {e}"
-                    ))
-                },
-            )?,
+            deleted_at: row.deleted_at,
             version: Self::version_from_parts(
-                row.try_get::<i32, _>("contract_version").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode collection {id} contract version: {e}"
-                    ))
-                })?,
-                row.try_get::<i64, _>("revision").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode collection {id} revision: {e}"
-                    ))
-                })?,
-                row.try_get::<Option<String>, _>("etag").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode collection {id} etag: {e}"
-                    ))
-                })?,
+                row.contract_version,
+                row.revision,
+                row.etag,
             )?,
         })
     }
@@ -2828,13 +2775,18 @@ impl CollectionRepository for PostgresCollectionRepository {
         request: ListCollectionItemsRequest,
         mode: CollectionReadMode,
     ) -> Result<ListCollectionItemsResponse> {
-        if self
-            .load_collection_kind(id)
+        let summary = self
+            .load_definition_row(id)
             .await?
-            .is_some_and(Self::kind_uses_dynamic_materialization)
-        {
+            .map(Self::map_definition_row)
+            .transpose()?
+            .ok_or_else(|| {
+                MediaError::NotFound(format!("collection {id} not found"))
+            })?;
+        let version = summary.version.clone();
+        if Self::kind_uses_dynamic_materialization(summary.kind) {
             return self
-                .list_materialized_collection_items(id, request, mode)
+                .list_materialized_collection_items(id, request, mode, version)
                 .await;
         }
 
@@ -2896,17 +2848,13 @@ impl CollectionRepository for PostgresCollectionRepository {
                     reason: Some("media reference was not found".to_string()),
                     checked_at: Some(Utc::now()),
                 });
-            let keep = if mode.exposes_preserved_membership() {
-                request
-                    .availability
-                    .is_none_or(|expected| expected == availability.status)
-            } else {
-                availability.status
-                    == CollectionMemberAvailabilityStatus::Available
-                    && request.availability.is_none_or(|expected| {
-                        expected
+            let keep = match request.availability {
+                Some(expected) => expected == availability.status,
+                None => {
+                    mode.exposes_preserved_membership()
+                        || availability.status
                             == CollectionMemberAvailabilityStatus::Available
-                    })
+                }
             };
             if !keep {
                 continue;
@@ -2948,6 +2896,7 @@ impl CollectionRepository for PostgresCollectionRepository {
             items: page_items,
             page: page_info_for_slice(offset, limit, total),
             materialization: CollectionMaterializationStatus::default(),
+            version,
         })
     }
 
@@ -3445,18 +3394,19 @@ impl CollectionRepository for PostgresCollectionRepository {
         _mode: CollectionReadMode,
     ) -> Result<ListShelfPlacementsResponse> {
         let surface = request.surface.map(Self::encode_shelf_surface);
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            ShelfPlacementRow,
             r#"
             SELECT
                 id,
                 schema_version,
                 collection_id,
-                surface::text AS surface,
+                surface::text AS "surface!",
                 shelf_key,
                 position,
                 pinned,
-                presentation::text AS presentation,
-                visibility::text AS visibility,
+                presentation::text AS "presentation!",
+                visibility::text AS "visibility!",
                 created_at,
                 updated_at
             FROM collection_shelf_placements
@@ -3466,10 +3416,10 @@ impl CollectionRepository for PostgresCollectionRepository {
               AND ($3::bool OR pinned)
             ORDER BY pinned DESC, position_key, id
             "#,
+            surface,
+            request.shelf_key,
+            request.include_unpinned,
         )
-        .bind(surface)
-        .bind(request.shelf_key)
-        .bind(request.include_unpinned)
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -3515,9 +3465,9 @@ impl CollectionRepository for PostgresCollectionRepository {
             match request.position {
                 Some(position) => position,
                 None => {
-                    let row = sqlx::query(
+                    let row = sqlx::query!(
                         r#"
-                        SELECT COALESCE(MAX(position), -1) + 1 AS next_position
+                        SELECT COALESCE(MAX(position), -1) + 1 AS "next_position!"
                         FROM collection_shelf_placements
                         WHERE surface = $1::varchar
                           AND shelf_key = $2
@@ -3525,9 +3475,9 @@ impl CollectionRepository for PostgresCollectionRepository {
                           AND placement_scope_key = 'global'
                           AND hidden_at IS NULL
                         "#,
+                        surface,
+                        &shelf_key,
                     )
-                    .bind(surface)
-                    .bind(&shelf_key)
                     .fetch_one(self.pool())
                     .await
                     .map_err(|e| {
@@ -3535,16 +3485,7 @@ impl CollectionRepository for PostgresCollectionRepository {
                             "failed to load shelf placement tail: {e}"
                         ))
                     })?;
-                    u32::try_from(
-                        row.try_get::<i32, _>("next_position").map_err(
-                            |e| {
-                                MediaError::Internal(format!(
-                                    "failed to decode shelf placement tail: {e}"
-                                ))
-                            },
-                        )?,
-                    )
-                    .map_err(|_| {
+                    u32::try_from(row.next_position).map_err(|_| {
                         MediaError::Internal(
                             "shelf placement tail is negative".to_string(),
                         )
@@ -3552,18 +3493,18 @@ impl CollectionRepository for PostgresCollectionRepository {
                 }
             }
         } else {
-            let row = sqlx::query(
+            let row = sqlx::query!(
                 r#"
-                SELECT COALESCE(MAX(position), -1) + 1 AS next_position
+                SELECT COALESCE(MAX(position), -1) + 1 AS "next_position!"
                 FROM collection_shelf_placements
                 WHERE surface = $1::varchar
                   AND shelf_key = $2
                   AND placement_scope = 'global'
                   AND placement_scope_key = 'global'
                 "#,
+                surface,
+                &shelf_key,
             )
-            .bind(surface)
-            .bind(&shelf_key)
             .fetch_one(self.pool())
             .await
             .map_err(|e| {
@@ -3571,21 +3512,15 @@ impl CollectionRepository for PostgresCollectionRepository {
                     "failed to load hidden shelf placement tail: {e}"
                 ))
             })?;
-            u32::try_from(row.try_get::<i32, _>("next_position").map_err(
-                |e| {
-                    MediaError::Internal(format!(
-                        "failed to decode hidden shelf placement tail: {e}"
-                    ))
-                },
-            )?)
-            .map_err(|_| {
+            u32::try_from(row.next_position).map_err(|_| {
                 MediaError::Internal(
                     "hidden shelf placement tail is negative".to_string(),
                 )
             })?
         };
         let position_key = manual_position_key_for_index(position as usize)?;
-        let row = sqlx::query(
+        let row = sqlx::query_as!(
+            ShelfPlacementRow,
             r#"
             INSERT INTO collection_shelf_placements (
                 collection_id,
@@ -3606,7 +3541,7 @@ impl CollectionRepository for PostgresCollectionRepository {
             ) VALUES (
                 $1, $2, $3::varchar, $4, 'global', 'global', $5::varchar,
                 $6::varchar, $7, CASE WHEN $7 THEN NOW() ELSE NULL END,
-                CASE WHEN $7 THEN $8 ELSE NULL END,
+                CASE WHEN $7 THEN $8::uuid ELSE NULL END,
                 $9, ($10::text)::numeric,
                 CASE WHEN $7 THEN NULL ELSE NOW() END,
                 NOW()
@@ -3615,7 +3550,7 @@ impl CollectionRepository for PostgresCollectionRepository {
             DO UPDATE SET
                 pinned = EXCLUDED.pinned,
                 pinned_at = CASE WHEN EXCLUDED.pinned THEN NOW() ELSE NULL END,
-                pinned_by = CASE WHEN EXCLUDED.pinned THEN $8 ELSE NULL END,
+                pinned_by = CASE WHEN EXCLUDED.pinned THEN $8::uuid ELSE NULL END,
                 position = EXCLUDED.position,
                 position_key = EXCLUDED.position_key,
                 visibility = EXCLUDED.visibility,
@@ -3626,30 +3561,30 @@ impl CollectionRepository for PostgresCollectionRepository {
                 id,
                 schema_version,
                 collection_id,
-                surface::text AS surface,
+                surface::text AS "surface!",
                 shelf_key,
                 position,
                 pinned,
-                presentation::text AS presentation,
-                visibility::text AS visibility,
+                presentation::text AS "presentation!",
+                visibility::text AS "visibility!",
                 created_at,
                 updated_at
             "#,
+            request.collection_id.to_uuid(),
+            collection_summary.identity.stable_key,
+            surface,
+            shelf_key,
+            visibility,
+            collection_presentation,
+            request.pinned,
+            pinned_by,
+            i32::try_from(position).map_err(|_| {
+                MediaError::InvalidMedia(
+                    "shelf placement position exceeds i32".to_string(),
+                )
+            })?,
+            position_key,
         )
-        .bind(request.collection_id.to_uuid())
-        .bind(collection_summary.identity.stable_key)
-        .bind(surface)
-        .bind(shelf_key)
-        .bind(visibility)
-        .bind(collection_presentation)
-        .bind(request.pinned)
-        .bind(pinned_by)
-        .bind(i32::try_from(position).map_err(|_| {
-            MediaError::InvalidMedia(
-                "shelf placement position exceeds i32".to_string(),
-            )
-        })?)
-        .bind(position_key)
         .fetch_one(self.pool())
         .await
         .map_err(|e| {
@@ -3703,16 +3638,21 @@ impl CollectionRepository for PostgresCollectionRepository {
             .iter()
             .map(|order| order.placement_id.to_uuid())
             .collect();
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            ShelfPlacementLockRow,
             r#"
-            SELECT id, surface::text AS surface, shelf_key, placement_scope, placement_scope_key
+            SELECT
+                surface::text AS "surface!",
+                shelf_key,
+                placement_scope,
+                placement_scope_key
             FROM collection_shelf_placements
             WHERE id = ANY($1::uuid[])
               AND hidden_at IS NULL
             FOR UPDATE
             "#,
+            &placement_ids,
         )
-        .bind(&placement_ids)
         .fetch_all(&mut *tx)
         .await
         .map_err(|e| {
@@ -3726,63 +3666,22 @@ impl CollectionRepository for PostgresCollectionRepository {
             ));
         }
         let first = rows.first().expect("non-empty reorder rows");
-        let surface: String = first.try_get("surface").map_err(|e| {
-            MediaError::Internal(format!(
-                "failed to decode shelf placement surface: {e}"
-            ))
-        })?;
-        let shelf_key: String = first.try_get("shelf_key").map_err(|e| {
-            MediaError::Internal(format!(
-                "failed to decode shelf placement key: {e}"
-            ))
-        })?;
-        let placement_scope: String =
-            first.try_get("placement_scope").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement scope: {e}"
-                ))
-            })?;
-        let placement_scope_key: String =
-            first.try_get("placement_scope_key").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement scope key: {e}"
-                ))
-            })?;
+        let surface = first.surface.clone();
+        let shelf_key = first.shelf_key.clone();
+        let placement_scope = first.placement_scope.clone();
+        let placement_scope_key = first.placement_scope_key.clone();
         for row in &rows {
-            let row_surface: String = row.try_get("surface").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode shelf placement surface: {e}"
-                ))
-            })?;
-            let row_shelf_key: String =
-                row.try_get("shelf_key").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode shelf placement key: {e}"
-                    ))
-                })?;
-            let row_scope: String =
-                row.try_get("placement_scope").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode shelf placement scope: {e}"
-                    ))
-                })?;
-            let row_scope_key: String =
-                row.try_get("placement_scope_key").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode shelf placement scope key: {e}"
-                    ))
-                })?;
-            if row_surface != surface
-                || row_shelf_key != shelf_key
-                || row_scope != placement_scope
-                || row_scope_key != placement_scope_key
+            if row.surface != surface
+                || row.shelf_key != shelf_key
+                || row.placement_scope != placement_scope
+                || row.placement_scope_key != placement_scope_key
             {
                 return Err(MediaError::Conflict(
                     "shelf reorder must target one shelf".to_string(),
                 ));
             }
         }
-        let shelf_rows = sqlx::query(
+        let shelf_rows = sqlx::query!(
             r#"
             SELECT id
             FROM collection_shelf_placements
@@ -3794,11 +3693,11 @@ impl CollectionRepository for PostgresCollectionRepository {
             ORDER BY position_key, id
             FOR UPDATE
             "#,
+            &surface,
+            &shelf_key,
+            &placement_scope,
+            &placement_scope_key,
         )
-        .bind(&surface)
-        .bind(&shelf_key)
-        .bind(&placement_scope)
-        .bind(&placement_scope_key)
         .fetch_all(&mut *tx)
         .await
         .map_err(|e| {
@@ -3813,10 +3712,7 @@ impl CollectionRepository for PostgresCollectionRepository {
             .collect();
         let mut final_order: Vec<Uuid> = shelf_rows
             .iter()
-            .filter_map(|row| {
-                let id: Uuid = row.try_get("id").ok()?;
-                (!requested.contains(&id)).then_some(id)
-            })
+            .filter_map(|row| (!requested.contains(&row.id)).then_some(row.id))
             .collect();
         let mut ordering = request.ordering.clone();
         ordering.sort_by_key(|order| order.position);
@@ -3824,7 +3720,7 @@ impl CollectionRepository for PostgresCollectionRepository {
             let index = (order.position as usize).min(final_order.len());
             final_order.insert(index, order.placement_id.to_uuid());
         }
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE collection_shelf_placements
             SET position_key = position_key + 1000000000000000000::numeric,
@@ -3835,11 +3731,11 @@ impl CollectionRepository for PostgresCollectionRepository {
               AND placement_scope_key = $4
               AND hidden_at IS NULL
             "#,
+            &surface,
+            &shelf_key,
+            &placement_scope,
+            &placement_scope_key,
         )
-        .bind(&surface)
-        .bind(&shelf_key)
-        .bind(&placement_scope)
-        .bind(&placement_scope_key)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -3854,7 +3750,7 @@ impl CollectionRepository for PostgresCollectionRepository {
                     "shelf placement position exceeds i32".to_string(),
                 )
             })?;
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 UPDATE collection_shelf_placements
                 SET position = $2,
@@ -3865,11 +3761,11 @@ impl CollectionRepository for PostgresCollectionRepository {
                     updated_at = NOW()
                 WHERE id = $1
                 "#,
+                *placement_id,
+                position,
+                position_key,
+                reordered_by,
             )
-            .bind(*placement_id)
-            .bind(position)
-            .bind(position_key)
-            .bind(reordered_by)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
@@ -3878,18 +3774,19 @@ impl CollectionRepository for PostgresCollectionRepository {
                 ))
             })?;
         }
-        let response_rows = sqlx::query(
+        let response_rows = sqlx::query_as!(
+            ShelfPlacementRow,
             r#"
             SELECT
                 id,
                 schema_version,
                 collection_id,
-                surface::text AS surface,
+                surface::text AS "surface!",
                 shelf_key,
                 position,
                 pinned,
-                presentation::text AS presentation,
-                visibility::text AS visibility,
+                presentation::text AS "presentation!",
+                visibility::text AS "visibility!",
                 created_at,
                 updated_at
             FROM collection_shelf_placements
@@ -3900,11 +3797,11 @@ impl CollectionRepository for PostgresCollectionRepository {
               AND hidden_at IS NULL
             ORDER BY position_key, id
             "#,
+            &surface,
+            &shelf_key,
+            &placement_scope,
+            &placement_scope_key,
         )
-        .bind(&surface)
-        .bind(&shelf_key)
-        .bind(&placement_scope)
-        .bind(&placement_scope_key)
         .fetch_all(&mut *tx)
         .await
         .map_err(|e| {
@@ -3934,11 +3831,15 @@ impl CollectionRepository for PostgresCollectionRepository {
                     "tmdb_id must be a numeric TMDB collection id".to_string(),
                 )
             })?;
-        let legacy_rows = sqlx::query(
+        let legacy_rows = sqlx::query_as!(
+            LegacyTmdbCollectionRow,
             r#"
-            SELECT mcm.movie_id, mcm.library_id, mcm.batch_id, mcm.collection_id,
-                   mcm.name, mcm.poster_path, mcm.backdrop_path,
-                   mr.title AS movie_title
+            SELECT
+                mcm.movie_id,
+                mcm.name,
+                mcm.poster_path,
+                mcm.backdrop_path,
+                mr.title AS "movie_title!"
             FROM movie_collection_membership mcm
             JOIN movie_references mr
               ON mr.id = mcm.movie_id
@@ -3947,8 +3848,8 @@ impl CollectionRepository for PostgresCollectionRepository {
             WHERE mcm.collection_id = $1
             ORDER BY mr.title, mcm.movie_id
             "#,
+            tmdb_collection_id,
         )
-        .bind(tmdb_collection_id)
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -3963,13 +3864,8 @@ impl CollectionRepository for PostgresCollectionRepository {
                 request.tmdb_id
             )));
         };
-        let title: String = request.title_override.clone().unwrap_or(
-            first.try_get("name").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode legacy TMDB collection title: {e}"
-                ))
-            })?,
-        );
+        let title: String =
+            request.title_override.clone().unwrap_or(first.name.clone());
         let collection = self
             .create_collection(CreateCollectionRequest {
                 title,
@@ -4008,7 +3904,7 @@ impl CollectionRepository for PostgresCollectionRepository {
                 "failed to start TMDB import transaction: {e}"
             ))
         })?;
-        let source_row = sqlx::query(
+        let source_row = sqlx::query!(
             r#"
             INSERT INTO collection_sources (
                 collection_id,
@@ -4028,11 +3924,11 @@ impl CollectionRepository for PostgresCollectionRepository {
                 updated_at = NOW()
             RETURNING id
             "#,
+            collection_id.to_uuid(),
+            source_kind,
+            &request.tmdb_id,
+            collection.summary.title.clone(),
         )
-        .bind(collection_id.to_uuid())
-        .bind(source_kind)
-        .bind(&request.tmdb_id)
-        .bind(collection.summary.title.clone())
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
@@ -4040,27 +3936,15 @@ impl CollectionRepository for PostgresCollectionRepository {
                 "failed to upsert TMDB collection source: {e}"
             ))
         })?;
-        let source_id: Uuid = source_row.try_get("id").map_err(|e| {
-            MediaError::Internal(format!(
-                "failed to decode TMDB collection source id: {e}"
-            ))
-        })?;
+        let source_id = source_row.id;
         let mut imported_items = 0_u32;
         for (index, row) in legacy_rows.iter().enumerate() {
-            let movie_id: Uuid = row.try_get("movie_id").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode legacy TMDB movie id: {e}"
-                ))
-            })?;
+            let movie_id = row.movie_id;
             let media_id = MediaID::Movie(MovieID(movie_id));
             let item_key = CollectionMemberKey::for_media(&media_id);
             let source_order_key = manual_position_key_for_index(index)?;
-            let title: String = row.try_get("movie_title").map_err(|e| {
-                MediaError::Internal(format!(
-                    "failed to decode legacy TMDB movie title: {e}"
-                ))
-            })?;
-            sqlx::query(
+            let title = row.movie_title.clone();
+            sqlx::query!(
                 r#"
                 INSERT INTO collection_source_memberships (
                     source_id,
@@ -4099,34 +3983,22 @@ impl CollectionRepository for PostgresCollectionRepository {
                     matched_at = NOW(),
                     updated_at = NOW()
                 "#,
+                source_id,
+                collection_id.to_uuid(),
+                item_key.as_str(),
+                movie_id,
+                movie_id.to_string(),
+                i32::try_from(index).map_err(|_| {
+                    MediaError::InvalidMedia(
+                        "TMDB import position exceeds i32".to_string(),
+                    )
+                })?,
+                source_order_key,
+                title,
+                row.poster_path.clone(),
+                row.backdrop_path.clone(),
+                tmdb_collection_id,
             )
-            .bind(source_id)
-            .bind(collection_id.to_uuid())
-            .bind(item_key.as_str())
-            .bind(movie_id)
-            .bind(movie_id.to_string())
-            .bind(i32::try_from(index).map_err(|_| {
-                MediaError::InvalidMedia(
-                    "TMDB import position exceeds i32".to_string(),
-                )
-            })?)
-            .bind(source_order_key)
-            .bind(title)
-            .bind(row.try_get::<Option<String>, _>("poster_path").map_err(
-                |e| {
-                    MediaError::Internal(format!(
-                        "failed to decode legacy TMDB poster path: {e}"
-                    ))
-                },
-            )?)
-            .bind(row.try_get::<Option<String>, _>("backdrop_path").map_err(
-                |e| {
-                    MediaError::Internal(format!(
-                        "failed to decode legacy TMDB backdrop path: {e}"
-                    ))
-                },
-            )?)
-            .bind(tmdb_collection_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
@@ -4155,11 +4027,14 @@ impl CollectionRepository for PostgresCollectionRepository {
     ) -> Result<TmdbListCollectionsResponse> {
         let offset = parse_collection_cursor(request.page.cursor.as_deref())?;
         let limit = clamp_collection_page_limit(request.page.limit);
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            TmdbCollectionListRow,
             r#"
-            SELECT collection_id, name,
-                   MIN(poster_path) AS poster_path,
-                   COUNT(*)::bigint AS item_count
+            SELECT
+                collection_id,
+                name,
+                MIN(poster_path) AS "poster_path?",
+                COUNT(*)::bigint AS "item_count!"
             FROM movie_collection_membership
             GROUP BY collection_id, name
             ORDER BY name, collection_id
@@ -4174,41 +4049,19 @@ impl CollectionRepository for PostgresCollectionRepository {
         })?;
         let mut collections = Vec::with_capacity(rows.len());
         for row in rows {
-            let item_count = u32::try_from(
-                row.try_get::<i64, _>("item_count").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode TMDB collection item count: {e}"
-                    ))
-                })?,
-            )
-            .map_err(|_| {
+            let item_count = u32::try_from(row.item_count).map_err(|_| {
                 MediaError::Internal(
                     "TMDB collection item count exceeds u32".to_string(),
                 )
             })?;
             collections.push(TmdbCollectionSummary {
-                tmdb_id: row
-                    .try_get::<i64, _>("collection_id")
-                    .map_err(|e| {
-                        MediaError::Internal(format!(
-                            "failed to decode TMDB collection id: {e}"
-                        ))
-                    })?
-                    .to_string(),
-                title: row.try_get("name").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode TMDB collection title: {e}"
-                    ))
-                })?,
+                tmdb_id: row.collection_id.to_string(),
+                title: row.name,
                 description: None,
                 import_kind: request
                     .import_kind
                     .unwrap_or(TmdbCollectionImportKind::Collection),
-                poster_path: row.try_get("poster_path").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to decode TMDB collection poster path: {e}"
-                    ))
-                })?,
+                poster_path: row.poster_path,
                 item_count,
             });
         }
@@ -4311,7 +4164,7 @@ impl CollectionRepository for PostgresCollectionRepository {
         request: MarkSystemCollectionsStaleRequest,
     ) -> Result<SystemCollectionsStaleResponse> {
         let library_id = request.library_id.map(|id| id.to_uuid());
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r#"
             UPDATE collection_materializations cm
             SET
@@ -4332,11 +4185,11 @@ impl CollectionRepository for PostgresCollectionRepository {
                     OR cm.user_id = $4
                   )
             "#,
+            request.cause.stale_reason(),
+            library_id,
+            request.cause.as_str(),
+            request.user_id,
         )
-        .bind(request.cause.stale_reason())
-        .bind(library_id)
-        .bind(request.cause.as_str())
-        .bind(request.user_id)
         .execute(self.pool())
         .await
         .map_err(|e| {
