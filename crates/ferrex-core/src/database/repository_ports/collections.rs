@@ -4,16 +4,27 @@ use uuid::Uuid;
 
 use crate::api::types::collections::{
     ArchiveCollectionRequest, ArchiveCollectionResponse, CollectionDetail,
-    CollectionDuplicatePolicy, CollectionId,
-    CollectionManualMembershipConflict, CollectionManualMembershipConflictCode,
-    CollectionMemberAvailability, CollectionMemberKey, CollectionPageInfo,
-    CreateCollectionRequest, GetCollectionDetailRequest,
+    CollectionId, CollectionMemberAvailability, CollectionMemberKey,
+    CollectionPageInfo, CreateCollectionRequest, DeleteCollectionRequest,
+    DeleteCollectionResponse, GetCollectionDetailRequest,
     ListCollectionItemsRequest, ListCollectionItemsResponse,
-    ListCollectionsRequest, ListCollectionsResponse, MAX_COLLECTION_PAGE_LIMIT,
-    ManualAddCollectionItemsRequest, ManualAddCollectionItemsResponse,
-    ManualRemoveCollectionItemsRequest, ManualRemoveCollectionItemsResponse,
-    ManualReorderCollectionItemsRequest, ManualReorderCollectionItemsResponse,
-    UpdateCollectionRequest,
+    ListCollectionsRequest, ListCollectionsResponse,
+    ListShelfPlacementsRequest, ListShelfPlacementsResponse,
+    MAX_COLLECTION_PAGE_LIMIT, ManualAddCollectionItemsRequest,
+    ManualAddCollectionItemsResponse, ManualRemoveCollectionItemsRequest,
+    ManualRemoveCollectionItemsResponse, ManualReorderCollectionItemsRequest,
+    ManualReorderCollectionItemsResponse, PinShelfPlacementRequest,
+    PinShelfPlacementResponse, PreviewCollectionRuleRequest,
+    PreviewCollectionRuleResponse, RefreshCollectionRuleRequest,
+    RefreshCollectionRuleResponse, ReorderShelfPlacementsRequest,
+    ReorderShelfPlacementsResponse, TmdbImportCollectionRequest,
+    TmdbImportCollectionResponse, TmdbListCollectionsRequest,
+    TmdbListCollectionsResponse, UpdateCollectionRequest,
+    ValidateCollectionRuleRequest, ValidateCollectionRuleResponse,
+};
+use crate::api::types::system_collections::{
+    MarkSystemCollectionsStaleRequest, SystemCollectionDefinition,
+    SystemCollectionSeedReport, SystemCollectionsStaleResponse,
 };
 use crate::error::{MediaError, Result};
 
@@ -86,6 +97,19 @@ pub trait CollectionRepository: Send + Sync {
         archived_by: Option<Uuid>,
     ) -> Result<ArchiveCollectionResponse>;
 
+    async fn delete_collection(
+        &self,
+        id: CollectionId,
+        request: DeleteCollectionRequest,
+        deleted_by: Option<Uuid>,
+    ) -> Result<DeleteCollectionResponse> {
+        let _ = (id, request, deleted_by);
+        Err(MediaError::InvalidMedia(
+            "collection deletion is not supported by this repository"
+                .to_string(),
+        ))
+    }
+
     async fn get_collection_detail(
         &self,
         id: CollectionId,
@@ -125,10 +149,98 @@ pub trait CollectionRepository: Send + Sync {
         request: ManualReorderCollectionItemsRequest,
     ) -> Result<ManualReorderCollectionItemsResponse>;
 
+    async fn validate_collection_rule(
+        &self,
+        request: ValidateCollectionRuleRequest,
+    ) -> Result<ValidateCollectionRuleResponse> {
+        Ok(ValidateCollectionRuleResponse::from_rule(&request.rule))
+    }
+
+    async fn preview_collection_rule(
+        &self,
+        request: PreviewCollectionRuleRequest,
+        mode: CollectionReadMode,
+    ) -> Result<PreviewCollectionRuleResponse>;
+
+    async fn refresh_collection_rule(
+        &self,
+        id: CollectionId,
+        request: RefreshCollectionRuleRequest,
+    ) -> Result<RefreshCollectionRuleResponse>;
+
+    async fn list_shelf_placements(
+        &self,
+        request: ListShelfPlacementsRequest,
+        mode: CollectionReadMode,
+    ) -> Result<ListShelfPlacementsResponse> {
+        let _ = (request, mode);
+        Err(MediaError::InvalidMedia(
+            "shelf placement reads are not supported by this repository"
+                .to_string(),
+        ))
+    }
+
+    async fn pin_shelf_placement(
+        &self,
+        request: PinShelfPlacementRequest,
+        pinned_by: Option<Uuid>,
+    ) -> Result<PinShelfPlacementResponse> {
+        let _ = (request, pinned_by);
+        Err(MediaError::InvalidMedia(
+            "shelf placement pinning is not supported by this repository"
+                .to_string(),
+        ))
+    }
+
+    async fn reorder_shelf_placements(
+        &self,
+        request: ReorderShelfPlacementsRequest,
+        reordered_by: Option<Uuid>,
+    ) -> Result<ReorderShelfPlacementsResponse> {
+        let _ = (request, reordered_by);
+        Err(MediaError::InvalidMedia(
+            "shelf placement reordering is not supported by this repository"
+                .to_string(),
+        ))
+    }
+
+    async fn tmdb_import_collection(
+        &self,
+        request: TmdbImportCollectionRequest,
+        imported_by: Option<Uuid>,
+    ) -> Result<TmdbImportCollectionResponse> {
+        let _ = (request, imported_by);
+        Err(MediaError::InvalidMedia(
+            "TMDB collection import is not supported by this repository"
+                .to_string(),
+        ))
+    }
+
+    async fn tmdb_list_collections(
+        &self,
+        request: TmdbListCollectionsRequest,
+    ) -> Result<TmdbListCollectionsResponse> {
+        let _ = request;
+        Err(MediaError::InvalidMedia(
+            "TMDB collection listing is not supported by this repository"
+                .to_string(),
+        ))
+    }
+
     async fn resolve_collection_items(
         &self,
         items: &[CollectionItemIdentity],
     ) -> Result<Vec<CollectionResolvedItem>>;
+
+    async fn ensure_system_collections(
+        &self,
+        definitions: &[SystemCollectionDefinition],
+    ) -> Result<SystemCollectionSeedReport>;
+
+    async fn mark_system_collections_stale(
+        &self,
+        request: MarkSystemCollectionsStaleRequest,
+    ) -> Result<SystemCollectionsStaleResponse>;
 }
 
 pub(crate) fn clamp_collection_page_limit(limit: u16) -> u16 {
@@ -159,25 +271,6 @@ pub(crate) fn page_info_for_slice(
     }
 }
 
-pub(crate) fn collection_manual_membership_conflict(
-    code: CollectionManualMembershipConflictCode,
-    collection_id: CollectionId,
-    duplicate_policy: Option<CollectionDuplicatePolicy>,
-    item_keys: Vec<CollectionMemberKey>,
-    message: impl Into<String>,
-) -> MediaError {
-    let conflict = CollectionManualMembershipConflict {
-        code,
-        collection_id,
-        duplicate_policy,
-        item_keys,
-        message: message.into(),
-    };
-    let message = serde_json::to_string(&conflict)
-        .unwrap_or_else(|_| conflict.message.clone());
-    MediaError::Conflict(message)
-}
-
 pub(crate) fn manual_position_for_index(index: usize) -> Result<u64> {
     let one_based = u64::try_from(index)
         .map_err(|_| {
@@ -204,20 +297,20 @@ pub(crate) fn manual_position_key_for_index(index: usize) -> Result<String> {
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_support {
-    use std::collections::{BTreeMap, HashMap, HashSet};
+    use std::collections::{BTreeMap, HashMap};
     use std::sync::{Arc, Mutex};
 
     use chrono::Utc;
 
     use super::*;
     use crate::api::types::collections::{
-        CollectionIdentity, CollectionKind, CollectionManualAddItem,
+        CollectionDuplicatePolicy, CollectionIdentity,
         CollectionManualAddResult, CollectionManualAddStatus,
-        CollectionManualOrder, CollectionMaterializationStatus,
-        CollectionMediaKind, CollectionMediaScope, CollectionMember,
+        CollectionMaterializationStatus, CollectionMember,
         CollectionMemberAvailabilityStatus, CollectionPagination,
         CollectionSummary, CollectionTimestamps, CollectionVersion,
-        DynamicCollectionRule,
+        DynamicCollectionRule, SHELF_PLACEMENT_SCHEMA_VERSION, ShelfPlacement,
+        ShelfPlacementId,
     };
 
     #[derive(Debug, Clone)]
@@ -249,22 +342,6 @@ pub mod test_support {
 
         pub fn description(mut self, description: impl Into<String>) -> Self {
             self.request.description = Some(description.into());
-            self
-        }
-
-        pub fn media_scope(
-            mut self,
-            media_scope: CollectionMediaScope,
-        ) -> Self {
-            self.request.media_scope = media_scope;
-            self
-        }
-
-        pub fn duplicate_policy(
-            mut self,
-            duplicate_policy: CollectionDuplicatePolicy,
-        ) -> Self {
-            self.request.duplicate_policy = duplicate_policy;
             self
         }
 
@@ -324,180 +401,6 @@ pub mod test_support {
                 .expect("collection state lock")
                 .resolved
                 .insert(item.item_key.clone(), item);
-        }
-
-        fn current_version(detail: &CollectionDetail) -> CollectionVersion {
-            detail.summary.version.clone()
-        }
-
-        fn bump_collection_version(
-            detail: &mut CollectionDetail,
-        ) -> CollectionVersion {
-            detail.summary.version.revision += 1;
-            detail.summary.version.etag = Some(format!(
-                "collection:{}:v{}",
-                detail.summary.identity.id, detail.summary.version.revision
-            ));
-            detail.summary.timestamps.updated_at = Utc::now();
-            detail.summary.version.clone()
-        }
-
-        fn ensure_manual_editable(
-            detail: &CollectionDetail,
-            expected_revision: Option<u64>,
-        ) -> Result<()> {
-            if detail.summary.kind != CollectionKind::Manual {
-                return Err(MediaError::InvalidMedia(format!(
-                    "collection {} is not a manual collection",
-                    detail.summary.identity.id
-                )));
-            }
-            if detail.summary.timestamps.archived_at.is_some() {
-                return Err(MediaError::Conflict(format!(
-                    "collection {} is archived",
-                    detail.summary.identity.id
-                )));
-            }
-            if let Some(expected) = expected_revision
-                && expected != detail.summary.version.revision
-            {
-                return Err(MediaError::Conflict(format!(
-                    "collection {} revision conflict",
-                    detail.summary.identity.id
-                )));
-            }
-            Ok(())
-        }
-
-        fn missing_resolved_item(media_id: MediaID) -> CollectionResolvedItem {
-            CollectionResolvedItem {
-                item_key: CollectionMemberKey::for_media(&media_id),
-                media_id,
-                title: None,
-                subtitle: None,
-                availability: CollectionMemberAvailability {
-                    status: CollectionMemberAvailabilityStatus::Missing,
-                    reason: Some("media reference was not found".to_string()),
-                    checked_at: Some(Utc::now()),
-                },
-            }
-        }
-
-        fn title_for_add(
-            item: &crate::api::types::collections::CollectionManualAddItem,
-            resolved: &CollectionResolvedItem,
-        ) -> String {
-            item.title_override
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .or_else(|| resolved.title.clone())
-                .unwrap_or_else(|| item.media_id.to_string())
-        }
-
-        fn final_order_with_insertions(
-            existing: &[CollectionMemberKey],
-            insertions: &[(CollectionMemberKey, Option<u32>, usize)],
-        ) -> Vec<CollectionMemberKey> {
-            let mut order = existing.to_vec();
-            let mut positioned: Vec<_> = insertions
-                .iter()
-                .filter_map(|(key, position, index)| {
-                    position.map(|position| (key.clone(), position, *index))
-                })
-                .collect();
-            positioned.sort_by_key(|(_, position, index)| (*position, *index));
-            for (key, position, _) in positioned {
-                let index = (position as usize).min(order.len());
-                order.insert(index, key);
-            }
-            for (key, position, _) in insertions {
-                if position.is_none() {
-                    order.push(key.clone());
-                }
-            }
-            order
-        }
-
-        fn final_order_with_reorder(
-            collection_id: CollectionId,
-            existing: &[CollectionMemberKey],
-            ordering: &[CollectionManualOrder],
-        ) -> Result<Vec<CollectionMemberKey>> {
-            let mut seen_keys = HashSet::new();
-            let mut seen_positions = HashSet::new();
-            for order in ordering {
-                if !seen_keys.insert(order.item_key.clone()) {
-                    return Err(MediaError::InvalidMedia(
-                        "manual reorder contains duplicate item keys"
-                            .to_string(),
-                    ));
-                }
-                if !seen_positions.insert(order.position) {
-                    return Err(MediaError::InvalidMedia(
-                        "manual reorder contains duplicate positions"
-                            .to_string(),
-                    ));
-                }
-            }
-
-            let existing_set: HashSet<_> = existing.iter().cloned().collect();
-            let missing: Vec<_> = ordering
-                .iter()
-                .filter(|order| !existing_set.contains(&order.item_key))
-                .map(|order| order.item_key.clone())
-                .collect();
-            if !missing.is_empty() {
-                return Err(collection_manual_membership_conflict(
-                    CollectionManualMembershipConflictCode::MissingMember,
-                    collection_id,
-                    None,
-                    missing,
-                    "manual reorder references members that are not in the collection",
-                ));
-            }
-
-            let requested: HashSet<_> = ordering
-                .iter()
-                .map(|order| order.item_key.clone())
-                .collect();
-            let mut order: Vec<_> = existing
-                .iter()
-                .filter(|key| !requested.contains(*key))
-                .cloned()
-                .collect();
-            let mut placements = ordering.to_vec();
-            placements.sort_by_key(|order| order.position);
-            for placement in placements {
-                let index = (placement.position as usize).min(order.len());
-                order.insert(index, placement.item_key);
-            }
-            Ok(order)
-        }
-
-        fn apply_order(
-            items: &mut [CollectionMember],
-            order: &[CollectionMemberKey],
-        ) -> Result<()> {
-            let positions: HashMap<_, _> = order
-                .iter()
-                .enumerate()
-                .map(|(index, key)| {
-                    Ok((key.clone(), manual_position_for_index(index)?))
-                })
-                .collect::<Result<HashMap<_, _>>>()?;
-            for item in items {
-                if let Some(position) = positions.get(&item.item_key) {
-                    item.position = u32::try_from(*position).map_err(|_| {
-                        MediaError::InvalidMedia(
-                            "manual collection order key exceeds u32"
-                                .to_string(),
-                        )
-                    })?;
-                }
-            }
-            Ok(())
         }
 
         fn visible_items(
@@ -761,33 +664,10 @@ pub mod test_support {
                 parse_collection_cursor(request.page.cursor.as_deref())?;
             let limit = clamp_collection_page_limit(request.page.limit);
             let state = self.state.lock().expect("collection state lock");
-            let mut items =
+            let items =
                 state.items.get(id.as_uuid()).cloned().unwrap_or_default();
-            for item in &mut items {
-                let resolved =
-                    state.resolved.get(&item.item_key).cloned().unwrap_or_else(
-                        || Self::missing_resolved_item(item.media_id),
-                    );
-                if let Some(title) = resolved.title {
-                    item.title = title;
-                }
-                item.subtitle = resolved.subtitle;
-                item.availability = resolved.availability;
-            }
-            items.sort_by(|a, b| {
-                a.position
-                    .cmp(&b.position)
-                    .then_with(|| a.item_key.cmp(&b.item_key))
-            });
-            let mut filtered =
+            let filtered =
                 Self::visible_items(&items, mode, request.availability);
-            for (index, item) in filtered.iter_mut().enumerate() {
-                item.position = u32::try_from(index).map_err(|_| {
-                    MediaError::InvalidMedia(
-                        "collection item position exceeds u32".to_string(),
-                    )
-                })?;
-            }
             let total = filtered.len();
             Ok(ListCollectionItemsResponse {
                 collection_id: id,
@@ -808,223 +688,112 @@ pub mod test_support {
             added_by: Option<Uuid>,
         ) -> Result<ManualAddCollectionItemsResponse> {
             let mut state = self.state.lock().expect("collection state lock");
-            let collection_uuid = id.to_uuid();
-            let detail =
-                state.collections.get(&collection_uuid).ok_or_else(|| {
+            let summary = state
+                .collections
+                .get(id.as_uuid())
+                .ok_or_else(|| {
                     MediaError::NotFound(format!("collection {id} not found"))
-                })?;
-            Self::ensure_manual_editable(detail, request.expected_revision)?;
-            let media_scope = detail.summary.media_scope.clone();
-            let duplicate_policy = request
-                .duplicate_policy
-                .unwrap_or(detail.summary.duplicate_policy);
-            let current_version = Self::current_version(detail);
-            let resolved_items = state.resolved.clone();
-            let existing_items = state
-                .items
-                .get(&collection_uuid)
-                .cloned()
-                .unwrap_or_default();
-            let existing_keys: HashSet<_> = existing_items
-                .iter()
-                .map(|item| item.item_key.clone())
-                .collect();
-            let existing_order: Vec<_> = existing_items
-                .iter()
-                .map(|item| item.item_key.clone())
-                .collect();
-            let mut seen_input = HashSet::new();
-            let mut duplicate_keys = Vec::new();
-            let mut result_slots = vec![None; request.items.len()];
-            let mut candidates: Vec<(
-                usize,
-                CollectionManualAddItem,
-                CollectionMemberKey,
-            )> = Vec::new();
+                })?
+                .summary
+                .clone();
+            if let Some(expected) = request.expected_revision
+                && expected != summary.version.revision
+            {
+                return Err(MediaError::Conflict(format!(
+                    "collection {id} revision conflict"
+                )));
+            }
 
-            for (index, item) in request.items.iter().enumerate() {
+            let policy =
+                request.duplicate_policy.unwrap_or(summary.duplicate_policy);
+            let mut items =
+                state.items.get(id.as_uuid()).cloned().unwrap_or_default();
+            let mut results = Vec::with_capacity(request.items.len());
+            let mut changed = false;
+            for item in request.items {
                 let item_key = CollectionMemberKey::for_media(&item.media_id);
-                if !media_scope.allows_media(&item.media_id) {
-                    return Err(MediaError::InvalidMedia(format!(
-                        "collection {id} media scope does not allow {item_key}"
-                    )));
-                }
-
-                let duplicate = existing_keys.contains(&item_key)
-                    || !seen_input.insert(item_key.clone());
-                if duplicate {
-                    duplicate_keys.push(item_key.clone());
-                    if matches!(
-                        duplicate_policy,
-                        CollectionDuplicatePolicy::DeduplicateMedia
-                            | CollectionDuplicatePolicy::DeduplicateLogical
-                    ) {
-                        let status = if existing_keys.contains(&item_key) {
-                            CollectionManualAddStatus::AlreadyPresent
-                        } else {
-                            CollectionManualAddStatus::DuplicateSkipped
-                        };
-                        result_slots[index] = Some(CollectionManualAddResult {
-                            item_key,
-                            status,
-                            message: Some(
-                                "manual collection already contains this item"
-                                    .to_string(),
-                            ),
-                        });
+                let exists = items.iter().any(|member| {
+                    member.item_key == item_key
+                        || member.media_id == item.media_id
+                });
+                if exists {
+                    if policy == CollectionDuplicatePolicy::RejectDuplicates {
+                        return Err(MediaError::Conflict(format!(
+                            "collection {id} already contains {item_key}"
+                        )));
                     }
+                    results.push(CollectionManualAddResult {
+                        item_key,
+                        status: CollectionManualAddStatus::DuplicateSkipped,
+                        message: Some(
+                            "Item is already present in this collection"
+                                .to_string(),
+                        ),
+                    });
                     continue;
                 }
-
-                candidates.push((index, item.clone(), item_key));
-            }
-
-            if !duplicate_keys.is_empty()
-                && !matches!(
-                    duplicate_policy,
-                    CollectionDuplicatePolicy::DeduplicateMedia
-                        | CollectionDuplicatePolicy::DeduplicateLogical
-                )
-            {
-                duplicate_keys.sort();
-                duplicate_keys.dedup();
-                let code = if duplicate_policy
-                    == CollectionDuplicatePolicy::KeepAll
-                {
-                    CollectionManualMembershipConflictCode::UnsupportedDuplicatePolicy
-                } else {
-                    CollectionManualMembershipConflictCode::DuplicateMember
-                };
-                return Err(collection_manual_membership_conflict(
-                    code,
-                    id,
-                    Some(duplicate_policy),
-                    duplicate_keys,
-                    "manual collection already contains one or more requested items",
-                ));
-            }
-
-            let has_positioned = candidates
-                .iter()
-                .any(|(_, item, _)| item.position.is_some());
-            let final_order = if has_positioned {
-                let insertions: Vec<_> = candidates
-                    .iter()
-                    .map(|(index, item, key)| {
-                        (key.clone(), item.position, *index)
-                    })
-                    .collect();
-                Some(Self::final_order_with_insertions(
-                    &existing_order,
-                    &insertions,
-                ))
-            } else {
-                None
-            };
-
-            let items = state.items.entry(collection_uuid).or_default();
-            let mut next_position = items
-                .iter()
-                .map(|item| u64::from(item.position))
-                .max()
-                .unwrap_or(0)
-                .saturating_add(1000);
-            for (candidate_index, item, item_key) in candidates {
-                let resolved =
-                    resolved_items.get(&item_key).cloned().unwrap_or_else(
-                        || Self::missing_resolved_item(item.media_id),
-                    );
-                let position = if let Some(order) = final_order.as_ref() {
-                    let order_index = order
+                let position = item.position.unwrap_or_else(|| {
+                    items
                         .iter()
-                        .position(|key| key == &item_key)
-                        .ok_or_else(|| {
-                            MediaError::Internal(
-                                "new manual member was missing from final order"
-                                    .to_string(),
-                            )
-                        })?;
-                    manual_position_for_index(order_index)?
-                } else {
-                    let position = next_position;
-                    next_position = next_position.saturating_add(1000);
-                    position
-                };
-                let position = u32::try_from(position).map_err(|_| {
-                    MediaError::InvalidMedia(
-                        "manual collection order key exceeds u32".to_string(),
-                    )
-                })?;
-                items.push(CollectionMember {
-                    item_key: item_key.clone(),
-                    media_id: item.media_id,
-                    media_type: CollectionMediaKind::from(&item.media_id),
-                    title: Self::title_for_add(&item, &resolved),
-                    subtitle: resolved.subtitle,
-                    position,
-                    sort_key: Some(item_key.to_string()),
-                    availability: resolved.availability,
-                    added_at: Some(Utc::now()),
-                    added_by,
+                        .map(|member| member.position)
+                        .max()
+                        .unwrap_or(0)
+                        .saturating_add(1)
                 });
-                result_slots[candidate_index] =
-                    Some(CollectionManualAddResult {
-                        item_key,
-                        status: CollectionManualAddStatus::Added,
-                        message: None,
-                    });
+                let resolved = state.resolved.get(&item_key).cloned();
+                let availability = resolved
+                    .as_ref()
+                    .map(|item| item.availability.clone())
+                    .unwrap_or_default();
+                let mut member = CollectionMember::new(
+                    item.media_id,
+                    item.title_override
+                        .or_else(|| {
+                            resolved
+                                .as_ref()
+                                .and_then(|item| item.title.clone())
+                        })
+                        .unwrap_or_else(|| item.media_id.to_string()),
+                    position,
+                );
+                member.subtitle = resolved.and_then(|item| item.subtitle);
+                member.availability = availability;
+                member.added_at = Some(Utc::now());
+                member.added_by = added_by;
+                items.push(member);
+                results.push(CollectionManualAddResult {
+                    item_key,
+                    status: CollectionManualAddStatus::Added,
+                    message: None,
+                });
+                changed = true;
             }
 
-            if let Some(order) = final_order.as_ref() {
-                Self::apply_order(items, order)?;
-            }
-            items.sort_by(|a, b| {
-                a.position
-                    .cmp(&b.position)
-                    .then_with(|| a.item_key.cmp(&b.item_key))
-            });
-            let item_count = u32::try_from(items.len()).map_err(|_| {
-                MediaError::InvalidMedia(
-                    "collection item count exceeds u32".to_string(),
-                )
-            })?;
-            let changed = result_slots.iter().any(|result| {
-                matches!(
-                    result,
-                    Some(CollectionManualAddResult {
-                        status: CollectionManualAddStatus::Added,
-                        ..
-                    })
-                )
-            });
             let version = if changed {
+                let item_count = items.len() as u32;
+                state.items.insert(id.to_uuid(), items);
                 let detail = state
                     .collections
-                    .get_mut(&collection_uuid)
+                    .get_mut(id.as_uuid())
                     .ok_or_else(|| {
                         MediaError::NotFound(format!(
                             "collection {id} not found"
                         ))
                     })?;
+                detail.summary.version.revision += 1;
+                detail.summary.version.etag = Some(format!(
+                    "collection:{}:v{}",
+                    id, detail.summary.version.revision
+                ));
+                detail.summary.timestamps.updated_at = Utc::now();
                 detail.summary.item_count = item_count;
-                Self::bump_collection_version(detail)
+                detail.summary.version.clone()
             } else {
-                current_version
+                summary.version
             };
-
             Ok(ManualAddCollectionItemsResponse {
                 collection_id: id,
-                results: result_slots
-                    .into_iter()
-                    .map(|result| {
-                        result.ok_or_else(|| {
-                            MediaError::Internal(
-                                "manual add result was not recorded"
-                                    .to_string(),
-                            )
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?,
+                results,
                 version,
             })
         }
@@ -1035,61 +804,56 @@ pub mod test_support {
             request: ManualRemoveCollectionItemsRequest,
         ) -> Result<ManualRemoveCollectionItemsResponse> {
             let mut state = self.state.lock().expect("collection state lock");
-            let collection_uuid = id.to_uuid();
+            let current_revision = state
+                .collections
+                .get(id.as_uuid())
+                .ok_or_else(|| {
+                    MediaError::NotFound(format!("collection {id} not found"))
+                })?
+                .summary
+                .version
+                .revision;
+            if let Some(expected) = request.expected_revision
+                && expected != current_revision
+            {
+                return Err(MediaError::Conflict(format!(
+                    "collection {id} revision conflict"
+                )));
+            }
+
+            let mut removed_item_keys = Vec::new();
+            let mut missing_item_keys = Vec::new();
+            let item_count = {
+                let items = state.items.entry(id.to_uuid()).or_default();
+                for item_key in request.item_keys {
+                    let before = items.len();
+                    items.retain(|member| member.item_key != item_key);
+                    if items.len() < before {
+                        removed_item_keys.push(item_key);
+                    } else {
+                        missing_item_keys.push(item_key);
+                    }
+                }
+                items.len() as u32
+            };
             let detail =
-                state.collections.get(&collection_uuid).ok_or_else(|| {
+                state.collections.get_mut(id.as_uuid()).ok_or_else(|| {
                     MediaError::NotFound(format!("collection {id} not found"))
                 })?;
-            Self::ensure_manual_editable(detail, request.expected_revision)?;
-            let current_version = Self::current_version(detail);
-            let requested: HashSet<_> =
-                request.item_keys.iter().cloned().collect();
-            let items = state.items.entry(collection_uuid).or_default();
-            let before = items.len();
-            let mut removed_item_keys = Vec::new();
-            items.retain(|item| {
-                if requested.contains(&item.item_key) {
-                    removed_item_keys.push(item.item_key.clone());
-                    false
-                } else {
-                    true
-                }
-            });
-            removed_item_keys.sort();
-            let removed_set: HashSet<_> =
-                removed_item_keys.iter().cloned().collect();
-            let mut missing_item_keys: Vec<_> = request
-                .item_keys
-                .into_iter()
-                .filter(|key| !removed_set.contains(key))
-                .collect();
-            missing_item_keys.sort();
-            missing_item_keys.dedup();
-            let item_count = u32::try_from(items.len()).map_err(|_| {
-                MediaError::InvalidMedia(
-                    "collection item count exceeds u32".to_string(),
-                )
-            })?;
-            let changed = before != items.len();
-            let version = if changed {
-                let detail = state
-                    .collections
-                    .get_mut(&collection_uuid)
-                    .ok_or_else(|| {
-                        MediaError::NotFound(format!(
-                            "collection {id} not found"
-                        ))
-                    })?;
+            if !removed_item_keys.is_empty() {
+                detail.summary.version.revision += 1;
+                detail.summary.version.etag = Some(format!(
+                    "collection:{}:v{}",
+                    id, detail.summary.version.revision
+                ));
+                detail.summary.timestamps.updated_at = Utc::now();
                 detail.summary.item_count = item_count;
-                Self::bump_collection_version(detail)
-            } else {
-                current_version
-            };
+            }
             Ok(ManualRemoveCollectionItemsResponse {
                 collection_id: id,
                 removed_item_keys,
                 missing_item_keys,
-                version,
+                version: detail.summary.version.clone(),
             })
         }
 
@@ -1099,58 +863,72 @@ pub mod test_support {
             request: ManualReorderCollectionItemsRequest,
         ) -> Result<ManualReorderCollectionItemsResponse> {
             let mut state = self.state.lock().expect("collection state lock");
-            let collection_uuid = id.to_uuid();
+            let current_revision = state
+                .collections
+                .get(id.as_uuid())
+                .ok_or_else(|| {
+                    MediaError::NotFound(format!("collection {id} not found"))
+                })?
+                .summary
+                .version
+                .revision;
+            if let Some(expected) = request.expected_revision
+                && expected != current_revision
+            {
+                return Err(MediaError::Conflict(format!(
+                    "collection {id} revision conflict"
+                )));
+            }
+            let mut changed = false;
+            if let Some(items) = state.items.get_mut(id.as_uuid()) {
+                for order in request.ordering {
+                    if let Some(member) = items
+                        .iter_mut()
+                        .find(|member| member.item_key == order.item_key)
+                        && member.position != order.position
+                    {
+                        member.position = order.position;
+                        changed = true;
+                    }
+                }
+            }
             let detail =
-                state.collections.get(&collection_uuid).ok_or_else(|| {
+                state.collections.get_mut(id.as_uuid()).ok_or_else(|| {
                     MediaError::NotFound(format!("collection {id} not found"))
                 })?;
-            Self::ensure_manual_editable(detail, request.expected_revision)?;
-            let current_version = Self::current_version(detail);
-            if request.ordering.is_empty() {
-                return Ok(ManualReorderCollectionItemsResponse {
-                    collection_id: id,
-                    version: current_version,
-                });
-            }
-            let items = state.items.entry(collection_uuid).or_default();
-            items.sort_by(|a, b| {
-                a.position
-                    .cmp(&b.position)
-                    .then_with(|| a.item_key.cmp(&b.item_key))
-            });
-            let existing_order: Vec<_> =
-                items.iter().map(|item| item.item_key.clone()).collect();
-            let final_order = Self::final_order_with_reorder(
-                id,
-                &existing_order,
-                &request.ordering,
-            )?;
-            let changed = final_order != existing_order;
             if changed {
-                Self::apply_order(items, &final_order)?;
-                items.sort_by(|a, b| {
-                    a.position
-                        .cmp(&b.position)
-                        .then_with(|| a.item_key.cmp(&b.item_key))
-                });
+                detail.summary.version.revision += 1;
+                detail.summary.version.etag = Some(format!(
+                    "collection:{}:v{}",
+                    id, detail.summary.version.revision
+                ));
+                detail.summary.timestamps.updated_at = Utc::now();
             }
-            let version = if changed {
-                let detail = state
-                    .collections
-                    .get_mut(&collection_uuid)
-                    .ok_or_else(|| {
-                        MediaError::NotFound(format!(
-                            "collection {id} not found"
-                        ))
-                    })?;
-                Self::bump_collection_version(detail)
-            } else {
-                current_version
-            };
             Ok(ManualReorderCollectionItemsResponse {
                 collection_id: id,
-                version,
+                version: detail.summary.version.clone(),
             })
+        }
+
+        async fn preview_collection_rule(
+            &self,
+            _request: PreviewCollectionRuleRequest,
+            _mode: CollectionReadMode,
+        ) -> Result<PreviewCollectionRuleResponse> {
+            Err(MediaError::InvalidMedia(
+                "dynamic collection preview requires the Postgres collection repository"
+                    .to_string(),
+            ))
+        }
+
+        async fn refresh_collection_rule(
+            &self,
+            id: CollectionId,
+            _request: RefreshCollectionRuleRequest,
+        ) -> Result<RefreshCollectionRuleResponse> {
+            Err(MediaError::InvalidMedia(format!(
+                "dynamic collection materialization for {id} requires the Postgres collection repository"
+            )))
         }
 
         async fn resolve_collection_items(
@@ -1180,317 +958,84 @@ pub mod test_support {
                 })
                 .collect())
         }
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use ferrex_model::{EpisodeID, MediaID, MovieID, SeriesID};
-    use uuid::Uuid;
-
-    use super::test_support::{
-        CollectionDefinitionRequestBuilder, InMemoryCollectionRepository,
-    };
-    use super::*;
-    use crate::api::types::collections::{
-        CollectionManualMembershipConflict, CollectionManualOrder,
-        CollectionMediaKind, CollectionMediaScope,
-        CollectionMemberAvailability, CollectionMemberAvailabilityStatus,
-        ManualAddCollectionItemsRequest, ManualRemoveCollectionItemsRequest,
-        ManualReorderCollectionItemsRequest,
-    };
-
-    fn movie_id(suffix: u128) -> MediaID {
-        MediaID::Movie(MovieID(Uuid::from_u128(
-            0x10000000000070008000000000000000 + suffix,
-        )))
-    }
-
-    fn episode_id(suffix: u128) -> MediaID {
-        MediaID::Episode(EpisodeID(Uuid::from_u128(
-            0x20000000000070008000000000000000 + suffix,
-        )))
-    }
-
-    fn series_id(suffix: u128) -> MediaID {
-        MediaID::Series(SeriesID(Uuid::from_u128(
-            0x30000000000070008000000000000000 + suffix,
-        )))
-    }
-
-    fn resolved(media_id: MediaID, title: &str) -> CollectionResolvedItem {
-        CollectionResolvedItem {
-            item_key: CollectionMemberKey::for_media(&media_id),
-            media_id,
-            title: Some(title.to_string()),
-            subtitle: None,
-            availability: CollectionMemberAvailability::default(),
-        }
-    }
-
-    fn tombstoned(media_id: MediaID, title: &str) -> CollectionResolvedItem {
-        CollectionResolvedItem {
-            item_key: CollectionMemberKey::for_media(&media_id),
-            media_id,
-            title: Some(title.to_string()),
-            subtitle: None,
-            availability: CollectionMemberAvailability {
-                status: CollectionMemberAvailabilityStatus::Tombstoned,
-                reason: Some("fixture tombstone".to_string()),
-                checked_at: None,
-            },
-        }
-    }
-
-    fn duplicate_conflict_code(
-        err: MediaError,
-    ) -> CollectionManualMembershipConflictCode {
-        let MediaError::Conflict(message) = err else {
-            panic!("expected conflict error");
-        };
-        let conflict: CollectionManualMembershipConflict =
-            serde_json::from_str(&message)
-                .expect("structured conflict payload");
-        conflict.code
-    }
-
-    #[tokio::test]
-    async fn manual_membership_add_remove_and_reorder_items() -> Result<()> {
-        let repo = InMemoryCollectionRepository::new();
-        let collection = repo
-            .create_collection(
-                CollectionDefinitionRequestBuilder::new("Manual picks").build(),
-            )
-            .await?;
-        let first = movie_id(1);
-        let second = episode_id(2);
-        repo.set_resolved_item(resolved(first, "First movie"));
-        repo.set_resolved_item(resolved(second, "Second episode"));
-
-        let added = repo
-            .manual_add_collection_items(
-                collection.summary.identity.id,
-                ManualAddCollectionItemsRequest {
-                    items: vec![
-                        crate::api::types::collections::CollectionManualAddItem {
-                            media_id: first,
-                            title_override: None,
-                            position: None,
-                        },
-                        crate::api::types::collections::CollectionManualAddItem {
-                            media_id: second,
-                            title_override: None,
-                            position: None,
-                        },
-                    ],
-                    duplicate_policy: None,
-                    expected_revision: Some(0),
-                },
-                None,
-            )
-            .await?;
-        assert_eq!(added.version.revision, 1);
-        assert_eq!(added.results.len(), 2);
-
-        repo.manual_reorder_collection_items(
-            collection.summary.identity.id,
-            ManualReorderCollectionItemsRequest {
-                ordering: vec![CollectionManualOrder {
-                    item_key: CollectionMemberKey::for_media(&second),
-                    position: 0,
-                }],
-                expected_revision: Some(1),
-            },
-        )
-        .await?;
-
-        let reordered = repo
-            .list_collection_items(
-                collection.summary.identity.id,
-                ListCollectionItemsRequest::default(),
-                CollectionReadMode::Edit,
-            )
-            .await?;
-        assert_eq!(reordered.items.len(), 2);
-        assert_eq!(reordered.items[0].media_id, second);
-        assert_eq!(reordered.items[1].media_id, first);
-
-        let removed = repo
-            .manual_remove_collection_items(
-                collection.summary.identity.id,
-                ManualRemoveCollectionItemsRequest {
-                    item_keys: vec![CollectionMemberKey::for_media(&second)],
-                    expected_revision: Some(2),
-                },
-            )
-            .await?;
-        assert_eq!(removed.version.revision, 3);
-        assert_eq!(removed.removed_item_keys.len(), 1);
-        let remaining = repo
-            .list_collection_items(
-                collection.summary.identity.id,
-                ListCollectionItemsRequest::default(),
-                CollectionReadMode::Edit,
-            )
-            .await?;
-        assert_eq!(remaining.items.len(), 1);
-        assert_eq!(remaining.items[0].media_id, first);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn manual_membership_validates_scope_duplicates_and_stale_versions()
-    -> Result<()> {
-        let repo = InMemoryCollectionRepository::new();
-        let collection = repo
-            .create_collection(
-                CollectionDefinitionRequestBuilder::new("Mixed scope")
-                    .media_scope(CollectionMediaScope::Types {
-                        media_types: vec![
-                            CollectionMediaKind::Movie,
-                            CollectionMediaKind::Episode,
-                        ],
-                    })
-                    .build(),
-            )
-            .await?;
-        let movie = movie_id(10);
-        let episode = episode_id(11);
-        let series = series_id(12);
-        repo.set_resolved_item(resolved(movie, "Allowed movie"));
-        repo.set_resolved_item(resolved(episode, "Allowed episode"));
-
-        repo.manual_add_collection_items(
-            collection.summary.identity.id,
-            ManualAddCollectionItemsRequest {
-                items: vec![
-                    crate::api::types::collections::CollectionManualAddItem {
-                        media_id: movie,
-                        title_override: None,
-                        position: None,
+        async fn ensure_system_collections(
+            &self,
+            definitions: &[SystemCollectionDefinition],
+        ) -> Result<SystemCollectionSeedReport> {
+            let mut state = self.state.lock().expect("collection state lock");
+            let now = Utc::now();
+            for definition in definitions {
+                let existing_id =
+                    state.collections.values().find_map(|detail| {
+                        (detail.summary.identity.stable_key
+                            == definition.stable_key)
+                            .then_some(detail.summary.identity.id)
+                    });
+                let id = existing_id.unwrap_or_else(CollectionId::new);
+                let placement = ShelfPlacement {
+                    schema_version: SHELF_PLACEMENT_SCHEMA_VERSION,
+                    id: ShelfPlacementId::new(),
+                    collection_id: id,
+                    surface: definition.placement.surface,
+                    shelf_key: definition.placement.shelf_key.clone(),
+                    position: definition.placement.position,
+                    pinned: definition.placement.pinned,
+                    presentation: definition.presentation(),
+                    visibility: definition.visibility(),
+                    created_at: now,
+                    updated_at: now,
+                };
+                let summary = CollectionSummary {
+                    identity: CollectionIdentity {
+                        id,
+                        stable_key: definition.stable_key.clone(),
+                        external_key: None,
                     },
-                ],
-                duplicate_policy: None,
-                expected_revision: Some(0),
-            },
-            None,
-        )
-        .await?;
-
-        let scope_error = repo
-            .manual_add_collection_items(
-                collection.summary.identity.id,
-                ManualAddCollectionItemsRequest {
-                    items: vec![crate::api::types::collections::CollectionManualAddItem {
-                        media_id: series,
-                        title_override: None,
-                        position: None,
-                    }],
-                    duplicate_policy: None,
-                    expected_revision: Some(1),
-                },
-                None,
-            )
-            .await
-            .expect_err("series is outside the collection media scope");
-        assert!(matches!(scope_error, MediaError::InvalidMedia(_)));
-
-        let duplicate = repo
-            .manual_add_collection_items(
-                collection.summary.identity.id,
-                ManualAddCollectionItemsRequest {
-                    items: vec![crate::api::types::collections::CollectionManualAddItem {
-                        media_id: movie,
-                        title_override: None,
-                        position: None,
-                    }],
-                    duplicate_policy: None,
-                    expected_revision: Some(1),
-                },
-                None,
-            )
-            .await
-            .expect_err("duplicates reject by default");
-        assert_eq!(
-            duplicate_conflict_code(duplicate),
-            CollectionManualMembershipConflictCode::DuplicateMember
-        );
-
-        let stale = repo
-            .manual_add_collection_items(
-                collection.summary.identity.id,
-                ManualAddCollectionItemsRequest {
-                    items: vec![crate::api::types::collections::CollectionManualAddItem {
-                        media_id: episode,
-                        title_override: None,
-                        position: None,
-                    }],
-                    duplicate_policy: None,
-                    expected_revision: Some(0),
-                },
-                None,
-            )
-            .await
-            .expect_err("stale collection revision should conflict");
-        assert!(matches!(stale, MediaError::Conflict(_)));
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn manual_membership_preserves_unavailable_items_for_edit_reads()
-    -> Result<()> {
-        let repo = InMemoryCollectionRepository::new();
-        let collection = repo
-            .create_collection(
-                CollectionDefinitionRequestBuilder::new("Unavailable picks")
-                    .build(),
-            )
-            .await?;
-        let unavailable = movie_id(20);
-        repo.set_resolved_item(tombstoned(unavailable, "Tombstoned movie"));
-
-        repo.manual_add_collection_items(
-            collection.summary.identity.id,
-            ManualAddCollectionItemsRequest {
-                items: vec![
-                    crate::api::types::collections::CollectionManualAddItem {
-                        media_id: unavailable,
-                        title_override: None,
-                        position: None,
+                    title: definition.title.clone(),
+                    description: Some(definition.description()),
+                    kind: definition.kind(),
+                    source: definition.source(),
+                    owner: definition.owner(),
+                    scope: definition.scope,
+                    visibility: definition.visibility(),
+                    presentation: definition.presentation(),
+                    media_scope: definition.media_scope.clone(),
+                    duplicate_policy: definition.duplicate_policy(),
+                    artwork: Default::default(),
+                    theme: Default::default(),
+                    provenance: definition.provenance(),
+                    version: CollectionVersion::default(),
+                    timestamps: CollectionTimestamps {
+                        created_at: now,
+                        updated_at: now,
+                        archived_at: None,
                     },
-                ],
-                duplicate_policy: None,
-                expected_revision: Some(0),
-            },
-            None,
-        )
-        .await?;
+                    item_count: 0,
+                    materialization: CollectionMaterializationStatus::default(),
+                };
+                state.collections.insert(
+                    id.to_uuid(),
+                    CollectionDetail {
+                        summary,
+                        rule: Some(definition.rule.clone()),
+                        items_preview: Vec::new(),
+                        shelf_placements: vec![placement],
+                    },
+                );
+            }
 
-        let normal = repo
-            .list_collection_items(
-                collection.summary.identity.id,
-                ListCollectionItemsRequest::default(),
-                CollectionReadMode::Normal,
-            )
-            .await?;
-        assert!(normal.items.is_empty());
+            Ok(SystemCollectionSeedReport {
+                requested: definitions.len(),
+                upserted: definitions.len(),
+            })
+        }
 
-        let edit = repo
-            .list_collection_items(
-                collection.summary.identity.id,
-                ListCollectionItemsRequest::default(),
-                CollectionReadMode::Edit,
-            )
-            .await?;
-        assert_eq!(edit.items.len(), 1);
-        assert_eq!(edit.items[0].media_id, unavailable);
-        assert_eq!(
-            edit.items[0].availability.status,
-            CollectionMemberAvailabilityStatus::Tombstoned
-        );
-
-        Ok(())
+        async fn mark_system_collections_stale(
+            &self,
+            _request: MarkSystemCollectionsStaleRequest,
+        ) -> Result<SystemCollectionsStaleResponse> {
+            Ok(SystemCollectionsStaleResponse::default())
+        }
     }
 }

@@ -1,0 +1,185 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                er.id,\n                mf.library_id,\n                COALESCE(em.name, 'Episode ' || er.episode_number::text) AS \"title!\",\n                ('S' || er.season_number::text || ' E' || er.episode_number::text) AS \"subtitle?\",\n                em.overview AS \"overview?\",\n                em.air_date AS \"release_date?\",\n                er.discovered_at AS \"discovered_at!\",\n                mf.discovered_at AS \"added_at!\",\n                er.created_at AS \"created_at?\",\n                er.updated_at AS \"updated_at!\",\n                em.runtime AS \"runtime_minutes?\",\n                em.vote_average::double precision AS \"rating?\",\n                NULL::double precision AS \"popularity?\",\n                NULL::text AS \"content_rating?\",\n                em.tmdb_id AS \"tmdb_id?\",\n                mf.file_size AS \"file_size_bytes!\",\n                mf.is_available AS \"is_available!\",\n                mf.tombstone_reason AS \"tombstone_reason?\",\n                ARRAY(\n                    SELECT lower(sg.name)\n                    FROM series_genres sg\n                    WHERE sg.series_id = er.series_id\n                    ORDER BY lower(sg.name), sg.genre_id\n                ) AS \"genres!\",\n                ARRAY(\n                    SELECT lower(ek.name)\n                    FROM episode_keywords ek\n                    WHERE ek.episode_id = er.id\n                    ORDER BY lower(ek.name), ek.keyword_id\n                ) AS \"keywords!\",\n                ARRAY(\n                    SELECT lower(actor.name)\n                    FROM (\n                        SELECT p.name, ec.person_tmdb_id\n                        FROM episode_cast ec\n                        JOIN persons p ON p.id = ec.person_id\n                        WHERE ec.episode_id = er.id\n                        UNION\n                        SELECT p.name, egs.person_tmdb_id\n                        FROM episode_guest_stars egs\n                        JOIN persons p ON p.id = egs.person_id\n                        WHERE egs.episode_id = er.id\n                    ) actor\n                    ORDER BY lower(actor.name), actor.person_tmdb_id\n                ) AS \"actor_names!\",\n                ARRAY(\n                    SELECT actor.person_tmdb_id\n                    FROM (\n                        SELECT ec.person_tmdb_id\n                        FROM episode_cast ec\n                        WHERE ec.episode_id = er.id\n                        UNION\n                        SELECT egs.person_tmdb_id\n                        FROM episode_guest_stars egs\n                        WHERE egs.episode_id = er.id\n                    ) actor\n                    ORDER BY actor.person_tmdb_id\n                ) AS \"actor_tmdb_ids!\",\n                ARRAY(\n                    SELECT lower(p.name)\n                    FROM episode_crew ec\n                    JOIN persons p ON p.id = ec.person_id\n                    WHERE ec.episode_id = er.id\n                      AND lower(ec.job) = 'director'\n                    ORDER BY lower(p.name), ec.person_tmdb_id\n                ) AS \"director_names!\",\n                ARRAY(\n                    SELECT ec.person_tmdb_id\n                    FROM episode_crew ec\n                    WHERE ec.episode_id = er.id\n                      AND lower(ec.job) = 'director'\n                    ORDER BY ec.person_tmdb_id\n                ) AS \"director_tmdb_ids!\",\n                uwp.position::double precision AS \"watch_position?\",\n                uwp.duration::double precision AS \"watch_duration?\",\n                uwp.last_watched AS \"last_watched?\",\n                ucm.completed_at AS \"completed_at?\"\n            FROM episode_references er\n            JOIN media_files mf ON mf.id = er.file_id\n            LEFT JOIN episode_metadata em ON em.episode_id = er.id\n            LEFT JOIN user_watch_progress uwp\n              ON $1::uuid IS NOT NULL\n             AND uwp.user_id = $1\n             AND uwp.media_uuid = er.id\n             AND uwp.media_type = $2\n            LEFT JOIN user_completed_media ucm\n              ON $1::uuid IS NOT NULL\n             AND ucm.user_id = $1\n             AND ucm.media_uuid = er.id\n             AND ucm.media_type = $2\n            ORDER BY er.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "subtitle?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "overview?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "release_date?",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 6,
+        "name": "discovered_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "added_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "runtime_minutes?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "rating?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 12,
+        "name": "popularity?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 13,
+        "name": "content_rating?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "tmdb_id?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 15,
+        "name": "file_size_bytes!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 16,
+        "name": "is_available!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "tombstone_reason?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "genres!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 19,
+        "name": "keywords!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 20,
+        "name": "actor_names!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 21,
+        "name": "actor_tmdb_ids!",
+        "type_info": "Int8Array"
+      },
+      {
+        "ordinal": 22,
+        "name": "director_names!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 23,
+        "name": "director_tmdb_ids!",
+        "type_info": "Int8Array"
+      },
+      {
+        "ordinal": 24,
+        "name": "watch_position?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 25,
+        "name": "watch_duration?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 26,
+        "name": "last_watched?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 27,
+        "name": "completed_at?",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      null,
+      null,
+      null,
+      true,
+      false,
+      false,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "7e877a43558ae98aed35c12f46398dd3a18fbf95cbdc9b7d168999d107b1ba71"
+}

@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                state::text AS \"state!\",\n                rule_hash,\n                evaluated_at,\n                expires_at,\n                error_message,\n                total_count,\n                visible_count\n            FROM collection_materializations\n            WHERE collection_id = $1\n            ORDER BY updated_at DESC, id DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "rule_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "evaluated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "total_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "visible_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "4ba5bb670063b4c1eb9c764d62993a46ea5ae284e15693e56868af972cf6cb5d"
+}

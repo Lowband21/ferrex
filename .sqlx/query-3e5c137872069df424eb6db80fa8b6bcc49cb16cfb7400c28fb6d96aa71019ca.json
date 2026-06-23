@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO collection_materialized_items (\n                    materialization_id,\n                    collection_id,\n                    materialization_key,\n                    item_key,\n                    media_type,\n                    media_id,\n                    position,\n                    order_key,\n                    visible,\n                    hidden_reason,\n                    evaluated_at\n                ) VALUES (\n                    $1, $2, $3, $4, ($5::text)::media_type, $6, $7, $8, $9, $10, NOW()\n                )\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3e5c137872069df424eb6db80fa8b6bcc49cb16cfb7400c28fb6d96aa71019ca"
+}

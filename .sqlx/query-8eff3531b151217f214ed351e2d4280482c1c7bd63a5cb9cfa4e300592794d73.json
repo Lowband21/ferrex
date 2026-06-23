@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT materialization_scope, materialization_key, user_id\n        FROM collection_materializations\n        WHERE collection_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "materialization_scope",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "materialization_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8eff3531b151217f214ed351e2d4280482c1c7bd63a5cb9cfa4e300592794d73"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM collection_materialized_items\n            WHERE materialization_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e2135ea4677c447239dc14a6d6b9ff26b2edaeeed44ac95d4e95e6e3863f8c37"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                cd.id,\n                cd.stable_key,\n                cd.external_key,\n                cd.title,\n                cd.description,\n                cd.kind::text AS \"kind!\",\n                cd.source::text AS \"source!\",\n                cd.owner_type::text AS \"owner_type!\",\n                cd.owner_user_id,\n                cd.owner_device_id,\n                cd.owner_display_name,\n                cd.scope::text AS \"scope!\",\n                cd.visibility::text AS \"visibility!\",\n                cd.presentation::text AS \"presentation!\",\n                cd.media_scope,\n                cd.duplicate_policy::text AS \"duplicate_policy!\",\n                cd.artwork,\n                cd.theme,\n                cd.provenance,\n                cd.contract_version,\n                cd.revision,\n                cd.etag,\n                cd.created_at,\n                cd.updated_at,\n                cd.archived_at,\n                COALESCE(cmm.item_count, 0)::bigint AS \"item_count!\",\n                cm.state::text AS \"materialization_state?\",\n                cm.visible_count AS \"materialization_item_count?\",\n                cm.rule_hash AS \"materialization_rule_hash?\",\n                cm.evaluated_at AS \"materialization_generated_at?\",\n                cm.expires_at AS \"materialization_expires_at?\",\n                cm.error_message AS \"materialization_last_error?\"\n            FROM collection_definitions cd\n            LEFT JOIN (\n                SELECT collection_id, COUNT(*)::bigint AS item_count\n                FROM collection_manual_memberships\n                GROUP BY collection_id\n            ) cmm ON cmm.collection_id = cd.id\n            LEFT JOIN LATERAL (\n                SELECT state, visible_count, rule_hash, evaluated_at, expires_at, error_message\n                FROM collection_materializations\n                WHERE collection_id = cd.id\n                ORDER BY updated_at DESC, id DESC\n                LIMIT 1\n            ) cm ON TRUE\n            WHERE cd.id = $1\n              AND cd.deleted_at IS NULL\n            ",
+  "query": "\n            SELECT\n                cd.id,\n                cd.stable_key,\n                cd.external_key,\n                cd.title,\n                cd.description,\n                cd.kind::text AS \"kind!\",\n                cd.source::text AS \"source!\",\n                cd.owner_type::text AS \"owner_type!\",\n                cd.owner_user_id,\n                cd.owner_device_id,\n                cd.owner_display_name,\n                cd.scope::text AS \"scope!\",\n                cd.visibility::text AS \"visibility!\",\n                cd.presentation::text AS \"presentation!\",\n                cd.media_scope,\n                cd.duplicate_policy::text AS \"duplicate_policy!\",\n                cd.artwork,\n                cd.theme,\n                cd.provenance,\n                cd.contract_version,\n                cd.revision,\n                cd.etag,\n                cd.created_at,\n                cd.updated_at,\n                cd.archived_at,\n                COALESCE(cmm.item_count, 0)::bigint AS \"item_count!\",\n                cm.state::text AS \"materialization_state?\",\n                cm.total_count AS \"materialization_total_count?\",\n                cm.visible_count AS \"materialization_visible_count?\",\n                cm.rule_hash AS \"materialization_rule_hash?\",\n                cm.evaluated_at AS \"materialization_generated_at?\",\n                cm.expires_at AS \"materialization_expires_at?\",\n                cm.error_message AS \"materialization_last_error?\"\n            FROM collection_definitions cd\n            LEFT JOIN (\n                SELECT collection_id, COUNT(*)::bigint AS item_count\n                FROM collection_manual_memberships\n                GROUP BY collection_id\n            ) cmm ON cmm.collection_id = cd.id\n            LEFT JOIN LATERAL (\n                SELECT state, total_count, visible_count, rule_hash, evaluated_at, expires_at, error_message\n                FROM collection_materializations\n                WHERE collection_id = cd.id\n                ORDER BY updated_at DESC, id DESC\n                LIMIT 1\n            ) cm ON TRUE\n            WHERE cd.id = $1\n              AND cd.deleted_at IS NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -140,26 +140,31 @@
       },
       {
         "ordinal": 27,
-        "name": "materialization_item_count?",
+        "name": "materialization_total_count?",
         "type_info": "Int4"
       },
       {
         "ordinal": 28,
+        "name": "materialization_visible_count?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 29,
         "name": "materialization_rule_hash?",
         "type_info": "Text"
       },
       {
-        "ordinal": 29,
+        "ordinal": 30,
         "name": "materialization_generated_at?",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 30,
+        "ordinal": 31,
         "name": "materialization_expires_at?",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 31,
+        "ordinal": 32,
         "name": "materialization_last_error?",
         "type_info": "Text"
       }
@@ -199,10 +204,11 @@
       null,
       false,
       false,
+      false,
       true,
       true,
       true
     ]
   },
-  "hash": "4c79998dcac6226971f70bf51fcc20ec73a8ea6d3a614800c12fbfab6e332df6"
+  "hash": "2e243d5c33561059e559d17829a6c653c78fddf1310bf3276ad9f7c4f24094f7"
 }

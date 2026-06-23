@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO collection_materializations (\n                collection_id,\n                materialization_scope,\n                materialization_key,\n                user_id,\n                rule_hash,\n                rule_schema_version,\n                materialization_schema_version,\n                state,\n                evaluated_at,\n                error_at,\n                error_code,\n                error_message,\n                total_count,\n                visible_count,\n                updated_at\n            ) VALUES (\n                $1, $2::varchar, $3, $4, $5, $6, $7,\n                'failed', NULL, NOW(), 'evaluation_failed', $8, 0, 0, NOW()\n            )\n            ON CONFLICT (collection_id, materialization_key) DO UPDATE SET\n                rule_hash = EXCLUDED.rule_hash,\n                rule_schema_version = EXCLUDED.rule_schema_version,\n                materialization_schema_version = EXCLUDED.materialization_schema_version,\n                state = 'failed',\n                evaluated_at = NULL,\n                error_at = NOW(),\n                error_code = EXCLUDED.error_code,\n                error_message = EXCLUDED.error_message,\n                total_count = 0,\n                visible_count = 0,\n                expires_at = NULL,\n                updated_at = NOW()\n            RETURNING\n                id,\n                state::text AS \"state!\",\n                rule_hash,\n                evaluated_at,\n                expires_at,\n                error_message,\n                total_count,\n                visible_count\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "rule_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "evaluated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "total_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "visible_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "7e07e6c4933bd9177f66374a135d14b80ce65a5f5ede2a90af52fe64cff6621e"
+}

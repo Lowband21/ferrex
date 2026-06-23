@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE collection_materializations\n            SET\n                state = 'stale',\n                stale_at = COALESCE(stale_at, NOW()),\n                stale_reason = COALESCE(stale_reason, 'collection rule changed'),\n                updated_at = NOW()\n            WHERE collection_id = $1\n              AND rule_hash <> $2\n              AND state <> 'stale'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0a9f8d7f8c200f1b5978559f823719f7bd96eb2880428331190e81fb0eb2022"
+}

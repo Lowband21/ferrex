@@ -1276,6 +1276,10 @@ pub struct CollectionMaterializationStatus {
     pub state: CollectionMaterializationState,
     #[serde(default)]
     pub item_count: u32,
+    #[serde(default)]
+    pub total_count: u32,
+    #[serde(default)]
+    pub visible_count: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1292,6 +1296,8 @@ impl Default for CollectionMaterializationStatus {
             schema_version: COLLECTION_MATERIALIZATION_SCHEMA_VERSION,
             state: CollectionMaterializationState::NotMaterialized,
             item_count: 0,
+            total_count: 0,
+            visible_count: 0,
             rule_hash: None,
             generated_at: None,
             expires_at: None,
