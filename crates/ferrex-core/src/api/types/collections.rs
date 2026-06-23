@@ -45,8 +45,25 @@ fn default_collection_page_limit() -> u16 {
     DEFAULT_COLLECTION_PAGE_LIMIT
 }
 
-fn default_true() -> bool {
-    true
+fn deserialize_u16_from_string_or_number<'de, D>(
+    deserializer: D,
+) -> Result<u16, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrNumber {
+        String(String),
+        Number(u16),
+    }
+
+    match StringOrNumber::deserialize(deserializer)? {
+        StringOrNumber::String(value) => {
+            value.parse::<u16>().map_err(serde::de::Error::custom)
+        }
+        StringOrNumber::Number(value) => Ok(value),
+    }
 }
 
 #[derive(
@@ -401,9 +418,9 @@ impl CollectionMediaScope {
 #[serde(rename_all = "snake_case")]
 pub enum CollectionDuplicatePolicy {
     KeepAll,
+    #[default]
     DeduplicateMedia,
     DeduplicateLogical,
-    #[default]
     RejectDuplicates,
 }
 
@@ -534,19 +551,6 @@ pub struct CollectionMemberAvailability {
     pub checked_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CollectionMemberSourceProvenance {
-    pub source: CollectionSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub imported_from: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub external_media_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub external_id: Option<String>,
-}
-
 impl Default for CollectionMemberAvailability {
     fn default() -> Self {
         Self {
@@ -574,8 +578,6 @@ pub struct CollectionMember {
     pub added_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub added_by: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_provenance: Option<CollectionMemberSourceProvenance>,
 }
 
 impl CollectionMember {
@@ -595,7 +597,6 @@ impl CollectionMember {
             availability: CollectionMemberAvailability::default(),
             added_at: None,
             added_by: None,
-            source_provenance: None,
         }
     }
 }
@@ -644,7 +645,10 @@ pub struct CollectionDetail {
 pub struct CollectionPagination {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    #[serde(default = "default_collection_page_limit")]
+    #[serde(
+        default = "default_collection_page_limit",
+        deserialize_with = "deserialize_u16_from_string_or_number"
+    )]
     pub limit: u16,
 }
 
@@ -679,7 +683,7 @@ impl Default for CollectionPageInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ListCollectionsRequest {
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub page: CollectionPagination,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<CollectionKind>,
@@ -718,7 +722,7 @@ pub struct GetCollectionDetailResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ListCollectionItemsRequest {
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub page: CollectionPagination,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub availability: Option<CollectionMemberAvailabilityStatus>,
@@ -825,6 +829,21 @@ fn default_archive_collection() -> bool {
 pub struct ArchiveCollectionResponse {
     pub collection_id: CollectionId,
     pub archived_at: Option<DateTime<Utc>>,
+    pub version: CollectionVersion,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DeleteCollectionRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeleteCollectionResponse {
+    pub collection_id: CollectionId,
+    pub deleted_at: DateTime<Utc>,
     pub version: CollectionVersion,
 }
 
@@ -1460,11 +1479,8 @@ pub struct ShelfPlacement {
     pub schema_version: u16,
     pub id: ShelfPlacementId,
     pub collection_id: CollectionId,
-    #[serde(default)]
     pub surface: ShelfSurface,
     pub shelf_key: String,
-    #[serde(default)]
-    pub scope: ShelfPlacementScope,
     pub position: u32,
     #[serde(default)]
     pub pinned: bool,
@@ -1472,8 +1488,6 @@ pub struct ShelfPlacement {
     pub presentation: CollectionPresentationMode,
     #[serde(default)]
     pub visibility: CollectionVisibility,
-    #[serde(default)]
-    pub reorder_revision: u64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1491,100 +1505,14 @@ pub enum ShelfSurface {
     Admin,
 }
 
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ShelfPlacementScopeKind {
-    #[default]
-    Global,
-    User,
-    Library,
-    Device,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct ShelfPlacementScope {
-    #[serde(default)]
-    pub scope: ShelfPlacementScopeKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub library_id: Option<LibraryId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device_id: Option<String>,
-}
-
-impl ShelfPlacementScope {
-    pub fn global() -> Self {
-        Self::default()
-    }
-
-    pub fn user(user_id: Uuid) -> Self {
-        Self {
-            scope: ShelfPlacementScopeKind::User,
-            user_id: Some(user_id),
-            library_id: None,
-            device_id: None,
-        }
-    }
-
-    pub fn library(library_id: LibraryId) -> Self {
-        Self {
-            scope: ShelfPlacementScopeKind::Library,
-            user_id: None,
-            library_id: Some(library_id),
-            device_id: None,
-        }
-    }
-
-    pub fn device(device_id: impl Into<String>) -> Self {
-        Self {
-            scope: ShelfPlacementScopeKind::Device,
-            user_id: None,
-            library_id: None,
-            device_id: Some(device_id.into()),
-        }
-    }
-}
-
-impl Default for ShelfPlacementScope {
-    fn default() -> Self {
-        Self {
-            scope: ShelfPlacementScopeKind::Global,
-            user_id: None,
-            library_id: None,
-            device_id: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ListShelfPlacementsRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface: Option<ShelfSurface>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shelf_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<ShelfPlacementScope>,
-    #[serde(default)]
-    pub include_global_scope: bool,
     #[serde(default)]
     pub include_unpinned: bool,
-    #[serde(default)]
-    pub include_hidden: bool,
-    #[serde(default)]
-    pub include_archived_collections: bool,
-    #[serde(default)]
-    pub include_missing_collections: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub visibility: Option<CollectionVisibility>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<CollectionSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<CollectionKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub presentation: Option<CollectionPresentationMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1598,18 +1526,12 @@ pub struct PinShelfPlacementRequest {
     #[serde(default)]
     pub surface: ShelfSurface,
     pub shelf_key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<ShelfPlacementScope>,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<CollectionPresentationMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub visibility: Option<CollectionVisibility>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1621,17 +1543,10 @@ pub struct PinShelfPlacementResponse {
 pub struct ShelfPlacementOrder {
     pub placement_id: ShelfPlacementId,
     pub position: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ReorderShelfPlacementsRequest {
-    #[serde(default)]
-    pub surface: ShelfSurface,
-    pub shelf_key: String,
-    #[serde(default)]
-    pub scope: ShelfPlacementScope,
     pub ordering: Vec<ShelfPlacementOrder>,
 }
 
@@ -1687,7 +1602,7 @@ pub struct TmdbListCollectionsRequest {
     pub account_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_kind: Option<TmdbCollectionImportKind>,
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub page: CollectionPagination,
 }
 
@@ -1785,6 +1700,61 @@ mod tests {
             materialization.state,
             CollectionMaterializationState::NotMaterialized
         );
+    }
+
+    #[test]
+    fn query_requests_round_trip_through_urlencoded_forms() {
+        let collections = ListCollectionsRequest {
+            page: CollectionPagination {
+                cursor: Some("25".to_string()),
+                limit: 10,
+            },
+            kind: Some(CollectionKind::Manual),
+            media_type: Some(CollectionMediaKind::Movie),
+            include_item_counts: true,
+            ..ListCollectionsRequest::default()
+        };
+        let encoded = serde_urlencoded::to_string(&collections)
+            .expect("collection list query serializes");
+        assert!(encoded.contains("cursor=25"));
+        assert!(encoded.contains("limit=10"));
+        assert!(encoded.contains("kind=manual"));
+        assert!(encoded.contains("media_type=movie"));
+        let decoded: ListCollectionsRequest =
+            serde_urlencoded::from_str(&encoded)
+                .expect("collection list query parses");
+        assert_eq!(decoded, collections);
+
+        let items = ListCollectionItemsRequest {
+            page: CollectionPagination {
+                cursor: Some("1".to_string()),
+                limit: 2,
+            },
+            availability: Some(CollectionMemberAvailabilityStatus::Available),
+        };
+        let encoded = serde_urlencoded::to_string(&items)
+            .expect("collection items query serializes");
+        assert!(encoded.contains("availability=available"));
+        let decoded: ListCollectionItemsRequest =
+            serde_urlencoded::from_str(&encoded)
+                .expect("collection items query parses");
+        assert_eq!(decoded, items);
+
+        let tmdb = TmdbListCollectionsRequest {
+            account_id: Some("account".to_string()),
+            import_kind: Some(TmdbCollectionImportKind::Collection),
+            page: CollectionPagination {
+                cursor: Some("2".to_string()),
+                limit: 3,
+            },
+        };
+        let encoded = serde_urlencoded::to_string(&tmdb)
+            .expect("tmdb collection query serializes");
+        assert!(encoded.contains("import_kind=collection"));
+        let decoded: TmdbListCollectionsRequest =
+            serde_urlencoded::from_str(&encoded)
+                .expect("tmdb collection query parses");
+        assert_eq!(decoded, tmdb);
     }
 
     #[test]

@@ -8,7 +8,6 @@ use ferrex_core::api::routes::v1::admin::MEDIA_ROOT_BROWSER;
 
 #[cfg(feature = "demo")]
 use crate::handlers::admin::demo_handlers;
-use crate::handlers::discovery;
 use crate::handlers::stream::stream_handlers;
 use crate::handlers::users::admin_user_management;
 use crate::handlers::users::{
@@ -19,6 +18,7 @@ use crate::handlers::users::{
     },
     user_handlers, user_management, watch_status_handlers,
 };
+use crate::handlers::{collections as collection_handlers, discovery};
 use crate::{
     handlers::{
         admin::{dev_handlers, media_root},
@@ -324,6 +324,23 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         .route(
             v1::intelligence::PROVIDER_STATUS,
             get(intelligence_handlers::provider_status_handler),
+        )
+        // Collection read APIs
+        .route(
+            v1::collections::COLLECTION,
+            get(collection_handlers::list_collections_handler),
+        )
+        .route(
+            v1::collections::ITEM,
+            get(collection_handlers::get_collection_detail_handler),
+        )
+        .route(
+            v1::collections::ITEMS,
+            get(collection_handlers::list_collection_items_handler),
+        )
+        .route(
+            v1::shelves::PLACEMENTS,
+            get(collection_handlers::list_shelf_placements_handler),
         )
         // Query system
         .route(v1::media::QUERY, post(query_media_handler))

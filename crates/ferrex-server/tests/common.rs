@@ -7,6 +7,8 @@ use ferrex_core::domain::scan::orchestration::{
     config::OrchestratorConfig,
     persistence::{PostgresCursorRepository, PostgresQueueService},
 };
+#[cfg(feature = "demo")]
+use ferrex_server::demo::{DemoCoordinator, DemoPlanProvider};
 use ferrex_server::{
     application::auth::AuthApplicationFacade,
     handlers::users::UserService,
@@ -24,6 +26,8 @@ use ferrex_server::{
     routes::create_api_router,
 };
 
+#[cfg(feature = "demo")]
+use ferrex_core::domain::demo::DemoSeedOptions;
 use ferrex_core::domain::setup::SetupClaimService;
 use ferrex_core::{
     application::{
@@ -81,7 +85,14 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
     pool: PgPool,
     hooks: &H,
 ) -> Result<TestApp> {
-    build_test_app_internal(pool, hooks, None).await
+    build_test_app_internal(
+        pool,
+        hooks,
+        None,
+        #[cfg(feature = "demo")]
+        None,
+    )
+    .await
 }
 
 #[allow(unused)]
@@ -93,7 +104,31 @@ pub async fn build_test_app_with_hooks_and_intelligence_provider<
     config: IntelligenceRunManagerConfig,
     provider: Arc<dyn IntelligenceModelProvider>,
 ) -> Result<TestApp> {
-    build_test_app_internal(pool, hooks, Some((config, provider))).await
+    build_test_app_internal(
+        pool,
+        hooks,
+        Some((config, provider)),
+        #[cfg(feature = "demo")]
+        None,
+    )
+    .await
+}
+
+#[allow(unused)]
+#[cfg(feature = "demo")]
+pub async fn build_test_demo_app_with_hooks<H: StartupHooks>(
+    pool: PgPool,
+    hooks: &H,
+    demo_options: DemoSeedOptions,
+    demo_plan_provider: Arc<dyn DemoPlanProvider>,
+) -> Result<TestApp> {
+    build_test_app_internal(
+        pool,
+        hooks,
+        None,
+        Some((demo_options, demo_plan_provider)),
+    )
+    .await
 }
 
 async fn build_test_app_internal<H: StartupHooks>(
@@ -102,6 +137,10 @@ async fn build_test_app_internal<H: StartupHooks>(
     intelligence: Option<(
         IntelligenceRunManagerConfig,
         Arc<dyn IntelligenceModelProvider>,
+    )>,
+    #[cfg(feature = "demo")] demo: Option<(
+        DemoSeedOptions,
+        Arc<dyn DemoPlanProvider>,
     )>,
 ) -> Result<TestApp> {
     // SAFETY: tests run in isolation and set the env var before any child threads read it.
@@ -178,6 +217,27 @@ async fn build_test_app_internal<H: StartupHooks>(
         AppUnitOfWork::from_postgres(postgres.clone())
             .map_err(|err| anyhow!("failed to build unit of work: {err}"))?,
     );
+
+    #[cfg(feature = "demo")]
+    let demo_coordinator =
+        if let Some((demo_options, demo_plan_provider)) = demo {
+            let coordinator = Arc::new(
+                DemoCoordinator::bootstrap_with_provider(
+                    &mut config,
+                    demo_options,
+                    demo_plan_provider,
+                )
+                .await
+                .context("failed to bootstrap demo coordinator")?,
+            );
+            coordinator
+                .sync_database(unit_of_work.clone())
+                .await
+                .context("failed to sync demo libraries")?;
+            Some(coordinator)
+        } else {
+            None
+        };
 
     let image_service = Arc::new(ImageService::new(
         unit_of_work.media_files_read.clone(),
@@ -312,7 +372,7 @@ async fn build_test_app_internal<H: StartupHooks>(
         intelligence_runtime,
         false,
         #[cfg(feature = "demo")]
-        None,
+        demo_coordinator.clone(),
     ));
 
     let state = AppState::new(
@@ -327,7 +387,7 @@ async fn build_test_app_internal<H: StartupHooks>(
             state.context_handle(),
             &state,
             #[cfg(feature = "demo")]
-            None,
+            demo_coordinator.clone(),
         )
         .await
         .context("startup hooks failed")?;
