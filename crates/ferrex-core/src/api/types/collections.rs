@@ -45,6 +45,10 @@ fn default_collection_page_limit() -> u16 {
     DEFAULT_COLLECTION_PAGE_LIMIT
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(
     Debug,
     Clone,
@@ -1440,8 +1444,11 @@ pub struct ShelfPlacement {
     pub schema_version: u16,
     pub id: ShelfPlacementId,
     pub collection_id: CollectionId,
+    #[serde(default)]
     pub surface: ShelfSurface,
     pub shelf_key: String,
+    #[serde(default)]
+    pub scope: ShelfPlacementScope,
     pub position: u32,
     #[serde(default)]
     pub pinned: bool,
@@ -1449,6 +1456,8 @@ pub struct ShelfPlacement {
     pub presentation: CollectionPresentationMode,
     #[serde(default)]
     pub visibility: CollectionVisibility,
+    #[serde(default)]
+    pub reorder_revision: u64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1466,14 +1475,100 @@ pub enum ShelfSurface {
     Admin,
 }
 
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ShelfPlacementScopeKind {
+    #[default]
+    Global,
+    User,
+    Library,
+    Device,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ShelfPlacementScope {
+    #[serde(default)]
+    pub scope: ShelfPlacementScopeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_id: Option<LibraryId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+}
+
+impl ShelfPlacementScope {
+    pub fn global() -> Self {
+        Self::default()
+    }
+
+    pub fn user(user_id: Uuid) -> Self {
+        Self {
+            scope: ShelfPlacementScopeKind::User,
+            user_id: Some(user_id),
+            library_id: None,
+            device_id: None,
+        }
+    }
+
+    pub fn library(library_id: LibraryId) -> Self {
+        Self {
+            scope: ShelfPlacementScopeKind::Library,
+            user_id: None,
+            library_id: Some(library_id),
+            device_id: None,
+        }
+    }
+
+    pub fn device(device_id: impl Into<String>) -> Self {
+        Self {
+            scope: ShelfPlacementScopeKind::Device,
+            user_id: None,
+            library_id: None,
+            device_id: Some(device_id.into()),
+        }
+    }
+}
+
+impl Default for ShelfPlacementScope {
+    fn default() -> Self {
+        Self {
+            scope: ShelfPlacementScopeKind::Global,
+            user_id: None,
+            library_id: None,
+            device_id: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ListShelfPlacementsRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface: Option<ShelfSurface>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shelf_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ShelfPlacementScope>,
+    #[serde(default)]
+    pub include_global_scope: bool,
     #[serde(default)]
     pub include_unpinned: bool,
+    #[serde(default)]
+    pub include_hidden: bool,
+    #[serde(default)]
+    pub include_archived_collections: bool,
+    #[serde(default)]
+    pub include_missing_collections: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<CollectionVisibility>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<CollectionSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<CollectionKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<CollectionPresentationMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1487,12 +1582,18 @@ pub struct PinShelfPlacementRequest {
     #[serde(default)]
     pub surface: ShelfSurface,
     pub shelf_key: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ShelfPlacementScope>,
+    #[serde(default = "default_true")]
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<CollectionPresentationMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<CollectionVisibility>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1504,10 +1605,17 @@ pub struct PinShelfPlacementResponse {
 pub struct ShelfPlacementOrder {
     pub placement_id: ShelfPlacementId,
     pub position: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ReorderShelfPlacementsRequest {
+    #[serde(default)]
+    pub surface: ShelfSurface,
+    pub shelf_key: String,
+    #[serde(default)]
+    pub scope: ShelfPlacementScope,
     pub ordering: Vec<ShelfPlacementOrder>,
 }
 
