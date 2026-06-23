@@ -534,6 +534,19 @@ pub struct CollectionMemberAvailability {
     pub checked_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollectionMemberSourceProvenance {
+    pub source: CollectionSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_id: Option<String>,
+}
+
 impl Default for CollectionMemberAvailability {
     fn default() -> Self {
         Self {
@@ -561,6 +574,8 @@ pub struct CollectionMember {
     pub added_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub added_by: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_provenance: Option<CollectionMemberSourceProvenance>,
 }
 
 impl CollectionMember {
@@ -580,6 +595,7 @@ impl CollectionMember {
             availability: CollectionMemberAvailability::default(),
             added_at: None,
             added_by: None,
+            source_provenance: None,
         }
     }
 }

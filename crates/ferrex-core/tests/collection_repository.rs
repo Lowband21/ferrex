@@ -1,7 +1,5 @@
 //! Postgres-backed collection repository behavior tests.
 
-#![cfg(feature = "database")]
-
 use anyhow::Result;
 use ferrex_core::api::types::collections::{
     ArchiveCollectionRequest, CollectionDuplicatePolicy, CollectionId,
@@ -18,6 +16,10 @@ use ferrex_core::api::types::collections::{
     ListCollectionItemsRequest, ListCollectionsRequest,
     PreviewCollectionRuleRequest, RefreshCollectionRuleRequest,
     UpdateCollectionRequest,
+};
+use ferrex_core::api::types::{
+    MarkSystemCollectionsStaleRequest, SystemDiscoveryShelf,
+    system_global_explore_collections,
 };
 use ferrex_core::database::repositories::collections::PostgresCollectionRepository;
 use ferrex_core::database::repository_ports::collections::{
@@ -1093,6 +1095,162 @@ async fn dynamic_rule_sorting_limits_after_null_safe_tiebreaks(
             MediaID::Movie(MovieID(second_tie))
         ]
     );
+
+    Ok(())
+}
+
+#[sqlx::test(
+    migrator = "ferrex_core::MIGRATOR",
+    fixtures(path = "../fixtures", scripts("test_libraries"))
+)]
+async fn system_discovery_collections_seed_and_mark_scoped_materializations_stale(
+    pool: PgPool,
+) -> Result<()> {
+    let repo = PostgresCollectionRepository::new(pool.clone());
+    let user_id = uuid("5f000000-0000-7000-8000-000000000001");
+    sqlx::query(
+        r#"
+        INSERT INTO users (id, username, display_name)
+        VALUES ($1, 'systemdiscovery', 'System Discovery')
+        "#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await?;
+
+    let movie_id = uuid("5f000000-0000-7000-8000-000000000002");
+    seed_movie(
+        &pool,
+        movie_id,
+        uuid("5f000000-0000-7000-8000-000000000003"),
+        "System Recent",
+        true,
+    )
+    .await?;
+
+    let definitions = system_global_explore_collections(user_id);
+    let seed = repo.ensure_system_collections(&definitions).await?;
+    assert_eq!(seed.requested, 3);
+    assert_eq!(seed.upserted, 3);
+
+    let recently_added = definitions
+        .iter()
+        .find(|definition| {
+            definition.shelf == SystemDiscoveryShelf::RecentlyAddedMovies
+        })
+        .expect("recently added definition");
+    let collection_uuid = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM collection_definitions
+        WHERE stable_key = $1
+          AND kind = 'system'
+          AND source = 'system'
+        "#,
+    )
+    .bind(&recently_added.stable_key)
+    .fetch_one(&pool)
+    .await?;
+    let collection_id = CollectionId(collection_uuid);
+
+    let rule_hash = sqlx::query_scalar::<_, String>(
+        "SELECT rule_hash FROM collection_dynamic_rules WHERE collection_id = $1",
+    )
+    .bind(collection_uuid)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(rule_hash, recently_added.rule.rule_hash()?);
+
+    let placement_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM collection_shelf_placements
+        WHERE collection_id = $1
+          AND surface = 'home'
+          AND shelf_key = 'discovery:home'
+          AND placement_scope = 'user'
+        "#,
+    )
+    .bind(collection_uuid)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(placement_count, 1);
+
+    let refresh = repo
+        .refresh_collection_rule(
+            collection_id,
+            RefreshCollectionRuleRequest {
+                force: true,
+                expected_rule_hash: None,
+            },
+        )
+        .await?;
+    assert_eq!(
+        refresh.materialization.state,
+        CollectionMaterializationState::Ready
+    );
+    assert_eq!(refresh.materialization.visible_count, 1);
+
+    let other_user = uuid("5f000000-0000-7000-8000-000000000004");
+    let other_user_response = repo
+        .mark_system_collections_stale(
+            MarkSystemCollectionsStaleRequest::watch_state(
+                other_user,
+                Some(movie_library_id()),
+            ),
+        )
+        .await?;
+    assert_eq!(other_user_response.materializations_marked_stale, 0);
+
+    let watch_response = repo
+        .mark_system_collections_stale(
+            MarkSystemCollectionsStaleRequest::watch_state(
+                user_id,
+                Some(movie_library_id()),
+            ),
+        )
+        .await?;
+    assert_eq!(watch_response.materializations_marked_stale, 1);
+    let stale = sqlx::query_as::<
+        _,
+        (
+            String,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<String>,
+        ),
+    >(
+        r#"
+        SELECT state::text, stale_at, stale_reason
+        FROM collection_materializations
+        WHERE collection_id = $1
+        "#,
+    )
+    .bind(collection_uuid)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(stale.0, "stale");
+    assert!(stale.1.is_some());
+    assert_eq!(
+        stale.2.as_deref(),
+        Some("system discovery watch-state change")
+    );
+
+    repo.refresh_collection_rule(
+        collection_id,
+        RefreshCollectionRuleRequest {
+            force: true,
+            expected_rule_hash: None,
+        },
+    )
+    .await?;
+    let catalog_response = repo
+        .mark_system_collections_stale(
+            MarkSystemCollectionsStaleRequest::catalog(
+                Some(movie_library_id()),
+            ),
+        )
+        .await?;
+    assert_eq!(catalog_response.materializations_marked_stale, 1);
 
     Ok(())
 }
