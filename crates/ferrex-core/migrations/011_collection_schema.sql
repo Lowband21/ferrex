@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS collection_definitions (
     visibility varchar(32) NOT NULL DEFAULT 'private',
     presentation varchar(32) NOT NULL DEFAULT 'shelf',
     media_scope jsonb NOT NULL DEFAULT '{"type":"all"}'::jsonb,
-    duplicate_policy varchar(32) NOT NULL DEFAULT 'deduplicate_media',
+    duplicate_policy varchar(32) NOT NULL DEFAULT 'reject_duplicates',
     artwork jsonb NOT NULL DEFAULT '{}'::jsonb,
     theme jsonb NOT NULL DEFAULT '{}'::jsonb,
     provenance jsonb NOT NULL DEFAULT '{"source":"manual"}'::jsonb,

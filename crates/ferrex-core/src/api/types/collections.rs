@@ -365,15 +365,37 @@ pub enum CollectionMediaScope {
     },
 }
 
+impl CollectionMediaScope {
+    pub fn allows_media(&self, media_id: &MediaID) -> bool {
+        let item_key = CollectionMemberKey::for_media(media_id);
+        self.allows_member(&item_key, CollectionMediaKind::from(media_id))
+    }
+
+    fn allows_member(
+        &self,
+        item_key: &CollectionMemberKey,
+        media_kind: CollectionMediaKind,
+    ) -> bool {
+        match self {
+            Self::All => true,
+            Self::Types { media_types } => media_types.contains(&media_kind),
+            Self::Library { media_types, .. } => {
+                media_types.is_empty() || media_types.contains(&media_kind)
+            }
+            Self::ExplicitItems { item_keys } => item_keys.contains(item_key),
+        }
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum CollectionDuplicatePolicy {
     KeepAll,
-    #[default]
     DeduplicateMedia,
     DeduplicateLogical,
+    #[default]
     RejectDuplicates,
 }
 
@@ -798,6 +820,25 @@ pub struct ManualAddCollectionItemsRequest {
     pub duplicate_policy: Option<CollectionDuplicatePolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CollectionManualMembershipConflictCode {
+    DuplicateMember,
+    MissingMember,
+    UnsupportedDuplicatePolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollectionManualMembershipConflict {
+    pub code: CollectionManualMembershipConflictCode,
+    pub collection_id: CollectionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_policy: Option<CollectionDuplicatePolicy>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_keys: Vec<CollectionMemberKey>,
+    pub message: String,
 }
 
 #[derive(

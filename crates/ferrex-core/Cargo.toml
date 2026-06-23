@@ -137,4 +137,4 @@ required-features = ["database", "scan-runtime"]
 [[test]]
 name = "collection_repository"
 path = "tests/collection_repository.rs"
-required-features = ["database", "scan-runtime"]
+required-features = ["database", "scan-runtime", "test-utils"]

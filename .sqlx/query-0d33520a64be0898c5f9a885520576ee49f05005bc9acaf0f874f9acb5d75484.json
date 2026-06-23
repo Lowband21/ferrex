@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                kind::text AS \"kind!\",\n                contract_version,\n                revision,\n                etag,\n                archived_at\n            FROM collection_definitions\n            WHERE id = $1\n              AND deleted_at IS NULL\n            FOR UPDATE\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "contract_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "etag",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "archived_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "0d33520a64be0898c5f9a885520576ee49f05005bc9acaf0f874f9acb5d75484"
+}

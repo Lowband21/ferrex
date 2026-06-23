@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -13,7 +13,9 @@ use crate::api::types::collections::{
     ArchiveCollectionRequest, ArchiveCollectionResponse,
     COLLECTION_CONTRACT_VERSION, CollectionArtwork, CollectionDetail,
     CollectionDuplicatePolicy, CollectionId, CollectionIdentity,
-    CollectionKind, CollectionMaterializationState,
+    CollectionKind, CollectionManualAddItem, CollectionManualAddResult,
+    CollectionManualAddStatus, CollectionManualMembershipConflictCode,
+    CollectionManualOrder, CollectionMaterializationState,
     CollectionMaterializationStatus, CollectionMediaKind, CollectionMediaScope,
     CollectionMember, CollectionMemberAvailability,
     CollectionMemberAvailabilityStatus, CollectionMemberKey, CollectionOwner,
@@ -22,13 +24,17 @@ use crate::api::types::collections::{
     CollectionTheme, CollectionTimestamps, CollectionVersion,
     CreateCollectionRequest, DynamicCollectionRule, GetCollectionDetailRequest,
     ListCollectionItemsRequest, ListCollectionItemsResponse,
-    ListCollectionsRequest, ListCollectionsResponse, ShelfPlacement,
-    ShelfPlacementId, ShelfSurface, UpdateCollectionRequest,
+    ListCollectionsRequest, ListCollectionsResponse,
+    ManualAddCollectionItemsRequest, ManualAddCollectionItemsResponse,
+    ManualRemoveCollectionItemsRequest, ManualRemoveCollectionItemsResponse,
+    ManualReorderCollectionItemsRequest, ManualReorderCollectionItemsResponse,
+    ShelfPlacement, ShelfPlacementId, ShelfSurface, UpdateCollectionRequest,
 };
 use crate::database::repository_ports::collections::{
     CollectionItemIdentity, CollectionReadMode, CollectionRepository,
-    CollectionResolvedItem, clamp_collection_page_limit, page_info_for_slice,
-    parse_collection_cursor,
+    CollectionResolvedItem, clamp_collection_page_limit,
+    collection_manual_membership_conflict, manual_position_key_for_index,
+    page_info_for_slice, parse_collection_cursor,
 };
 use crate::error::{MediaError, Result};
 
@@ -132,6 +138,13 @@ struct ResolvedItemRow {
     reason: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct ManualAddCandidate {
+    index: usize,
+    item: CollectionManualAddItem,
+    item_key: CollectionMemberKey,
+}
+
 impl PostgresCollectionRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -143,6 +156,67 @@ impl PostgresCollectionRepository {
 
     fn etag_for(id: CollectionId, revision: u64) -> String {
         format!("collection:{id}:v{revision}")
+    }
+
+    fn version_from_parts(
+        contract_version: i32,
+        revision: i64,
+        etag: Option<String>,
+    ) -> Result<CollectionVersion> {
+        let contract_version =
+            u16::try_from(contract_version).map_err(|_| {
+                MediaError::Internal(
+                    "collection contract version exceeds u16".to_string(),
+                )
+            })?;
+        let revision = u64::try_from(revision).map_err(|_| {
+            MediaError::Internal("collection revision is negative".to_string())
+        })?;
+        Ok(CollectionVersion {
+            contract_version,
+            revision,
+            etag,
+        })
+    }
+
+    fn expected_revision_i64(
+        expected_revision: Option<u64>,
+    ) -> Result<Option<i64>> {
+        expected_revision
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| {
+                MediaError::InvalidMedia(
+                    "expected collection revision exceeds i64".to_string(),
+                )
+            })
+    }
+
+    fn validate_manual_write_state(
+        id: CollectionId,
+        kind: CollectionKind,
+        archived_at: Option<DateTime<Utc>>,
+        current_revision: i64,
+        expected_revision: Option<i64>,
+    ) -> Result<()> {
+        if kind != CollectionKind::Manual {
+            return Err(MediaError::InvalidMedia(format!(
+                "collection {id} is not a manual collection"
+            )));
+        }
+        if archived_at.is_some() {
+            return Err(MediaError::Conflict(format!(
+                "collection {id} is archived"
+            )));
+        }
+        if let Some(expected_revision) = expected_revision
+            && expected_revision != current_revision
+        {
+            return Err(MediaError::Conflict(format!(
+                "collection {id} revision conflict: expected {expected_revision}, current {current_revision}"
+            )));
+        }
+        Ok(())
     }
 
     fn sha256_hex(bytes: &[u8]) -> String {
@@ -365,7 +439,6 @@ impl PostgresCollectionRepository {
         CollectionMediaKind::from(&media_id)
     }
 
-    #[cfg(test)]
     fn encode_availability_status(
         value: CollectionMemberAvailabilityStatus,
     ) -> &'static str {
@@ -1194,6 +1267,97 @@ impl PostgresCollectionRepository {
         })?;
         Self::map_resolved_rows(CollectionMediaKind::Series, rows, out)
     }
+
+    fn title_for_manual_add(
+        item: &CollectionManualAddItem,
+        resolved: &CollectionResolvedItem,
+    ) -> String {
+        item.title_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| resolved.title.clone())
+            .unwrap_or_else(|| item.media_id.to_string())
+    }
+
+    fn final_order_with_insertions(
+        existing: &[CollectionMemberKey],
+        insertions: &[(CollectionMemberKey, Option<u32>, usize)],
+    ) -> Vec<CollectionMemberKey> {
+        let mut order = existing.to_vec();
+        let mut positioned: Vec<_> = insertions
+            .iter()
+            .filter_map(|(key, position, index)| {
+                position.map(|position| (key.clone(), position, *index))
+            })
+            .collect();
+        positioned.sort_by_key(|(_, position, index)| (*position, *index));
+        for (key, position, _) in positioned {
+            let index = (position as usize).min(order.len());
+            order.insert(index, key);
+        }
+        for (key, position, _) in insertions {
+            if position.is_none() {
+                order.push(key.clone());
+            }
+        }
+        order
+    }
+
+    fn final_order_with_reorder(
+        collection_id: CollectionId,
+        existing: &[CollectionMemberKey],
+        ordering: &[CollectionManualOrder],
+    ) -> Result<Vec<CollectionMemberKey>> {
+        let mut seen_keys = HashSet::new();
+        let mut seen_positions = HashSet::new();
+        for order in ordering {
+            if !seen_keys.insert(order.item_key.clone()) {
+                return Err(MediaError::InvalidMedia(
+                    "manual reorder contains duplicate item keys".to_string(),
+                ));
+            }
+            if !seen_positions.insert(order.position) {
+                return Err(MediaError::InvalidMedia(
+                    "manual reorder contains duplicate positions".to_string(),
+                ));
+            }
+        }
+
+        let existing_set: HashSet<_> = existing.iter().cloned().collect();
+        let missing: Vec<_> = ordering
+            .iter()
+            .filter(|order| !existing_set.contains(&order.item_key))
+            .map(|order| order.item_key.clone())
+            .collect();
+        if !missing.is_empty() {
+            return Err(collection_manual_membership_conflict(
+                CollectionManualMembershipConflictCode::MissingMember,
+                collection_id,
+                None,
+                missing,
+                "manual reorder references members that are not in the collection",
+            ));
+        }
+
+        let requested: HashSet<_> = ordering
+            .iter()
+            .map(|order| order.item_key.clone())
+            .collect();
+        let mut order: Vec<_> = existing
+            .iter()
+            .filter(|key| !requested.contains(*key))
+            .cloned()
+            .collect();
+        let mut placements = ordering.to_vec();
+        placements.sort_by_key(|order| order.position);
+        for placement in placements {
+            let index = (placement.position as usize).min(order.len());
+            order.insert(index, placement.item_key);
+        }
+        Ok(order)
+    }
 }
 
 #[async_trait]
@@ -1784,6 +1948,763 @@ impl CollectionRepository for PostgresCollectionRepository {
             items: page_items,
             page: page_info_for_slice(offset, limit, total),
             materialization: CollectionMaterializationStatus::default(),
+        })
+    }
+
+    async fn manual_add_collection_items(
+        &self,
+        id: CollectionId,
+        request: ManualAddCollectionItemsRequest,
+        added_by: Option<Uuid>,
+    ) -> Result<ManualAddCollectionItemsResponse> {
+        let expected_revision =
+            Self::expected_revision_i64(request.expected_revision)?;
+        let requested_identities: Vec<_> = request
+            .items
+            .iter()
+            .map(|item| CollectionItemIdentity::new(item.media_id))
+            .collect();
+        let resolved =
+            self.resolve_collection_items(&requested_identities).await?;
+        let resolved_by_key: HashMap<_, _> = resolved
+            .into_iter()
+            .map(|item| (item.item_key.clone(), item))
+            .collect();
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to start manual collection add transaction: {e}"
+            ))
+        })?;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                kind::text AS "kind!",
+                media_scope,
+                duplicate_policy::text AS "duplicate_policy!",
+                contract_version,
+                revision,
+                etag,
+                archived_at
+            FROM collection_definitions
+            WHERE id = $1
+              AND deleted_at IS NULL
+            FOR UPDATE
+            "#,
+            id.to_uuid(),
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to lock collection {id} for manual add: {e}"
+            ))
+        })?;
+
+        let Some(row) = row else {
+            return Err(MediaError::NotFound(format!(
+                "collection {id} not found"
+            )));
+        };
+        let kind = Self::decode_kind(&row.kind)?;
+        Self::validate_manual_write_state(
+            id,
+            kind,
+            row.archived_at,
+            row.revision,
+            expected_revision,
+        )?;
+        let media_scope = Self::from_json::<CollectionMediaScope>(
+            row.media_scope,
+            "media scope",
+        )?;
+        let collection_duplicate_policy =
+            Self::decode_duplicate_policy(&row.duplicate_policy)?;
+        let duplicate_policy = request
+            .duplicate_policy
+            .unwrap_or(collection_duplicate_policy);
+        let current_version = Self::version_from_parts(
+            row.contract_version,
+            row.revision,
+            row.etag,
+        )?;
+
+        let existing_rows = sqlx::query!(
+            r#"
+            SELECT item_key
+            FROM collection_manual_memberships
+            WHERE collection_id = $1
+            ORDER BY position_key, id
+            FOR UPDATE
+            "#,
+            id.to_uuid(),
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to lock collection {id} manual members: {e}"
+            ))
+        })?;
+        let existing_order: Vec<_> = existing_rows
+            .iter()
+            .map(|row| CollectionMemberKey::from(row.item_key.clone()))
+            .collect();
+        let existing_keys: HashSet<_> =
+            existing_order.iter().cloned().collect();
+        let mut seen_input = HashSet::new();
+        let mut duplicate_keys = Vec::new();
+        let mut result_slots = vec![None; request.items.len()];
+        let mut candidates = Vec::new();
+
+        for (index, item) in request.items.iter().enumerate() {
+            let item_key = CollectionMemberKey::for_media(&item.media_id);
+            if !media_scope.allows_media(&item.media_id) {
+                return Err(MediaError::InvalidMedia(format!(
+                    "collection {id} media scope does not allow {item_key}"
+                )));
+            }
+
+            let duplicate = existing_keys.contains(&item_key)
+                || !seen_input.insert(item_key.clone());
+            if duplicate {
+                duplicate_keys.push(item_key.clone());
+                if matches!(
+                    duplicate_policy,
+                    CollectionDuplicatePolicy::DeduplicateMedia
+                        | CollectionDuplicatePolicy::DeduplicateLogical
+                ) {
+                    let status = if existing_keys.contains(&item_key) {
+                        CollectionManualAddStatus::AlreadyPresent
+                    } else {
+                        CollectionManualAddStatus::DuplicateSkipped
+                    };
+                    result_slots[index] = Some(CollectionManualAddResult {
+                        item_key,
+                        status,
+                        message: Some(
+                            "manual collection already contains this item"
+                                .to_string(),
+                        ),
+                    });
+                }
+                continue;
+            }
+
+            candidates.push(ManualAddCandidate {
+                index,
+                item: item.clone(),
+                item_key,
+            });
+        }
+
+        if !duplicate_keys.is_empty()
+            && !matches!(
+                duplicate_policy,
+                CollectionDuplicatePolicy::DeduplicateMedia
+                    | CollectionDuplicatePolicy::DeduplicateLogical
+            )
+        {
+            duplicate_keys.sort();
+            duplicate_keys.dedup();
+            let code = if duplicate_policy == CollectionDuplicatePolicy::KeepAll
+            {
+                CollectionManualMembershipConflictCode::UnsupportedDuplicatePolicy
+            } else {
+                CollectionManualMembershipConflictCode::DuplicateMember
+            };
+            return Err(collection_manual_membership_conflict(
+                code,
+                id,
+                Some(duplicate_policy),
+                duplicate_keys,
+                "manual collection already contains one or more requested items",
+            ));
+        }
+
+        let has_positioned = candidates
+            .iter()
+            .any(|candidate| candidate.item.position.is_some());
+        let final_order = if has_positioned {
+            let insertions: Vec<_> = candidates
+                .iter()
+                .map(|candidate| {
+                    (
+                        candidate.item_key.clone(),
+                        candidate.item.position,
+                        candidate.index,
+                    )
+                })
+                .collect();
+            Some(Self::final_order_with_insertions(
+                &existing_order,
+                &insertions,
+            ))
+        } else {
+            None
+        };
+        let final_position_by_key: HashMap<_, _> = final_order
+            .as_ref()
+            .map(|order| {
+                order
+                    .iter()
+                    .enumerate()
+                    .map(|(index, key)| {
+                        Ok((key.clone(), manual_position_key_for_index(index)?))
+                    })
+                    .collect::<Result<HashMap<_, _>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        if final_order.is_some() {
+            sqlx::query!(
+                r#"
+                UPDATE collection_manual_memberships
+                SET position_key = position_key + 1000000000000000000::numeric,
+                    updated_at = NOW()
+                WHERE collection_id = $1
+                "#,
+                id.to_uuid(),
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to reserve collection {id} manual order keys: {e}"
+                ))
+            })?;
+        }
+
+        let max_row = if final_order.is_none() {
+            Some(
+                sqlx::query!(
+                    r#"
+                    SELECT COALESCE(CEIL(MAX(position_key)), 0)::bigint AS "max_position_key!"
+                    FROM collection_manual_memberships
+                    WHERE collection_id = $1
+                    "#,
+                    id.to_uuid(),
+                )
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "failed to load collection {id} manual order tail: {e}"
+                    ))
+                })?,
+            )
+        } else {
+            None
+        };
+        let mut next_position_key = max_row
+            .map(|row| {
+                u64::try_from(row.max_position_key)
+                    .map_err(|_| {
+                        MediaError::Internal(
+                            "manual collection order key is negative"
+                                .to_string(),
+                        )
+                    })?
+                    .checked_add(1000)
+                    .ok_or_else(|| {
+                        MediaError::InvalidMedia(
+                            "manual collection order key exceeds u64"
+                                .to_string(),
+                        )
+                    })
+            })
+            .transpose()?
+            .unwrap_or(1000);
+
+        for candidate in candidates {
+            let resolved = resolved_by_key
+                .get(&candidate.item_key)
+                .cloned()
+                .unwrap_or(CollectionResolvedItem {
+                    item_key: candidate.item_key.clone(),
+                    media_id: candidate.item.media_id,
+                    title: None,
+                    subtitle: None,
+                    availability: CollectionMemberAvailability {
+                        status: CollectionMemberAvailabilityStatus::Missing,
+                        reason: Some(
+                            "media reference was not found".to_string(),
+                        ),
+                        checked_at: Some(Utc::now()),
+                    },
+                });
+            let position_key = if let Some(position_key) =
+                final_position_by_key.get(&candidate.item_key)
+            {
+                position_key.clone()
+            } else {
+                let position_key = next_position_key.to_string();
+                next_position_key =
+                    next_position_key.checked_add(1000).ok_or_else(|| {
+                        MediaError::InvalidMedia(
+                            "manual collection order key exceeds u64"
+                                .to_string(),
+                        )
+                    })?;
+                position_key
+            };
+            let media_kind = Self::media_kind_from_id(candidate.item.media_id);
+            let media_type = Self::encode_media_kind(media_kind);
+            let media_id = *candidate.item.media_id.as_uuid();
+            let title_snapshot =
+                Self::title_for_manual_add(&candidate.item, &resolved);
+            let sort_key = Some(candidate.item_key.to_string());
+            let availability_status =
+                Self::encode_availability_status(resolved.availability.status);
+            let availability_reason = resolved.availability.reason.clone();
+            let availability_checked_at = resolved.availability.checked_at;
+
+            sqlx::query!(
+                r#"
+                INSERT INTO collection_manual_memberships (
+                    collection_id,
+                    item_key,
+                    media_type,
+                    media_id,
+                    title_snapshot,
+                    subtitle_snapshot,
+                    position_key,
+                    sort_key,
+                    availability_status,
+                    availability_reason,
+                    availability_checked_at,
+                    added_by
+                ) VALUES (
+                    $1, $2, ($3::text)::media_type, $4, $5, $6,
+                    ($7::text)::numeric, $8, $9::varchar, $10, $11, $12
+                )
+                "#,
+                id.to_uuid(),
+                candidate.item_key.as_str(),
+                media_type,
+                media_id,
+                title_snapshot,
+                resolved.subtitle,
+                position_key,
+                sort_key,
+                availability_status,
+                availability_reason,
+                availability_checked_at,
+                added_by,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to add {item_key} to collection {id}: {e}",
+                    item_key = candidate.item_key
+                ))
+            })?;
+
+            result_slots[candidate.index] = Some(CollectionManualAddResult {
+                item_key: candidate.item_key,
+                status: CollectionManualAddStatus::Added,
+                message: None,
+            });
+        }
+
+        if let Some(final_order) = final_order.as_ref() {
+            for (index, item_key) in final_order.iter().enumerate() {
+                let position_key = manual_position_key_for_index(index)?;
+                sqlx::query!(
+                    r#"
+                    UPDATE collection_manual_memberships
+                    SET position_key = ($3::text)::numeric,
+                        updated_at = NOW()
+                    WHERE collection_id = $1
+                      AND item_key = $2
+                    "#,
+                    id.to_uuid(),
+                    item_key.as_str(),
+                    position_key,
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "failed to persist collection {id} manual order: {e}"
+                    ))
+                })?;
+            }
+        }
+
+        let changed = result_slots.iter().any(|result| {
+            matches!(
+                result,
+                Some(CollectionManualAddResult {
+                    status: CollectionManualAddStatus::Added,
+                    ..
+                })
+            )
+        });
+        let version = if changed {
+            let version_row = sqlx::query!(
+                r#"
+                UPDATE collection_definitions
+                SET revision = revision + 1,
+                    etag = concat('collection:', id::text, ':v', revision + 1),
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING contract_version, revision, etag
+                "#,
+                id.to_uuid(),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to bump collection {id} revision after manual add: {e}"
+                ))
+            })?;
+            Self::version_from_parts(
+                version_row.contract_version,
+                version_row.revision,
+                version_row.etag,
+            )?
+        } else {
+            current_version
+        };
+
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to commit manual collection add for {id}: {e}"
+            ))
+        })?;
+
+        Ok(ManualAddCollectionItemsResponse {
+            collection_id: id,
+            results: result_slots
+                .into_iter()
+                .map(|result| {
+                    result.ok_or_else(|| {
+                        MediaError::Internal(
+                            "manual add result was not recorded".to_string(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+            version,
+        })
+    }
+
+    async fn manual_remove_collection_items(
+        &self,
+        id: CollectionId,
+        request: ManualRemoveCollectionItemsRequest,
+    ) -> Result<ManualRemoveCollectionItemsResponse> {
+        let expected_revision =
+            Self::expected_revision_i64(request.expected_revision)?;
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to start manual collection remove transaction: {e}"
+            ))
+        })?;
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                kind::text AS "kind!",
+                contract_version,
+                revision,
+                etag,
+                archived_at
+            FROM collection_definitions
+            WHERE id = $1
+              AND deleted_at IS NULL
+            FOR UPDATE
+            "#,
+            id.to_uuid(),
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to lock collection {id} for manual remove: {e}"
+            ))
+        })?;
+        let Some(row) = row else {
+            return Err(MediaError::NotFound(format!(
+                "collection {id} not found"
+            )));
+        };
+        let kind = Self::decode_kind(&row.kind)?;
+        Self::validate_manual_write_state(
+            id,
+            kind,
+            row.archived_at,
+            row.revision,
+            expected_revision,
+        )?;
+        let current_version = Self::version_from_parts(
+            row.contract_version,
+            row.revision,
+            row.etag,
+        )?;
+
+        let mut seen = HashSet::new();
+        let requested: Vec<String> = request
+            .item_keys
+            .iter()
+            .filter(|key| seen.insert((*key).clone()))
+            .map(|key| key.to_string())
+            .collect();
+        if requested.is_empty() {
+            tx.commit().await.map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to commit empty manual collection remove for {id}: {e}"
+                ))
+            })?;
+            return Ok(ManualRemoveCollectionItemsResponse {
+                collection_id: id,
+                removed_item_keys: Vec::new(),
+                missing_item_keys: Vec::new(),
+                version: current_version,
+            });
+        }
+
+        let removed_rows = sqlx::query!(
+            r#"
+            DELETE FROM collection_manual_memberships
+            WHERE collection_id = $1
+              AND item_key = ANY($2::text[])
+            RETURNING item_key
+            "#,
+            id.to_uuid(),
+            &requested,
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to remove manual members from collection {id}: {e}"
+            ))
+        })?;
+        let mut removed_item_keys: Vec<_> = removed_rows
+            .into_iter()
+            .map(|row| CollectionMemberKey::from(row.item_key))
+            .collect();
+        removed_item_keys.sort();
+        let removed_set: HashSet<_> = removed_item_keys
+            .iter()
+            .map(|key| key.as_str().to_string())
+            .collect();
+        let mut missing_item_keys: Vec<_> = requested
+            .into_iter()
+            .filter(|key| !removed_set.contains(key))
+            .map(CollectionMemberKey::from)
+            .collect();
+        missing_item_keys.sort();
+
+        let version = if removed_item_keys.is_empty() {
+            current_version
+        } else {
+            let version_row = sqlx::query!(
+                r#"
+                UPDATE collection_definitions
+                SET revision = revision + 1,
+                    etag = concat('collection:', id::text, ':v', revision + 1),
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING contract_version, revision, etag
+                "#,
+                id.to_uuid(),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to bump collection {id} revision after manual remove: {e}"
+                ))
+            })?;
+            Self::version_from_parts(
+                version_row.contract_version,
+                version_row.revision,
+                version_row.etag,
+            )?
+        };
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to commit manual collection remove for {id}: {e}"
+            ))
+        })?;
+
+        Ok(ManualRemoveCollectionItemsResponse {
+            collection_id: id,
+            removed_item_keys,
+            missing_item_keys,
+            version,
+        })
+    }
+
+    async fn manual_reorder_collection_items(
+        &self,
+        id: CollectionId,
+        request: ManualReorderCollectionItemsRequest,
+    ) -> Result<ManualReorderCollectionItemsResponse> {
+        let expected_revision =
+            Self::expected_revision_i64(request.expected_revision)?;
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to start manual collection reorder transaction: {e}"
+            ))
+        })?;
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                kind::text AS "kind!",
+                contract_version,
+                revision,
+                etag,
+                archived_at
+            FROM collection_definitions
+            WHERE id = $1
+              AND deleted_at IS NULL
+            FOR UPDATE
+            "#,
+            id.to_uuid(),
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to lock collection {id} for manual reorder: {e}"
+            ))
+        })?;
+        let Some(row) = row else {
+            return Err(MediaError::NotFound(format!(
+                "collection {id} not found"
+            )));
+        };
+        let kind = Self::decode_kind(&row.kind)?;
+        Self::validate_manual_write_state(
+            id,
+            kind,
+            row.archived_at,
+            row.revision,
+            expected_revision,
+        )?;
+        let current_version = Self::version_from_parts(
+            row.contract_version,
+            row.revision,
+            row.etag,
+        )?;
+        if request.ordering.is_empty() {
+            tx.commit().await.map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to commit empty manual collection reorder for {id}: {e}"
+                ))
+            })?;
+            return Ok(ManualReorderCollectionItemsResponse {
+                collection_id: id,
+                version: current_version,
+            });
+        }
+
+        let existing_rows = sqlx::query!(
+            r#"
+            SELECT item_key
+            FROM collection_manual_memberships
+            WHERE collection_id = $1
+            ORDER BY position_key, id
+            FOR UPDATE
+            "#,
+            id.to_uuid(),
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to lock collection {id} manual members for reorder: {e}"
+            ))
+        })?;
+        let existing_order: Vec<_> = existing_rows
+            .into_iter()
+            .map(|row| CollectionMemberKey::from(row.item_key))
+            .collect();
+        let final_order = Self::final_order_with_reorder(
+            id,
+            &existing_order,
+            &request.ordering,
+        )?;
+        let changed = final_order != existing_order;
+        let version = if changed {
+            sqlx::query!(
+                r#"
+                UPDATE collection_manual_memberships
+                SET position_key = position_key + 1000000000000000000::numeric,
+                    updated_at = NOW()
+                WHERE collection_id = $1
+                "#,
+                id.to_uuid(),
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to reserve collection {id} manual reorder keys: {e}"
+                ))
+            })?;
+            for (index, item_key) in final_order.iter().enumerate() {
+                let position_key = manual_position_key_for_index(index)?;
+                sqlx::query!(
+                    r#"
+                    UPDATE collection_manual_memberships
+                    SET position_key = ($3::text)::numeric,
+                        updated_at = NOW()
+                    WHERE collection_id = $1
+                      AND item_key = $2
+                    "#,
+                    id.to_uuid(),
+                    item_key.as_str(),
+                    position_key,
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "failed to persist collection {id} manual reorder: {e}"
+                    ))
+                })?;
+            }
+            let version_row = sqlx::query!(
+                r#"
+                UPDATE collection_definitions
+                SET revision = revision + 1,
+                    etag = concat('collection:', id::text, ':v', revision + 1),
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING contract_version, revision, etag
+                "#,
+                id.to_uuid(),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to bump collection {id} revision after manual reorder: {e}"
+                ))
+            })?;
+            Self::version_from_parts(
+                version_row.contract_version,
+                version_row.revision,
+                version_row.etag,
+            )?
+        } else {
+            current_version
+        };
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to commit manual collection reorder for {id}: {e}"
+            ))
+        })?;
+        Ok(ManualReorderCollectionItemsResponse {
+            collection_id: id,
+            version,
         })
     }
 

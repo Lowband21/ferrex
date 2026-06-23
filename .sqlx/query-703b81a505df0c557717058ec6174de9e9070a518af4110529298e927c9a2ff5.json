@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE collection_manual_memberships\n                SET position_key = position_key + 1000000000000000000::numeric,\n                    updated_at = NOW()\n                WHERE collection_id = $1\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "703b81a505df0c557717058ec6174de9e9070a518af4110529298e927c9a2ff5"
+}

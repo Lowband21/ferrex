@@ -1,5 +1,7 @@
 //! Postgres-backed collection repository behavior tests.
 
+#![cfg(feature = "database")]
+
 use anyhow::Result;
 use ferrex_core::api::types::collections::{
     ArchiveCollectionRequest, CollectionDuplicatePolicy, CollectionId,
