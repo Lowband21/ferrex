@@ -177,7 +177,7 @@ ffmpeg-next = "8.0"
 image = "0.25"
 
 # Cryptography
-sha2 = "0.10"
+sha2 = "0.11"
 aes-gcm = "0.10"
 base64 = "0.22"
 rustls = { version = "0.23", default-features = false }
