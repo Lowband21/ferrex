@@ -13,6 +13,7 @@ use crate::domains::ui::{
     playback_ui::PlaybackMessage,
     settings_ui::SettingsUiMessage,
     shell_ui::UiShellMessage,
+    smart_shelf::SmartShelfUiMessage,
     view_model_ui::ViewModelMessage,
     views::{
         tenfoot::{detail::TenFootDetailMessage, home::TenFootHomeMessage},
@@ -38,6 +39,7 @@ pub enum UiMessage {
     Playback(PlaybackMessage),
     Feedback(FeedbackMessage),
     Collections(CollectionsMessage),
+    SmartShelf(SmartShelfUiMessage),
 
     // Virtual carousel events (new module)
     VirtualCarousel(VirtualCarouselMessage),
@@ -75,6 +77,7 @@ impl UiMessage {
             Self::Playback(msg) => msg.name(),
             Self::Feedback(msg) => msg.name(),
             Self::Collections(msg) => msg.name(),
+            Self::SmartShelf(msg) => msg.name(),
 
             Self::VirtualCarousel(_) => "UI::VirtualCarousel",
             Self::TenFootHome(_) => "UI::TenFootHome",
@@ -107,6 +110,7 @@ impl std::fmt::Debug for UiMessage {
             Self::Collections(msg) => {
                 write!(f, "UI::Collections({:?})", msg)
             }
+            Self::SmartShelf(msg) => write!(f, "UI::SmartShelf({:?})", msg),
 
             Self::VirtualCarousel(msg) => {
                 write!(f, "UI::VirtualCarousel({:?})", msg)

@@ -28,6 +28,7 @@ use crate::{
         collections::{self, CollectionItemMoveDirection, CollectionsMessage},
         messages::UiMessage,
         shell_ui::UiShellMessage,
+        smart_shelf::SmartShelfUiMessage,
         tabs::{
             CollectionCreateFormState, CollectionDetailLoadState,
             CollectionEditFormState, CollectionItemActionState,
@@ -460,9 +461,12 @@ fn collections_header(state: &State) -> Element<'_, UiMessage> {
             ]
             .spacing(6),
             Space::new().width(Length::Fill),
+            button("Smart shelf")
+                .on_press(SmartShelfUiMessage::OpenComposer.into())
+                .style(theme::Button::Primary.style()),
             button("New manual collection")
                 .on_press(CollectionsMessage::ToggleCreateForm.into())
-                .style(theme::Button::Primary.style()),
+                .style(theme::Button::Secondary.style()),
             button(if loading { "Refreshing…" } else { "Refresh" })
                 .on_press(CollectionsMessage::Refresh.into())
                 .style(theme::Button::Secondary.style()),

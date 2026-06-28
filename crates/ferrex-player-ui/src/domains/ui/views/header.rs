@@ -6,6 +6,7 @@ use crate::{
             messages::UiMessage,
             settings_ui::SettingsUiMessage,
             shell_ui::{Scope, UiShellMessage},
+            smart_shelf::SmartShelfUiMessage,
             theme,
             types::ViewState,
         },
@@ -102,8 +103,19 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
             .width(Length::Fixed(HEIGHT))
             .height(HEIGHT);
 
+            let smart_shelf_button = button(
+                container(icon_text_with_size(Icon::Sparkles, 16.0))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+            )
+            .on_press(SmartShelfUiMessage::OpenComposer.into())
+            .style(theme::Button::HeaderIcon.style())
+            .width(Length::Fixed(HEIGHT))
+            .height(HEIGHT);
+
             let mut right_section = row![
                 search_button,
+                smart_shelf_button,
                 button(
                     container(icon_text_with_size(
                         if fullscreen_active(state) {
@@ -257,8 +269,19 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
             .width(Length::Fixed(HEIGHT))
             .height(HEIGHT);
 
+            let smart_shelf_button = button(
+                container(icon_text_with_size(Icon::Sparkles, 16.0))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+            )
+            .on_press(SmartShelfUiMessage::OpenComposer.into())
+            .style(theme::Button::HeaderIcon.style())
+            .width(Length::Fixed(HEIGHT))
+            .height(HEIGHT);
+
             let right_section = row![
                 search_button,
+                smart_shelf_button,
                 // Fullscreen toggle
                 button(
                     container(icon_text_with_size(

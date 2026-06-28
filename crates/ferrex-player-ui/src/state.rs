@@ -275,6 +275,7 @@ impl State {
             poster_menu_open: None,
             poster_menu_states: HashMap::new(),
             toast_manager: crate::domains::ui::feedback_ui::ToastManager::new(),
+            smart_shelf: crate::domains::ui::smart_shelf::SmartShelfUiState::default(),
             tenfoot_home:
                 crate::domains::ui::views::tenfoot::home::TenFootHomeState::new(
                 ),

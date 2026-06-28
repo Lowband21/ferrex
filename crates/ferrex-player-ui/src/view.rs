@@ -20,6 +20,7 @@ use crate::domains::ui::views::library::view_library;
 use crate::domains::ui::views::library_controls_bar::view_library_controls_bar;
 use crate::domains::ui::views::movies::view_movie_detail;
 use crate::domains::ui::views::settings::view_unified_settings;
+use crate::domains::ui::views::smart_shelf::view_smart_shelf_surface;
 use crate::domains::ui::views::tenfoot::{
     detail::{is_tenfoot_detail_route, view_tenfoot_detail},
     home::{is_tenfoot_home_route, view_tenfoot_home},
@@ -387,18 +388,30 @@ pub fn view(
             layered
         };
 
+    let with_smart_shelf_overlay =
+        if let Some(overlay) = view_smart_shelf_surface(state) {
+            Stack::new()
+                .push(with_search_overlay)
+                .push(overlay.map(DomainMessage::from))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            with_search_overlay
+        };
+
     // Overlay toast notifications if any are active
     if state.domains.ui.state.toast_manager.has_toasts() {
         let toast_overlay =
             crate::domains::ui::views::toast_overlay::view_toast_overlay(state);
         Stack::new()
-            .push(with_search_overlay)
+            .push(with_smart_shelf_overlay)
             .push(toast_overlay.map(DomainMessage::from))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     } else {
-        with_search_overlay
+        with_smart_shelf_overlay
     }
 }
 
