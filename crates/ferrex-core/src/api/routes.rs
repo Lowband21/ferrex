@@ -135,6 +135,12 @@ pub mod v1 {
             v1_path!("/intelligence/drafts/{artifact_id}");
         pub const PROVIDER_STATUS: &str =
             v1_path!("/intelligence/provider/status");
+        pub const SMART_SHELF_START: &str =
+            v1_path!("/intelligence/smart-shelves/runs");
+        pub const SMART_SHELF_DRAFT_DETAIL: &str =
+            v1_path!("/intelligence/smart-shelves/drafts/{artifact_id}");
+        pub const SMART_SHELF_SAVE: &str =
+            v1_path!("/intelligence/smart-shelves/drafts/{artifact_id}/save");
     }
 
     pub mod watch {

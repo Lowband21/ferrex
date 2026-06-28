@@ -1,4 +1,7 @@
-use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap, convert::Infallible, pin::Pin, sync::Arc,
+    time::Duration,
+};
 
 use axum::{
     Extension, Json,
@@ -9,9 +12,24 @@ use axum::{
         sse::{Event, KeepAlive},
     },
 };
+use chrono::Utc;
 use ferrex_core::{
-    api::{ApiResponse, types::intelligence::*},
+    api::{
+        ApiResponse,
+        types::{
+            collections::{
+                CollectionId, CollectionMediaKind, CollectionMediaScope,
+                CollectionMemberAvailabilityStatus, CollectionMemberKey,
+                GetCollectionDetailRequest,
+            },
+            intelligence::*,
+            smart_shelves::*,
+        },
+    },
     application::intelligence_runtime::IntelligenceRunManager,
+    database::repository_ports::collections::{
+        CollectionItemIdentity, CollectionReadMode,
+    },
     domain::intelligence::IntelligenceProviderError,
     error::MediaError,
     player_prelude::User,
@@ -21,6 +39,7 @@ use ferrex_model::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::infra::{
@@ -756,6 +775,98 @@ pub(crate) async fn draft_artifact_list_handler(
     )))
 }
 
+pub(crate) async fn smart_shelf_start_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(request): Json<SmartShelfStartRequest>,
+) -> Result<Json<ApiResponse<SmartShelfStartResponse>>, IntelligenceHttpError> {
+    let request = smart_shelf_run_start_request(request)?;
+    validate_run_start_request(&request)?;
+    let runtime = intelligence_runtime(&state)?;
+    ensure_provider_available(&runtime).await?;
+    let response = runtime
+        .start_run(request, Some(user.id))
+        .await
+        .map_err(IntelligenceHttpError::from_media_error)?;
+
+    Ok(Json(ApiResponse::success(response.into())))
+}
+
+pub(crate) async fn smart_shelf_draft_detail_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(artifact_id): Path<Uuid>,
+) -> Result<Json<ApiResponse<SmartShelfDraftResponse>>, SmartShelfHttpError> {
+    let access = load_smart_shelf_draft_access(&state, artifact_id).await?;
+    ensure_smart_shelf_draft_readable(&access, user.id)?;
+    let draft = state
+        .unit_of_work()
+        .intelligence
+        .get_draft_artifact(artifact_id, Some(user.id))
+        .await
+        .map_err(SmartShelfHttpError::from_media_error)?
+        .ok_or_else(|| SmartShelfHttpError::draft_hidden())?;
+
+    Ok(Json(ApiResponse::success(
+        SmartShelfDraftResponse::from_draft_artifact(draft),
+    )))
+}
+
+pub(crate) async fn smart_shelf_save_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(artifact_id): Path<Uuid>,
+    Json(request): Json<SmartShelfSaveRequest>,
+) -> Result<Json<ApiResponse<SmartShelfSaveResponse>>, SmartShelfHttpError> {
+    validate_smart_shelf_save_request(&request)?;
+    let access = load_smart_shelf_draft_access(&state, artifact_id).await?;
+    ensure_smart_shelf_draft_saveable(&access, user.id)?;
+    let payload = state
+        .unit_of_work()
+        .intelligence
+        .get_draft_artifact(artifact_id, Some(user.id))
+        .await
+        .map_err(SmartShelfHttpError::from_media_error)?
+        .ok_or_else(|| SmartShelfHttpError::draft_hidden())?;
+    let response =
+        SmartShelfDraftResponse::from_draft_artifact(payload.clone());
+    if !response.validation.valid {
+        return Err(SmartShelfHttpError::from_validation(
+            &response.validation,
+            "smart-shelf draft is not valid for save",
+        ));
+    }
+    let draft = response.draft.clone().ok_or_else(|| {
+        SmartShelfHttpError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            SmartShelfErrorCode::DraftMalformed,
+            "smart-shelf draft content is malformed",
+        )
+    })?;
+    let accepted_items = accepted_smart_shelf_items(&draft, &request)?;
+    let grounded = grounded_media_ids(payload.media_id, &payload.sources);
+    let validation =
+        validate_smart_shelf_draft_items(&accepted_items, &grounded);
+    if !validation.valid {
+        return Err(SmartShelfHttpError::from_validation(
+            &validation,
+            "accepted smart-shelf items are not valid for save",
+        ));
+    }
+
+    let response = save_smart_shelf_collection(
+        &state,
+        &user,
+        &payload,
+        &draft,
+        &accepted_items,
+        &request,
+    )
+    .await?;
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
 pub(crate) async fn provider_status_handler(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<IntelligenceProviderStatus>>, IntelligenceHttpError>
@@ -766,6 +877,732 @@ pub(crate) async fn provider_status_handler(
         .await
         .map_err(IntelligenceHttpError::from_provider_error)?;
     Ok(Json(ApiResponse::success(status)))
+}
+
+#[derive(Debug, Clone)]
+struct SmartShelfDraftAccess {
+    user_id: Option<Uuid>,
+    status: String,
+    metadata: Value,
+}
+
+#[derive(Debug)]
+pub(crate) struct SmartShelfHttpError {
+    status: StatusCode,
+    error: SmartShelfError,
+}
+
+impl SmartShelfHttpError {
+    fn new(
+        status: StatusCode,
+        code: SmartShelfErrorCode,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            status,
+            error: SmartShelfError {
+                code,
+                message: message.into(),
+                retryable: false,
+                details: Value::Null,
+            },
+        }
+    }
+
+    fn with_details(
+        status: StatusCode,
+        code: SmartShelfErrorCode,
+        message: impl Into<String>,
+        details: Value,
+    ) -> Self {
+        Self {
+            status,
+            error: SmartShelfError {
+                code,
+                message: message.into(),
+                retryable: false,
+                details,
+            },
+        }
+    }
+
+    fn draft_hidden() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            SmartShelfErrorCode::DraftHidden,
+            "smart-shelf draft was not found",
+        )
+    }
+
+    fn unauthorized() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            SmartShelfErrorCode::Unauthorized,
+            "smart-shelf draft is not owned by the requesting user",
+        )
+    }
+
+    fn stale() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            SmartShelfErrorCode::DraftStale,
+            "smart-shelf draft is no longer saveable",
+        )
+    }
+
+    fn already_saved(collection_id: Option<CollectionId>) -> Self {
+        let details = collection_id
+            .map(|id| json!({"collection_id": id}))
+            .unwrap_or(Value::Null);
+        Self::with_details(
+            StatusCode::CONFLICT,
+            SmartShelfErrorCode::AlreadySaved,
+            "smart-shelf draft has already been saved",
+            details,
+        )
+    }
+
+    fn invalid_request(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            SmartShelfErrorCode::InvalidRequest,
+            message,
+        )
+    }
+
+    fn collection_conflict(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            SmartShelfErrorCode::CollectionConflict,
+            message,
+        )
+    }
+
+    fn storage(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SmartShelfErrorCode::CollectionStorageError,
+            message,
+        )
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SmartShelfErrorCode::Internal,
+            message,
+        )
+    }
+
+    fn from_validation(
+        validation: &SmartShelfDraftValidation,
+        message: impl Into<String>,
+    ) -> Self {
+        let code = validation
+            .first_save_error_code()
+            .unwrap_or(SmartShelfErrorCode::DraftMalformed);
+        Self::with_details(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            code,
+            message,
+            json!({"issues": validation.issues}),
+        )
+    }
+
+    fn from_media_error(error: MediaError) -> Self {
+        match error {
+            MediaError::NotFound(message) => Self::new(
+                StatusCode::NOT_FOUND,
+                SmartShelfErrorCode::DraftHidden,
+                message,
+            ),
+            MediaError::Conflict(message) => Self::collection_conflict(message),
+            MediaError::InvalidMedia(message) => Self::invalid_request(message),
+            MediaError::Database(error) => Self::storage(format!(
+                "smart-shelf collection storage error: {error}"
+            )),
+            MediaError::Internal(message) => Self::internal(message),
+            other => Self::internal(other.to_string()),
+        }
+    }
+}
+
+impl IntoResponse for SmartShelfHttpError {
+    fn into_response(self) -> axum::response::Response {
+        let message = self.error.message.clone();
+        let body = Json(json!({
+            "status": "error",
+            "error": self.error,
+            "message": message,
+        }));
+        (self.status, body).into_response()
+    }
+}
+
+fn smart_shelf_run_start_request(
+    request: SmartShelfStartRequest,
+) -> Result<IntelligenceRunStartRequest, IntelligenceHttpError> {
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() {
+        return Err(IntelligenceHttpError::new(
+            StatusCode::BAD_REQUEST,
+            IntelligenceErrorCode::InvalidRequest,
+            "smart-shelf prompt must not be empty",
+        ));
+    }
+    if !request.constraints.is_null() && !request.constraints.is_object() {
+        return Err(IntelligenceHttpError::new(
+            StatusCode::BAD_REQUEST,
+            IntelligenceErrorCode::InvalidRequest,
+            "smart-shelf constraints must be a JSON object",
+        ));
+    }
+    if !request.metadata.is_null() && !request.metadata.is_object() {
+        return Err(IntelligenceHttpError::new(
+            StatusCode::BAD_REQUEST,
+            IntelligenceErrorCode::InvalidRequest,
+            "smart-shelf metadata must be a JSON object",
+        ));
+    }
+    let media_kinds = if request.media_kinds.is_empty() {
+        vec![IntelligenceMediaKind::Movie, IntelligenceMediaKind::Series]
+    } else {
+        request.media_kinds.clone()
+    };
+    if media_kinds.iter().any(|kind| {
+        !matches!(
+            kind,
+            IntelligenceMediaKind::Movie | IntelligenceMediaKind::Series
+        )
+    }) {
+        return Err(IntelligenceHttpError::new(
+            StatusCode::BAD_REQUEST,
+            IntelligenceErrorCode::InvalidRequest,
+            "smart-shelf runs currently support movie and series media kinds only",
+        ));
+    }
+
+    let prompt = build_smart_shelf_prompt(&request, &media_kinds);
+    let metadata = json!({
+        "smart_shelf": {
+            "schema_version": SMART_SHELF_DRAFT_SCHEMA_VERSION,
+            "template_id": request.template_id,
+            "item_count": request.item_count,
+            "media_kinds": media_kinds,
+            "constraints": request.constraints,
+            "locked_media_ids": request.locked_media_ids,
+        },
+        "client_metadata": request.metadata,
+    });
+
+    Ok(IntelligenceRunStartRequest {
+        purpose: IntelligenceRunPurpose::Recommendation,
+        library_id: request.library_id,
+        media_id: None,
+        prompt,
+        idempotency_key: request.idempotency_key,
+        model: request.model,
+        caps: request.caps,
+        metadata,
+    })
+}
+
+fn build_smart_shelf_prompt(
+    request: &SmartShelfStartRequest,
+    media_kinds: &[IntelligenceMediaKind],
+) -> String {
+    let constraints = if request.constraints.is_null() {
+        json!({})
+    } else {
+        request.constraints.clone()
+    };
+    let prompt_context = json!({
+        "user_prompt": request.prompt.trim(),
+        "template_id": request.template_id,
+        "library_id": request.library_id,
+        "item_count": request.item_count,
+        "media_kinds": media_kinds,
+        "constraints": constraints,
+        "locked_media_ids": request.locked_media_ids,
+    });
+    format!(
+        "Draft a Ferrex smart shelf from the bounded request below. Use Ferrex tools to ground every selected item. Create exactly one draft artifact with create_draft, then finish with final_response. The draft artifact content must be a JSON object with schema_version {schema_version}, title, optional description, optional interpreted_intent, requested_constraints, items, and optional alternates. Each item must include ordinal, media_id exactly as returned by Ferrex tools, title when available, a non-empty reason, and at least one source chip with label and media_id or artifact_id. Select only movie or series media, avoid duplicates, preserve any locked_media_ids, and include alternates only when they are grounded. Do not create collections or shelf placements; saving happens through the explicit smart-shelf save route.\n\nBounded smart-shelf request:\n{context}",
+        schema_version = SMART_SHELF_DRAFT_SCHEMA_VERSION,
+        context = prompt_context,
+    )
+}
+
+async fn load_smart_shelf_draft_access(
+    state: &AppState,
+    artifact_id: Uuid,
+) -> Result<SmartShelfDraftAccess, SmartShelfHttpError> {
+    let row = sqlx::query(
+        r#"
+        SELECT user_id, status::text AS status, metadata
+        FROM intelligence_artifacts
+        WHERE id = $1
+        "#,
+    )
+    .bind(artifact_id)
+    .fetch_optional(state.postgres().pool())
+    .await
+    .map_err(|error| {
+        SmartShelfHttpError::storage(format!(
+            "load smart-shelf draft access failed: {error}"
+        ))
+    })?
+    .ok_or_else(SmartShelfHttpError::draft_hidden)?;
+
+    Ok(SmartShelfDraftAccess {
+        user_id: row.try_get("user_id").map_err(|error| {
+            SmartShelfHttpError::storage(format!(
+                "decode smart-shelf draft owner failed: {error}"
+            ))
+        })?,
+        status: row.try_get("status").map_err(|error| {
+            SmartShelfHttpError::storage(format!(
+                "decode smart-shelf draft status failed: {error}"
+            ))
+        })?,
+        metadata: row.try_get("metadata").map_err(|error| {
+            SmartShelfHttpError::storage(format!(
+                "decode smart-shelf draft metadata failed: {error}"
+            ))
+        })?,
+    })
+}
+
+fn ensure_smart_shelf_draft_readable(
+    access: &SmartShelfDraftAccess,
+    user_id: Uuid,
+) -> Result<(), SmartShelfHttpError> {
+    if access.user_id != Some(user_id) {
+        return Err(SmartShelfHttpError::draft_hidden());
+    }
+    ensure_smart_shelf_status_saveable(access)
+}
+
+fn ensure_smart_shelf_draft_saveable(
+    access: &SmartShelfDraftAccess,
+    user_id: Uuid,
+) -> Result<(), SmartShelfHttpError> {
+    if access.user_id != Some(user_id) {
+        return Err(SmartShelfHttpError::unauthorized());
+    }
+    ensure_smart_shelf_status_saveable(access)
+}
+
+fn ensure_smart_shelf_status_saveable(
+    access: &SmartShelfDraftAccess,
+) -> Result<(), SmartShelfHttpError> {
+    if let Some(collection_id) =
+        saved_collection_id_from_metadata(&access.metadata).map(CollectionId)
+    {
+        return Err(SmartShelfHttpError::already_saved(Some(collection_id)));
+    }
+    if access.status != "draft" {
+        return Err(SmartShelfHttpError::stale());
+    }
+    Ok(())
+}
+
+fn validate_smart_shelf_save_request(
+    request: &SmartShelfSaveRequest,
+) -> Result<(), SmartShelfHttpError> {
+    if request
+        .title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err(SmartShelfHttpError::invalid_request(
+            "smart-shelf save title must not be empty when provided",
+        ));
+    }
+    if request
+        .idempotency_key
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
+        return Err(SmartShelfHttpError::invalid_request(
+            "smart-shelf save idempotency_key must not be empty when provided",
+        ));
+    }
+    if request
+        .idempotency_key
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > 128)
+    {
+        return Err(SmartShelfHttpError::invalid_request(
+            "smart-shelf save idempotency_key exceeds the 128 character limit",
+        ));
+    }
+    if request.items.len() > usize::from(MAX_SMART_SHELF_ITEM_COUNT) {
+        return Err(SmartShelfHttpError::invalid_request(format!(
+            "smart-shelf save cannot include more than {MAX_SMART_SHELF_ITEM_COUNT} items"
+        )));
+    }
+    Ok(())
+}
+
+fn accepted_smart_shelf_items(
+    draft: &SmartShelfDraftContent,
+    request: &SmartShelfSaveRequest,
+) -> Result<Vec<SmartShelfDraftItem>, SmartShelfHttpError> {
+    if request.items.is_empty() {
+        return Ok(draft.items.clone());
+    }
+
+    let mut item_pool: HashMap<MediaID, SmartShelfDraftItem> = HashMap::new();
+    for item in &draft.items {
+        item_pool
+            .entry(item.media_id)
+            .or_insert_with(|| item.clone());
+    }
+    for alternate in &draft.alternates {
+        let ordinal = alternate.target_ordinal.unwrap_or_else(|| {
+            u32::try_from(draft.items.len().saturating_add(1))
+                .unwrap_or(u32::MAX)
+        });
+        item_pool
+            .entry(alternate.media_id)
+            .or_insert_with(|| alternate.clone().into_item(ordinal));
+    }
+
+    let mut accepted = Vec::with_capacity(request.items.len());
+    for (index, selected) in request.items.iter().enumerate() {
+        let Some(candidate) = item_pool.get(&selected.media_id) else {
+            let validation = SmartShelfDraftValidation::from_issues(vec![
+                SmartShelfDraftValidationIssue::for_item(
+                    SmartShelfDraftValidationIssueCode::UngroundedItem,
+                    u32::try_from(index + 1).unwrap_or(u32::MAX),
+                    selected.media_id,
+                    "accepted smart-shelf item was not present in the draft or alternates",
+                ),
+            ]);
+            return Err(SmartShelfHttpError::from_validation(
+                &validation,
+                "accepted smart-shelf item is not part of the draft",
+            ));
+        };
+        let mut item = candidate.clone();
+        item.ordinal = u32::try_from(index + 1).unwrap_or(u32::MAX);
+        item.locked = selected.locked;
+        item.replacement_of = selected.replacement_of.or(item.replacement_of);
+        if selected
+            .reason
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            item.reason = selected.reason.clone();
+        }
+        if !selected.sources.is_empty() {
+            item.sources = selected.sources.clone();
+        }
+        accepted.push(item);
+    }
+
+    Ok(accepted)
+}
+
+async fn save_smart_shelf_collection(
+    state: &AppState,
+    user: &User,
+    payload: &IntelligenceDraftArtifactPayload,
+    draft: &SmartShelfDraftContent,
+    accepted_items: &[SmartShelfDraftItem],
+    request: &SmartShelfSaveRequest,
+) -> Result<SmartShelfSaveResponse, SmartShelfHttpError> {
+    let identities = accepted_items
+        .iter()
+        .map(|item| CollectionItemIdentity::new(item.media_id))
+        .collect::<Vec<_>>();
+    let resolved = state
+        .unit_of_work()
+        .collections
+        .resolve_collection_items(&identities)
+        .await
+        .map_err(SmartShelfHttpError::from_media_error)?;
+    let resolved_by_media = resolved
+        .into_iter()
+        .map(|item| (item.media_id, item))
+        .collect::<HashMap<_, _>>();
+    for item in accepted_items {
+        let Some(resolved) = resolved_by_media.get(&item.media_id) else {
+            return Err(SmartShelfHttpError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                SmartShelfErrorCode::UnsupportedMedia,
+                format!(
+                    "smart-shelf item {} could not be resolved",
+                    item.media_id
+                ),
+            ));
+        };
+        if resolved.availability.status
+            != CollectionMemberAvailabilityStatus::Available
+        {
+            return Err(SmartShelfHttpError::with_details(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                SmartShelfErrorCode::UnsupportedMedia,
+                format!(
+                    "smart-shelf item {} is not available for collection save",
+                    item.media_id
+                ),
+                json!({
+                    "media_id": item.media_id,
+                    "availability": resolved.availability,
+                }),
+            ));
+        }
+    }
+
+    let title = request
+        .title
+        .as_deref()
+        .unwrap_or(&draft.title)
+        .trim()
+        .to_string();
+    if title.is_empty() {
+        return Err(SmartShelfHttpError::invalid_request(
+            "smart-shelf save title must not be empty",
+        ));
+    }
+    let description = request
+        .description
+        .clone()
+        .or_else(|| draft.description.clone())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let collection_id = CollectionId::new();
+    let stable_key = collection_id.stable_key();
+    let external_key = request
+        .idempotency_key
+        .as_deref()
+        .map(|value| format!("smart-shelf:{}:{}", user.id, value.trim()));
+    let etag = format!("collection:{collection_id}:v1");
+    let media_scope = smart_shelf_collection_media_scope(accepted_items);
+    let media_scope = serde_json::to_value(media_scope).map_err(|error| {
+        SmartShelfHttpError::internal(format!(
+            "encode smart-shelf media scope failed: {error}"
+        ))
+    })?;
+    let provenance = json!({
+        "source": "manual",
+        "imported_from": "intelligence_draft",
+        "external_id": payload.artifact_id.to_string(),
+        "generated_by": "ferrex-smart-shelf",
+        "last_refreshed_at": Utc::now(),
+    });
+    let saved_at = Utc::now();
+    let save_metadata = json!({
+        "collection_id": collection_id,
+        "saved_at": saved_at,
+        "saved_by_user_id": user.id,
+        "item_count": accepted_items.len(),
+    });
+
+    let pool = state.postgres().pool().clone();
+    let mut tx = pool.begin().await.map_err(|error| {
+        SmartShelfHttpError::storage(format!(
+            "begin smart-shelf save transaction failed: {error}"
+        ))
+    })?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO collection_definitions (
+            id, stable_key, external_key, title, description, kind, source,
+            owner_type, owner_user_id, owner_display_name, scope, library_id,
+            visibility, presentation, media_scope, duplicate_policy, artwork,
+            theme, provenance, contract_version, revision, etag
+        ) VALUES (
+            $1, $2, $3, $4, $5, 'manual', 'manual',
+            'user', $6, $7, 'user', $8,
+            'private', 'shelf', $9::jsonb, 'reject_duplicates', '{}'::jsonb,
+            '{}'::jsonb, $10::jsonb, 1, 1, $11
+        )
+        "#,
+    )
+    .bind(collection_id.to_uuid())
+    .bind(&stable_key)
+    .bind(external_key.as_deref())
+    .bind(&title)
+    .bind(description.as_deref())
+    .bind(user.id)
+    .bind(&user.display_name)
+    .bind(payload.library_id.map(|id| id.to_uuid()))
+    .bind(&media_scope)
+    .bind(&provenance)
+    .bind(&etag)
+    .execute(&mut *tx)
+    .await
+    .map_err(map_smart_shelf_sqlx_error)?;
+
+    for (index, item) in accepted_items.iter().enumerate() {
+        let resolved =
+            resolved_by_media.get(&item.media_id).ok_or_else(|| {
+                SmartShelfHttpError::internal(format!(
+                    "resolved smart-shelf item disappeared: {}",
+                    item.media_id
+                ))
+            })?;
+        let item_key = CollectionMemberKey::for_media(&item.media_id);
+        let media_type = collection_media_type_slug(item.media_id);
+        let position = i64::try_from(index + 1).map_err(|_| {
+            SmartShelfHttpError::invalid_request(
+                "smart-shelf item position exceeds i64",
+            )
+        })?;
+        let title_snapshot = item
+            .title
+            .clone()
+            .or_else(|| resolved.title.clone())
+            .unwrap_or_else(|| item.media_id.to_string());
+        let subtitle_snapshot =
+            item.subtitle.clone().or_else(|| resolved.subtitle.clone());
+        let membership_metadata = json!({
+            "smart_shelf": {
+                "draft_artifact_id": payload.artifact_id,
+                "run_id": payload.run_id,
+                "draft_ordinal": item.ordinal,
+                "saved_position": position,
+                "reason": item.reason,
+                "sources": item.sources,
+                "locked": item.locked,
+                "replacement_of": item.replacement_of,
+                "title": item.title,
+            }
+        });
+
+        sqlx::query(
+            r#"
+            INSERT INTO collection_manual_memberships (
+                collection_id, item_key, media_type, media_id,
+                title_snapshot, subtitle_snapshot, position_key, sort_key,
+                availability_status, availability_reason,
+                availability_checked_at, added_by, metadata
+            ) VALUES (
+                $1, $2, ($3::text)::media_type, $4,
+                $5, $6, ($7::text)::numeric, $8,
+                'available', NULL,
+                NOW(), $9, $10::jsonb
+            )
+            "#,
+        )
+        .bind(collection_id.to_uuid())
+        .bind(item_key.as_str())
+        .bind(media_type)
+        .bind(*item.media_id.as_uuid())
+        .bind(&title_snapshot)
+        .bind(subtitle_snapshot.as_deref())
+        .bind(position.to_string())
+        .bind(item.reason.as_deref())
+        .bind(user.id)
+        .bind(&membership_metadata)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_smart_shelf_sqlx_error)?;
+    }
+
+    let updated = sqlx::query(
+        r#"
+        UPDATE intelligence_artifacts
+        SET status = 'superseded',
+            metadata = jsonb_set(metadata, '{smart_shelf_save}', $2::jsonb, true),
+            updated_at = NOW()
+        WHERE id = $1
+          AND user_id = $3
+          AND status = 'draft'
+        "#,
+    )
+    .bind(payload.artifact_id)
+    .bind(&save_metadata)
+    .bind(user.id)
+    .execute(&mut *tx)
+    .await
+    .map_err(map_smart_shelf_sqlx_error)?;
+    if updated.rows_affected() != 1 {
+        return Err(SmartShelfHttpError::stale());
+    }
+
+    tx.commit().await.map_err(|error| {
+        SmartShelfHttpError::storage(format!(
+            "commit smart-shelf save transaction failed: {error}"
+        ))
+    })?;
+
+    let detail = state
+        .unit_of_work()
+        .collections
+        .get_collection_detail(
+            collection_id,
+            GetCollectionDetailRequest {
+                include_rule: false,
+                include_items_preview: true,
+                include_shelf_placements: false,
+            },
+            CollectionReadMode::Admin,
+        )
+        .await
+        .map_err(SmartShelfHttpError::from_media_error)?
+        .ok_or_else(|| {
+            SmartShelfHttpError::storage(format!(
+                "saved smart-shelf collection {collection_id} could not be loaded"
+            ))
+        })?;
+
+    Ok(SmartShelfSaveResponse {
+        draft_artifact_id: payload.artifact_id,
+        collection_id,
+        collection: detail.summary,
+        item_count: u32::try_from(accepted_items.len()).unwrap_or(u32::MAX),
+        saved_at_epoch_seconds: Some(saved_at.timestamp()),
+    })
+}
+
+fn smart_shelf_collection_media_scope(
+    items: &[SmartShelfDraftItem],
+) -> CollectionMediaScope {
+    let mut media_types = Vec::new();
+    for item in items {
+        let media_type = CollectionMediaKind::from(&item.media_id);
+        if !media_types.contains(&media_type) {
+            media_types.push(media_type);
+        }
+    }
+    if media_types.is_empty() {
+        CollectionMediaScope::All
+    } else {
+        CollectionMediaScope::Types { media_types }
+    }
+}
+
+fn collection_media_type_slug(media_id: MediaID) -> &'static str {
+    match CollectionMediaKind::from(&media_id) {
+        CollectionMediaKind::Movie => "movie",
+        CollectionMediaKind::Series => "series",
+        CollectionMediaKind::Season => "season",
+        CollectionMediaKind::Episode => "episode",
+    }
+}
+
+fn map_smart_shelf_sqlx_error(error: sqlx::Error) -> SmartShelfHttpError {
+    if let sqlx::Error::Database(database) = &error
+        && let Some(constraint) = database.constraint()
+        && matches!(
+            constraint,
+            "uq_collection_definitions_external_key"
+                | "uq_collection_manual_memberships_item_key"
+                | "uq_collection_manual_memberships_media"
+                | "uq_collection_manual_memberships_position"
+        )
+    {
+        return SmartShelfHttpError::collection_conflict(
+            "smart-shelf save conflicted with an existing collection write",
+        );
+    }
+    SmartShelfHttpError::storage(format!(
+        "smart-shelf collection save failed: {error}"
+    ))
 }
 
 fn build_run_events_stream(

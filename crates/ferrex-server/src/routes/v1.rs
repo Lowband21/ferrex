@@ -391,6 +391,18 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             v1::intelligence::PROVIDER_STATUS,
             get(intelligence_handlers::provider_status_handler),
         )
+        .route(
+            v1::intelligence::SMART_SHELF_START,
+            post(intelligence_handlers::smart_shelf_start_handler),
+        )
+        .route(
+            v1::intelligence::SMART_SHELF_DRAFT_DETAIL,
+            get(intelligence_handlers::smart_shelf_draft_detail_handler),
+        )
+        .route(
+            v1::intelligence::SMART_SHELF_SAVE,
+            post(intelligence_handlers::smart_shelf_save_handler),
+        )
         // Query system
         .route(v1::media::QUERY, post(query_media_handler))
         // Scanning: pending-based triggers and counts
@@ -647,4 +659,57 @@ fn create_role_routes(state: AppState) -> Router<AppState> {
             state.clone(),
             auth::middleware::auth_middleware,
         ))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        Router,
+        body::{Body, to_bytes},
+        extract::Path,
+        http::{Method, Request, StatusCode},
+        routing::{get, post},
+    };
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    use super::v1;
+
+    async fn draft_detail(Path(artifact_id): Path<Uuid>) -> String {
+        format!("detail:{artifact_id}")
+    }
+
+    async fn save_draft(Path(artifact_id): Path<Uuid>) -> String {
+        format!("save:{artifact_id}")
+    }
+
+    #[tokio::test]
+    async fn smart_shelf_save_route_matches_api_contract() {
+        let artifact_id = Uuid::from_u128(0x8103);
+        let save_path = v1::intelligence::SMART_SHELF_SAVE
+            .replace("{artifact_id}", &artifact_id.to_string());
+        let router = Router::new()
+            .route(
+                v1::intelligence::SMART_SHELF_DRAFT_DETAIL,
+                get(draft_detail),
+            )
+            .route(v1::intelligence::SMART_SHELF_SAVE, post(save_draft));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(save_path)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("route handles request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body reads");
+        assert_eq!(body.as_ref(), format!("save:{artifact_id}").as_bytes());
+    }
 }
