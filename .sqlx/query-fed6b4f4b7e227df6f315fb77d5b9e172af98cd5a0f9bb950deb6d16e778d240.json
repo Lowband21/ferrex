@@ -1,0 +1,191 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                s.id,\n                s.library_id,\n                s.title::text AS \"title!\",\n                sm.overview AS \"overview?\",\n                sm.first_air_date AS \"release_date?\",\n                s.discovered_at AS \"discovered_at!\",\n                s.discovered_at AS \"added_at!\",\n                s.created_at AS \"created_at?\",\n                s.updated_at AS \"updated_at!\",\n                NULL::integer AS \"runtime_minutes?\",\n                sm.vote_average::double precision AS \"rating?\",\n                sm.popularity::double precision AS \"popularity?\",\n                sm.primary_content_rating AS \"content_rating?\",\n                s.tmdb_id AS \"tmdb_id?\",\n                availability.file_size_bytes AS \"file_size_bytes?\",\n                (availability.available_episode_count > 0) AS \"is_available!\",\n                CASE\n                    WHEN availability.episode_count = 0 THEN 'series has no episodes'\n                    WHEN availability.available_episode_count = 0 THEN 'series has no available episodes'\n                    ELSE NULL\n                END AS \"tombstone_reason?\",\n                ARRAY(\n                    SELECT lower(sg.name)\n                    FROM series_genres sg\n                    WHERE sg.series_id = s.id\n                    ORDER BY lower(sg.name), sg.genre_id\n                ) AS \"genres!\",\n                ARRAY(\n                    SELECT lower(sk.name)\n                    FROM series_keywords sk\n                    WHERE sk.series_id = s.id\n                    ORDER BY lower(sk.name), sk.keyword_id\n                ) AS \"keywords!\",\n                ARRAY(\n                    SELECT lower(p.name)\n                    FROM series_cast sc\n                    JOIN persons p ON p.id = sc.person_id\n                    WHERE sc.series_id = s.id\n                    ORDER BY lower(p.name), sc.person_tmdb_id\n                ) AS \"actor_names!\",\n                ARRAY(\n                    SELECT sc.person_tmdb_id\n                    FROM series_cast sc\n                    WHERE sc.series_id = s.id\n                    ORDER BY sc.person_tmdb_id\n                ) AS \"actor_tmdb_ids!\",\n                ARRAY(\n                    SELECT lower(p.name)\n                    FROM series_crew sc\n                    JOIN persons p ON p.id = sc.person_id\n                    WHERE sc.series_id = s.id\n                      AND lower(sc.job) = 'director'\n                    ORDER BY lower(p.name), sc.person_tmdb_id\n                ) AS \"director_names!\",\n                ARRAY(\n                    SELECT sc.person_tmdb_id\n                    FROM series_crew sc\n                    WHERE sc.series_id = s.id\n                      AND lower(sc.job) = 'director'\n                    ORDER BY sc.person_tmdb_id\n                ) AS \"director_tmdb_ids!\",\n                progress.position::double precision AS \"watch_position?\",\n                progress.duration::double precision AS \"watch_duration?\",\n                activity.last_watched AS \"last_watched?\",\n                activity.completed_count AS \"completed_count!\",\n                activity.in_progress_count AS \"in_progress_count!\",\n                availability.available_episode_count AS \"available_episode_count!\"\n            FROM series s\n            LEFT JOIN series_metadata sm ON sm.series_id = s.id\n            LEFT JOIN LATERAL (\n                SELECT\n                    COUNT(*) AS episode_count,\n                    COUNT(*) FILTER (WHERE mf.is_available) AS available_episode_count,\n                    SUM(mf.file_size)::bigint AS file_size_bytes\n                FROM episode_references er\n                JOIN media_files mf ON mf.id = er.file_id\n                WHERE er.series_id = s.id\n            ) availability ON TRUE\n            LEFT JOIN LATERAL (\n                WITH watched AS (\n                    SELECT\n                        MAX(uwp.last_watched) AS progress_last_watched,\n                        MAX(ucm.completed_at) AS completed_last_watched,\n                        COUNT(uwp.media_uuid) AS in_progress_count,\n                        COUNT(ucm.media_uuid) AS completed_count\n                    FROM episode_references er\n                    LEFT JOIN user_watch_progress uwp\n                      ON $1::uuid IS NOT NULL\n                     AND uwp.user_id = $1\n                     AND uwp.media_uuid = er.id\n                     AND uwp.media_type = $2\n                    LEFT JOIN user_completed_media ucm\n                      ON $1::uuid IS NOT NULL\n                     AND ucm.user_id = $1\n                     AND ucm.media_uuid = er.id\n                     AND ucm.media_type = $2\n                    WHERE er.series_id = s.id\n                )\n                SELECT\n                    CASE\n                        WHEN progress_last_watched IS NULL THEN completed_last_watched\n                        WHEN completed_last_watched IS NULL THEN progress_last_watched\n                        ELSE GREATEST(progress_last_watched, completed_last_watched)\n                    END AS last_watched,\n                    in_progress_count,\n                    completed_count\n                FROM watched\n            ) activity ON TRUE\n            LEFT JOIN LATERAL (\n                SELECT uwp.position, uwp.duration\n                FROM episode_references er\n                JOIN user_watch_progress uwp\n                  ON $1::uuid IS NOT NULL\n                 AND uwp.user_id = $1\n                 AND uwp.media_uuid = er.id\n                 AND uwp.media_type = $2\n                WHERE er.series_id = s.id\n                ORDER BY uwp.last_watched DESC, er.id\n                LIMIT 1\n            ) progress ON TRUE\n            ORDER BY s.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "overview?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "release_date?",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 5,
+        "name": "discovered_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "added_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "runtime_minutes?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "rating?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 11,
+        "name": "popularity?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 12,
+        "name": "content_rating?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "tmdb_id?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 14,
+        "name": "file_size_bytes?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 15,
+        "name": "is_available!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "tombstone_reason?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "genres!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 18,
+        "name": "keywords!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 19,
+        "name": "actor_names!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 20,
+        "name": "actor_tmdb_ids!",
+        "type_info": "Int8Array"
+      },
+      {
+        "ordinal": 21,
+        "name": "director_names!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 22,
+        "name": "director_tmdb_ids!",
+        "type_info": "Int8Array"
+      },
+      {
+        "ordinal": 23,
+        "name": "watch_position?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 24,
+        "name": "watch_duration?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 25,
+        "name": "last_watched?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 26,
+        "name": "completed_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 27,
+        "name": "in_progress_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 28,
+        "name": "available_episode_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      null,
+      null,
+      null,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "fed6b4f4b7e227df6f315fb77d5b9e172af98cd5a0f9bb950deb6d16e778d240"
+}

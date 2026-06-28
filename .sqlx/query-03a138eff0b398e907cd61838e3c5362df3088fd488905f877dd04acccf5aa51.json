@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE collection_definitions\n            SET\n                archived_at = CASE\n                    WHEN $2 THEN COALESCE(archived_at, NOW())\n                    ELSE NULL\n                END,\n                archived_by = CASE WHEN $2 THEN $3::uuid ELSE NULL::uuid END,\n                archive_reason = CASE WHEN $2 THEN $4::text ELSE NULL::text END,\n                revision = revision + 1,\n                etag = concat('collection:', id::text, ':v', revision + 1),\n                updated_at = NOW()\n            WHERE id = $1\n              AND deleted_at IS NULL\n              AND ($5::bigint IS NULL OR revision = $5)\n            RETURNING archived_at, revision, etag\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "archived_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "etag",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "03a138eff0b398e907cd61838e3c5362df3088fd488905f877dd04acccf5aa51"
+}

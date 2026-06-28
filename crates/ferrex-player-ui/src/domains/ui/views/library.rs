@@ -7,6 +7,7 @@ use crate::{
         shell_ui::Scope,
         theme,
         views::{
+            collections::view_collections,
             grid::{
                 virtual_movie_references_grid, virtual_series_references_grid,
             },
@@ -67,7 +68,10 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
 
     // debug timing disabled in tests to simplify renderer unification
 
-    if state.loading {
+    let is_collections_scope =
+        matches!(state.domains.ui.state.scope, Scope::Collections);
+
+    if state.loading && !is_collections_scope {
         // Loading state
         library_loading()
     } else {
@@ -91,7 +95,9 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                 container(Space::new().height(0)).into()
             };
 
-        if !state.domains.ui.state.repo_accessor.is_initialized() {
+        if !is_collections_scope
+            && !state.domains.ui.state.repo_accessor.is_initialized()
+        {
             // Empty state
             container(
                 column![
@@ -129,6 +135,7 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                     // Always show all content in Curated mode, regardless of library selection
                     view_home_content(state)
                 }
+                Scope::Collections => view_collections(state),
                 Scope::Library(_) => {
                     // Use the tab system to get the active tab
                     use crate::domains::ui::tabs::TabState;
@@ -224,6 +231,7 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                             // Use the AllViewModel from all_state
                             view_home_content(state)
                         }
+                        TabState::Collections(_) => view_collections(state),
                     }
                 }
             };

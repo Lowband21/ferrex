@@ -5,7 +5,10 @@
 //! adapters.
 
 use ferrex_core::{
-    api::routes::v1,
+    api::{
+        routes::{utils::replace_param, v1},
+        types::collections::*,
+    },
     player_prelude::{
         ApiResponse, AuthToken, AuthenticatedDevice, ConfirmClaimRequest,
         ConfirmClaimResponse, MediaQuery, MediaWithStatus, StartClaimRequest,
@@ -830,6 +833,22 @@ impl ApiClient {
         self.execute_request(request).await
     }
 
+    /// GET request with authentication and a serializable query string.
+    pub async fn get_with_query<Q, R>(&self, path: &str, query: &Q) -> Result<R>
+    where
+        Q: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let url = self.build_url(path);
+
+        log::debug!("GET request to: {}", url);
+        log::debug!("Base URL: {}", self.base_url);
+
+        let request = self.client.get(&url).query(query);
+        let request = self.build_request(request).await;
+        self.execute_request(request).await
+    }
+
     /// GET request for public endpoints (no authentication)
     pub async fn get_public<T: DeserializeOwned>(
         &self,
@@ -865,9 +884,211 @@ impl ApiClient {
         let request = self.build_request(request).await;
         self.execute_request(request).await
     }
+
+    /// DELETE request with a JSON body.
+    pub async fn delete_with_body<T: Serialize, R: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<R> {
+        let url = self.build_url(path);
+
+        let request = self.client.delete(&url).json(body);
+        let request = self.build_request(request).await;
+        self.execute_request(request).await
+    }
 }
 
 impl ApiClient {
+    fn collection_path(route: &str, collection_id: CollectionId) -> String {
+        replace_param(route, "{collection_id}", collection_id.to_string())
+    }
+
+    /// List player collections with filtering and pagination.
+    pub async fn list_collections(
+        &self,
+        request: &ListCollectionsRequest,
+    ) -> Result<ListCollectionsResponse> {
+        self.get_with_query(v1::collections::COLLECTION, request)
+            .await
+    }
+
+    /// Fetch collection detail and optional rule/item/shelf expansions.
+    pub async fn get_collection_detail(
+        &self,
+        collection_id: CollectionId,
+        request: &GetCollectionDetailRequest,
+    ) -> Result<GetCollectionDetailResponse> {
+        let path = Self::collection_path(v1::collections::ITEM, collection_id);
+        self.get_with_query(&path, request).await
+    }
+
+    /// List materialized collection members with pagination.
+    pub async fn list_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: &ListCollectionItemsRequest,
+    ) -> Result<ListCollectionItemsResponse> {
+        let path = Self::collection_path(v1::collections::ITEMS, collection_id);
+        self.get_with_query(&path, request).await
+    }
+
+    /// Create a collection definition.
+    pub async fn create_collection(
+        &self,
+        request: &CreateCollectionRequest,
+    ) -> Result<CreateCollectionResponse> {
+        self.post(v1::collections::COLLECTION, request).await
+    }
+
+    /// Update a collection definition.
+    pub async fn update_collection(
+        &self,
+        collection_id: CollectionId,
+        request: &UpdateCollectionRequest,
+    ) -> Result<UpdateCollectionResponse> {
+        let path = Self::collection_path(v1::collections::ITEM, collection_id);
+        self.put(&path, request).await
+    }
+
+    /// Archive or unarchive a collection.
+    pub async fn archive_collection(
+        &self,
+        collection_id: CollectionId,
+        request: &ArchiveCollectionRequest,
+    ) -> Result<ArchiveCollectionResponse> {
+        let path =
+            Self::collection_path(v1::collections::ARCHIVE, collection_id);
+        self.post(&path, request).await
+    }
+
+    /// Delete a collection definition.
+    pub async fn delete_collection(
+        &self,
+        collection_id: CollectionId,
+        request: &DeleteCollectionRequest,
+    ) -> Result<DeleteCollectionResponse> {
+        let path = Self::collection_path(v1::collections::ITEM, collection_id);
+        self.delete_with_body(&path, request).await
+    }
+
+    /// Add items to a manual collection.
+    pub async fn manual_add_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: &ManualAddCollectionItemsRequest,
+    ) -> Result<ManualAddCollectionItemsResponse> {
+        let path = Self::collection_path(
+            v1::collections::MANUAL_ADD_ITEMS,
+            collection_id,
+        );
+        self.post(&path, request).await
+    }
+
+    /// Remove items from a manual collection.
+    pub async fn manual_remove_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: &ManualRemoveCollectionItemsRequest,
+    ) -> Result<ManualRemoveCollectionItemsResponse> {
+        let path = Self::collection_path(
+            v1::collections::MANUAL_REMOVE_ITEMS,
+            collection_id,
+        );
+        self.post(&path, request).await
+    }
+
+    /// Reorder items in a manual collection.
+    pub async fn manual_reorder_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: &ManualReorderCollectionItemsRequest,
+    ) -> Result<ManualReorderCollectionItemsResponse> {
+        let path = Self::collection_path(
+            v1::collections::MANUAL_REORDER_ITEMS,
+            collection_id,
+        );
+        self.post(&path, request).await
+    }
+
+    /// Validate a dynamic collection rule.
+    pub async fn validate_collection_rule(
+        &self,
+        request: &ValidateCollectionRuleRequest,
+    ) -> Result<ValidateCollectionRuleResponse> {
+        self.post(v1::collections::RULE_VALIDATE, request).await
+    }
+
+    /// Preview dynamic collection rule results.
+    pub async fn preview_collection_rule(
+        &self,
+        request: &PreviewCollectionRuleRequest,
+    ) -> Result<PreviewCollectionRuleResponse> {
+        self.post(v1::collections::RULE_PREVIEW, request).await
+    }
+
+    /// Refresh a collection's dynamic rule materialization.
+    pub async fn refresh_collection_rule(
+        &self,
+        collection_id: CollectionId,
+        request: &RefreshCollectionRuleRequest,
+    ) -> Result<RefreshCollectionRuleResponse> {
+        let path =
+            Self::collection_path(v1::collections::RULE_REFRESH, collection_id);
+        self.post(&path, request).await
+    }
+
+    /// List shelf placements.
+    pub async fn list_shelf_placements(
+        &self,
+        request: &ListShelfPlacementsRequest,
+    ) -> Result<ListShelfPlacementsResponse> {
+        self.get_with_query(v1::shelves::PLACEMENTS, request).await
+    }
+
+    /// Pin or unpin a collection on a shelf.
+    pub async fn pin_shelf_placement(
+        &self,
+        request: &PinShelfPlacementRequest,
+    ) -> Result<PinShelfPlacementResponse> {
+        self.post(v1::shelves::PIN_PLACEMENT, request).await
+    }
+
+    /// Reorder shelf placements.
+    pub async fn reorder_shelf_placements(
+        &self,
+        request: &ReorderShelfPlacementsRequest,
+    ) -> Result<ReorderShelfPlacementsResponse> {
+        self.post(v1::shelves::REORDER_PLACEMENTS, request).await
+    }
+
+    /// List TMDB collections available for import.
+    pub async fn list_tmdb_collections(
+        &self,
+        request: &TmdbListCollectionsRequest,
+    ) -> Result<TmdbListCollectionsResponse> {
+        self.get_with_query(v1::collections::tmdb::LIST, request)
+            .await
+    }
+
+    /// Import a TMDB collection/list or refresh an existing imported collection.
+    pub async fn import_tmdb_collection(
+        &self,
+        request: &TmdbImportCollectionRequest,
+    ) -> Result<TmdbImportCollectionResponse> {
+        self.post(v1::collections::tmdb::IMPORT, request).await
+    }
+
+    /// Refresh an existing TMDB-backed collection using the import contract.
+    pub async fn refresh_tmdb_collection(
+        &self,
+        request: &TmdbImportCollectionRequest,
+    ) -> Result<TmdbImportCollectionResponse> {
+        let mut request = request.clone();
+        request.refresh_existing = true;
+        self.import_tmdb_collection(&request).await
+    }
+
     /// Get watch state for the current user
     pub async fn get_watch_state(&self) -> Result<UserWatchState> {
         self.get(v1::watch::STATE).await
@@ -965,5 +1186,116 @@ impl ApiClient {
         query: MediaQuery,
     ) -> Result<Vec<MediaWithStatus>> {
         self.post(v1::media::QUERY, &query).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrex_model::{MediaID, MovieID};
+    use uuid::Uuid;
+
+    fn uuid(value: &str) -> Uuid {
+        Uuid::parse_str(value).expect("valid uuid")
+    }
+
+    #[test]
+    fn collection_paths_use_shared_route_constants() {
+        let collection_id =
+            CollectionId::from(uuid("018f0c8a-2eab-7f03-a989-1fd8f8f03a11"));
+
+        assert_eq!(
+            ApiClient::collection_path(v1::collections::ITEM, collection_id),
+            "/api/v1/collections/018f0c8a-2eab-7f03-a989-1fd8f8f03a11"
+        );
+        assert_eq!(
+            ApiClient::collection_path(v1::collections::ITEMS, collection_id),
+            "/api/v1/collections/018f0c8a-2eab-7f03-a989-1fd8f8f03a11/items"
+        );
+        assert_eq!(
+            ApiClient::collection_path(
+                v1::collections::MANUAL_REORDER_ITEMS,
+                collection_id,
+            ),
+            "/api/v1/collections/018f0c8a-2eab-7f03-a989-1fd8f8f03a11/items:reorder"
+        );
+        assert_eq!(
+            ApiClient::collection_path(
+                v1::collections::RULE_REFRESH,
+                collection_id,
+            ),
+            "/api/v1/collections/018f0c8a-2eab-7f03-a989-1fd8f8f03a11/rule:refresh"
+        );
+
+        let client = ApiClient::new("https://ferrex.example/api/v1".into());
+        assert_eq!(
+            client.build_url(v1::shelves::PIN_PLACEMENT),
+            "https://ferrex.example/api/v1/shelves/placements:pin"
+        );
+        assert_eq!(
+            client.build_url(v1::collections::tmdb::LIST),
+            "https://ferrex.example/api/v1/collections/tmdb/lists"
+        );
+    }
+
+    #[test]
+    fn collection_contract_dtos_round_trip_through_json() {
+        let media_id = MediaID::Movie(MovieID(uuid(
+            "018f0c8a-2eab-7f03-a989-1fd8f8f03a12",
+        )));
+        let create = CreateCollectionRequest {
+            title: "Favorites".into(),
+            description: Some("Movies to revisit".into()),
+            kind: CollectionKind::Manual,
+            source: CollectionSource::Manual,
+            owner: CollectionOwner::default(),
+            scope: CollectionScope::User,
+            visibility: CollectionVisibility::Private,
+            presentation: CollectionPresentationMode::Playlist,
+            media_scope: CollectionMediaScope::ExplicitItems {
+                item_keys: vec![CollectionMemberKey::for_media(&media_id)],
+            },
+            duplicate_policy: CollectionDuplicatePolicy::RejectDuplicates,
+            artwork: CollectionArtwork::default(),
+            theme: CollectionTheme::default(),
+            provenance: None,
+            rule: None,
+        };
+        let decoded: CreateCollectionRequest = serde_json::from_str(
+            &serde_json::to_string(&create).expect("serialize create request"),
+        )
+        .expect("deserialize create request");
+        assert_eq!(decoded, create);
+
+        let add = ManualAddCollectionItemsRequest {
+            items: vec![CollectionManualAddItem {
+                media_id,
+                title_override: Some("Arrival".into()),
+                position: Some(7),
+            }],
+            duplicate_policy: Some(CollectionDuplicatePolicy::RejectDuplicates),
+            expected_revision: Some(3),
+        };
+        let decoded: ManualAddCollectionItemsRequest = serde_json::from_str(
+            &serde_json::to_string(&add).expect("serialize add request"),
+        )
+        .expect("deserialize add request");
+        assert_eq!(decoded, add);
+
+        let shelf = PinShelfPlacementRequest {
+            collection_id: CollectionId::from(uuid(
+                "018f0c8a-2eab-7f03-a989-1fd8f8f03a13",
+            )),
+            surface: ShelfSurface::Home,
+            shelf_key: "home.hero".into(),
+            pinned: true,
+            position: Some(1),
+            presentation: Some(CollectionPresentationMode::Hero),
+        };
+        let decoded: PinShelfPlacementRequest = serde_json::from_str(
+            &serde_json::to_string(&shelf).expect("serialize shelf request"),
+        )
+        .expect("deserialize shelf request");
+        assert_eq!(decoded, shelf);
     }
 }

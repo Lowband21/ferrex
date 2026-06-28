@@ -16,7 +16,10 @@ use crate::{
         },
         ui::{
             shell_ui::Scope,
-            tabs::{TabId, TabState},
+            tabs::{
+                CollectionItemMutationKind, CollectionPickerItem, TabId,
+                TabState,
+            },
             types::ViewState,
             update_handlers::{
                 handle_view_episode, handle_view_movie_details,
@@ -46,6 +49,15 @@ use crate::{
 };
 
 use chrono::{TimeZone, Utc};
+use ferrex_core::api::types::collections::{
+    CollectionArtwork, CollectionDetail, CollectionDuplicatePolicy,
+    CollectionId, CollectionIdentity, CollectionKind,
+    CollectionMaterializationState, CollectionMaterializationStatus,
+    CollectionMediaKind, CollectionMediaScope, CollectionMember,
+    CollectionPageInfo, CollectionPresentationMode, CollectionProvenance,
+    CollectionScope, CollectionSource, CollectionSummary, CollectionTheme,
+    CollectionTimestamps, CollectionVersion, CollectionVisibility,
+};
 use ferrex_core::player_prelude::{
     BackdropSize, GenreInfo, ImageRequest, ImageSize, Library, LibraryId,
     LibraryType, Media, MediaFile, MediaID, MovieID, MovieReference,
@@ -89,6 +101,10 @@ pub enum PlayerScenario {
     UserSelection,
     /// Desktop library home with seeded media and artwork.
     DesktopLibraryHome,
+    /// Desktop Collections list surface with manual create controls open.
+    DesktopCollectionsCreateForm,
+    /// Desktop Collections detail surface with manual editor controls open.
+    DesktopCollectionsManualEditor,
     /// Desktop movie detail surface with seeded media and artwork.
     DesktopMovieDetail,
     /// Desktop movie detail surface restored to its lower cast/review section.
@@ -145,10 +161,12 @@ impl std::fmt::Display for PlayerScenario {
 
 impl PlayerScenario {
     /// Canonical scenarios exposed to agents.
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 28] = [
         Self::FirstRunAuth,
         Self::UserSelection,
         Self::DesktopLibraryHome,
+        Self::DesktopCollectionsCreateForm,
+        Self::DesktopCollectionsManualEditor,
         Self::DesktopMovieDetail,
         Self::DesktopMovieDetailScrolled,
         Self::DesktopSeriesDetail,
@@ -180,6 +198,12 @@ impl PlayerScenario {
             Self::FirstRunAuth => "FirstRunAuth",
             Self::UserSelection => "UserSelection",
             Self::DesktopLibraryHome => "DesktopLibraryHome",
+            Self::DesktopCollectionsCreateForm => {
+                "DesktopCollectionsCreateForm"
+            }
+            Self::DesktopCollectionsManualEditor => {
+                "DesktopCollectionsManualEditor"
+            }
             Self::DesktopMovieDetail => "DesktopMovieDetail",
             Self::DesktopMovieDetailScrolled => "DesktopMovieDetailScrolled",
             Self::DesktopSeriesDetail => "DesktopSeriesDetail",
@@ -225,6 +249,12 @@ impl PlayerScenario {
             }
             Self::DesktopLibraryHome => {
                 "Desktop home/library surface with seeded movie and series rails"
+            }
+            Self::DesktopCollectionsCreateForm => {
+                "Desktop Collections list surface with manual create defaults and optimistic error state"
+            }
+            Self::DesktopCollectionsManualEditor => {
+                "Desktop Collections detail surface with manual edit, add, remove, reorder, archive, and conflict recovery states"
             }
             Self::DesktopMovieDetail => {
                 "Desktop movie detail page for a seeded deterministic movie"
@@ -321,6 +351,15 @@ impl PlayerScenario {
                 "authenticatedwithdevices" => Some(Self::SettingsDevices),
                 "adminsession" | "libraryloaded" | "libraryhome"
                 | "desktoplibrary" => Some(Self::DesktopLibraryHome),
+                "desktopcollections"
+                | "collectionscreateform"
+                | "desktopcollectionscreateform" => {
+                    Some(Self::DesktopCollectionsCreateForm)
+                }
+                "collectionsmanualeditor"
+                | "desktopcollectionsmanualeditor" => {
+                    Some(Self::DesktopCollectionsManualEditor)
+                }
                 "desktopmoviedetail" | "moviedetail" => {
                     Some(Self::DesktopMovieDetail)
                 }
@@ -388,6 +427,12 @@ impl PlayerScenario {
             Self::FirstRunAuth => first_run_state(config),
             Self::UserSelection => user_selection_state(config),
             Self::DesktopLibraryHome => desktop_library_home_state(config),
+            Self::DesktopCollectionsCreateForm => {
+                desktop_collections_create_form_state(config)
+            }
+            Self::DesktopCollectionsManualEditor => {
+                desktop_collections_manual_editor_state(config)
+            }
             Self::DesktopMovieDetail => desktop_movie_detail_state(config),
             Self::DesktopMovieDetailScrolled => {
                 desktop_movie_detail_scrolled_state(config)
@@ -565,6 +610,157 @@ fn desktop_library_home_state(config: &AppConfig) -> State {
     state.domains.ui.state.scope = Scope::Home;
     state.domains.ui.state.current_library_id = None;
     state.tab_manager.set_active_tab(TabId::Home);
+    state.loading = false;
+    state
+}
+
+fn desktop_collections_create_form_state(config: &AppConfig) -> State {
+    let mut state = desktop_collections_manual_editor_state(config);
+    state.domains.ui.state.view = ViewState::Library;
+    state.loading = false;
+    state
+}
+
+fn desktop_collections_manual_editor_state(config: &AppConfig) -> State {
+    let mut state = authenticated_base_state(config, false);
+    let seed = seed_library_state(&mut state);
+    let now = Utc
+        .with_ymd_and_hms(2026, 6, 22, 12, 0, 0)
+        .single()
+        .expect("valid deterministic timestamp");
+    let collection_id =
+        CollectionId(Uuid::from_u128(0x64900000000000000000000000000001));
+    let mut members = vec![
+        CollectionMember::new(
+            MediaID::Movie(seed.movies[0].id),
+            "Aurora Transit",
+            1,
+        ),
+        CollectionMember::new(
+            MediaID::Movie(seed.movies[1].id),
+            "Copper Harbor",
+            2,
+        ),
+    ];
+    members[0].subtitle = Some("Seeded movie · first".to_string());
+    members[1].subtitle = Some("Seeded movie · second".to_string());
+    let summary = CollectionSummary {
+        identity: CollectionIdentity::for_id(collection_id),
+        title: "Weekend Manual Queue".to_string(),
+        description: Some(
+            "A manually curated queue ready for editing.".to_string(),
+        ),
+        kind: CollectionKind::Manual,
+        source: CollectionSource::Manual,
+        owner: Default::default(),
+        scope: CollectionScope::User,
+        visibility: CollectionVisibility::Shared,
+        presentation: CollectionPresentationMode::Grid,
+        media_scope: CollectionMediaScope::Types {
+            media_types: vec![CollectionMediaKind::Movie],
+        },
+        duplicate_policy: CollectionDuplicatePolicy::DeduplicateMedia,
+        artwork: CollectionArtwork {
+            accent_color_hex: Some("#365B8C".to_string()),
+            ..CollectionArtwork::default()
+        },
+        theme: CollectionTheme {
+            primary_color_hex: Some("#365B8C".to_string()),
+            ..CollectionTheme::default()
+        },
+        provenance: CollectionProvenance::default(),
+        version: CollectionVersion {
+            revision: 7,
+            etag: Some(format!("collection-{}-7", collection_id)),
+            ..CollectionVersion::default()
+        },
+        timestamps: CollectionTimestamps {
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        },
+        item_count: members.len() as u32,
+        materialization: CollectionMaterializationStatus {
+            state: CollectionMaterializationState::Ready,
+            item_count: members.len() as u32,
+            generated_at: Some(now),
+            ..CollectionMaterializationStatus::default()
+        },
+    };
+    let detail = CollectionDetail {
+        summary: summary.clone(),
+        rule: None,
+        items_preview: members.clone(),
+        shelf_placements: Vec::new(),
+    };
+
+    state.domains.ui.state.scope = Scope::Collections;
+    state.domains.ui.state.view = ViewState::CollectionDetail { collection_id };
+    state.tab_manager.set_active_tab(TabId::Collections);
+    if let TabState::Collections(tab) =
+        state.tab_manager.get_or_create_tab(TabId::Collections)
+    {
+        tab.mark_loaded(
+            vec![summary],
+            CollectionPageInfo {
+                next_cursor: None,
+                limit: 50,
+                total: 1,
+            },
+        );
+        tab.create_form.is_open = true;
+        tab.create_form.title = "New manual collection".to_string();
+        tab.create_form.description =
+            "Optimistic create error example".to_string();
+        tab.create_form.error =
+            Some("Server unavailable; retry when connected.".to_string());
+        tab.mark_detail_loaded(detail);
+        tab.mark_items_loaded(
+            collection_id,
+            members.clone(),
+            CollectionPageInfo {
+                next_cursor: None,
+                limit: 50,
+                total: members.len() as u64,
+            },
+            CollectionMaterializationStatus {
+                state: CollectionMaterializationState::Ready,
+                item_count: members.len() as u32,
+                generated_at: Some(now),
+                ..CollectionMaterializationStatus::default()
+            },
+            false,
+        );
+        let form = tab.ensure_edit_form(collection_id);
+        form.title = "Weekend Manual Queue (edited)".to_string();
+        form.description =
+            "Dirty metadata with a stale conflict recovery path.".to_string();
+        form.is_dirty = true;
+        form.error = Some(
+            "Collection version conflict: reload latest before saving."
+                .to_string(),
+        );
+        form.conflict = true;
+        let picker = tab.picker_state_mut(collection_id);
+        picker.query = "Signal".to_string();
+        picker.error = Some("Signal Grove cannot be added because this collection accepts movies.".to_string());
+        picker.results.push(CollectionPickerItem {
+            media_id: MediaID::Series(seed.series[0].id),
+            title: "Signal Grove".to_string(),
+            subtitle: Some("Series result blocked by movie scope".to_string()),
+            media_kind: CollectionMediaKind::Series,
+            library_id: Some(seed.series_library.id),
+        });
+        let action = tab.item_action_state_mut(collection_id);
+        action.in_flight = Some(CollectionItemMutationKind::Reordering(
+            members[0].item_key.clone(),
+        ));
+        action.error = Some(
+            "Collection version conflict: reload latest before reordering."
+                .to_string(),
+        );
+        action.conflict = true;
+    }
     state.loading = false;
     state
 }
@@ -2525,6 +2721,18 @@ mod tests {
         assert!(
             scenarios
                 .iter()
+                .any(|scenario| scenario.name
+                    == "DesktopCollectionsCreateForm")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.name
+                    == "DesktopCollectionsManualEditor")
+        );
+        assert!(
+            scenarios
+                .iter()
                 .any(|scenario| scenario.name == "DesktopMovieDetail")
         );
         assert!(
@@ -2851,6 +3059,60 @@ mod tests {
         };
         assert!(!home.recent_movies.is_empty());
         assert!(!home.recent_series.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn desktop_collections_create_form_scenario_seeds_create_state() {
+        let state =
+            PlayerScenario::DesktopCollectionsCreateForm.build(&test_config());
+
+        assert_eq!(state.interface_mode, InterfaceMode::Desktop);
+        assert_eq!(state.domains.ui.state.scope, Scope::Collections);
+        assert!(matches!(state.domains.ui.state.view, ViewState::Library));
+        let Some(TabState::Collections(tab)) =
+            state.tab_manager.get_tab(TabId::Collections)
+        else {
+            panic!("collections tab should exist");
+        };
+        assert!(tab.create_form.is_open);
+        assert!(!tab.create_form.title.is_empty());
+        assert!(tab.create_form.error.is_some());
+        assert!(!tab.summaries.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn desktop_collections_manual_editor_scenario_seeds_editing_state() {
+        let state = PlayerScenario::DesktopCollectionsManualEditor
+            .build(&test_config());
+
+        assert_eq!(state.interface_mode, InterfaceMode::Desktop);
+        assert_eq!(state.domains.ui.state.scope, Scope::Collections);
+        let collection_id = match &state.domains.ui.state.view {
+            ViewState::CollectionDetail { collection_id } => *collection_id,
+            _ => panic!("collections scenario should open collection detail"),
+        };
+        let Some(TabState::Collections(tab)) =
+            state.tab_manager.get_tab(TabId::Collections)
+        else {
+            panic!("collections tab should exist");
+        };
+        assert!(tab.create_form.is_open);
+        assert!(tab.summary(collection_id).is_some());
+        assert!(
+            tab.edit_forms
+                .get(&collection_id)
+                .is_some_and(|form| form.conflict)
+        );
+        assert!(
+            tab.picker_states
+                .get(&collection_id)
+                .is_some_and(|picker| !picker.results.is_empty())
+        );
+        assert!(
+            tab.item_action_states
+                .get(&collection_id)
+                .is_some_and(|action| action.conflict)
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

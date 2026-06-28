@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE collection_shelf_placements\n            SET position_key = position_key + 1000000000000000000::numeric,\n                updated_at = NOW()\n            WHERE surface = $1::varchar\n              AND shelf_key = $2\n              AND placement_scope = $3::varchar\n              AND placement_scope_key = $4\n              AND hidden_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "976b9d34aaad5f5c809054003c4be7ebeadf3ed3070bad3143f1015441744f91"
+}

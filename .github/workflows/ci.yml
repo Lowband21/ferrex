@@ -32,14 +32,19 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.8.0 --activate
+
       - name: Install docs dependencies
-        run: corepack pnpm --dir docs install --frozen-lockfile
+        run: pnpm --dir docs install --frozen-lockfile
 
       - name: Check docs app
-        run: corepack pnpm --dir docs run check
+        run: pnpm --dir docs run check
 
       - name: Build docs site
-        run: corepack pnpm --dir docs run build
+        run: pnpm --dir docs run build
 
   sqlx-enforcement:
     name: SQLx enforcement

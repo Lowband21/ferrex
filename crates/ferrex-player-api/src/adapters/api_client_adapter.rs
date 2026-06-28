@@ -11,6 +11,7 @@ use crate::{
 };
 use ferrex_player_foundation::repository::{RepositoryError, RepositoryResult};
 
+use ferrex_core::api::types::collections::*;
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
     FilterIndicesRequest, ImageManifestRequest, ImageManifestResponse,
@@ -48,6 +49,34 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 const FILTER_INDICES_CACHE_TTL: Duration = Duration::from_secs(30);
+
+fn map_collection_query_error(error: anyhow::Error) -> RepositoryError {
+    RepositoryError::QueryFailed(error.to_string())
+}
+
+fn map_collection_create_error(error: anyhow::Error) -> RepositoryError {
+    let message = error.to_string();
+    if message.contains("409") || message.to_lowercase().contains("conflict") {
+        RepositoryError::CreateFailed(format!(
+            "Collection conflict: {}",
+            message
+        ))
+    } else {
+        RepositoryError::CreateFailed(message)
+    }
+}
+
+fn map_collection_update_error(error: anyhow::Error) -> RepositoryError {
+    let message = error.to_string();
+    if message.contains("409") || message.to_lowercase().contains("conflict") {
+        RepositoryError::UpdateFailed(format!(
+            "Collection conflict: {}",
+            message
+        ))
+    } else {
+        RepositoryError::UpdateFailed(message)
+    }
+}
 
 /// Adapter that implements ApiService using the existing ApiClient
 #[derive(Debug, Clone)]
@@ -601,6 +630,205 @@ impl ApiService for ApiClientAdapter {
             .query_media(query)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn list_collections(
+        &self,
+        request: ListCollectionsRequest,
+    ) -> RepositoryResult<ListCollectionsResponse> {
+        self.client
+            .list_collections(&request)
+            .await
+            .map_err(map_collection_query_error)
+    }
+
+    async fn get_collection_detail(
+        &self,
+        collection_id: CollectionId,
+        request: GetCollectionDetailRequest,
+    ) -> RepositoryResult<GetCollectionDetailResponse> {
+        self.client
+            .get_collection_detail(collection_id, &request)
+            .await
+            .map_err(map_collection_query_error)
+    }
+
+    async fn list_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ListCollectionItemsRequest,
+    ) -> RepositoryResult<ListCollectionItemsResponse> {
+        self.client
+            .list_collection_items(collection_id, &request)
+            .await
+            .map_err(map_collection_query_error)
+    }
+
+    async fn create_collection(
+        &self,
+        request: CreateCollectionRequest,
+    ) -> RepositoryResult<CreateCollectionResponse> {
+        self.client
+            .create_collection(&request)
+            .await
+            .map_err(map_collection_create_error)
+    }
+
+    async fn update_collection(
+        &self,
+        collection_id: CollectionId,
+        request: UpdateCollectionRequest,
+    ) -> RepositoryResult<UpdateCollectionResponse> {
+        self.client
+            .update_collection(collection_id, &request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn archive_collection(
+        &self,
+        collection_id: CollectionId,
+        request: ArchiveCollectionRequest,
+    ) -> RepositoryResult<ArchiveCollectionResponse> {
+        self.client
+            .archive_collection(collection_id, &request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn delete_collection(
+        &self,
+        collection_id: CollectionId,
+        request: DeleteCollectionRequest,
+    ) -> RepositoryResult<DeleteCollectionResponse> {
+        self.client
+            .delete_collection(collection_id, &request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn manual_add_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualAddCollectionItemsRequest,
+    ) -> RepositoryResult<ManualAddCollectionItemsResponse> {
+        self.client
+            .manual_add_collection_items(collection_id, &request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn manual_remove_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualRemoveCollectionItemsRequest,
+    ) -> RepositoryResult<ManualRemoveCollectionItemsResponse> {
+        self.client
+            .manual_remove_collection_items(collection_id, &request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn manual_reorder_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualReorderCollectionItemsRequest,
+    ) -> RepositoryResult<ManualReorderCollectionItemsResponse> {
+        self.client
+            .manual_reorder_collection_items(collection_id, &request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn validate_collection_rule(
+        &self,
+        request: ValidateCollectionRuleRequest,
+    ) -> RepositoryResult<ValidateCollectionRuleResponse> {
+        self.client
+            .validate_collection_rule(&request)
+            .await
+            .map_err(map_collection_query_error)
+    }
+
+    async fn preview_collection_rule(
+        &self,
+        request: PreviewCollectionRuleRequest,
+    ) -> RepositoryResult<PreviewCollectionRuleResponse> {
+        self.client
+            .preview_collection_rule(&request)
+            .await
+            .map_err(map_collection_query_error)
+    }
+
+    async fn refresh_collection_rule(
+        &self,
+        collection_id: CollectionId,
+        request: RefreshCollectionRuleRequest,
+    ) -> RepositoryResult<RefreshCollectionRuleResponse> {
+        self.client
+            .refresh_collection_rule(collection_id, &request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn list_shelf_placements(
+        &self,
+        request: ListShelfPlacementsRequest,
+    ) -> RepositoryResult<ListShelfPlacementsResponse> {
+        self.client
+            .list_shelf_placements(&request)
+            .await
+            .map_err(map_collection_query_error)
+    }
+
+    async fn pin_shelf_placement(
+        &self,
+        request: PinShelfPlacementRequest,
+    ) -> RepositoryResult<PinShelfPlacementResponse> {
+        self.client
+            .pin_shelf_placement(&request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn reorder_shelf_placements(
+        &self,
+        request: ReorderShelfPlacementsRequest,
+    ) -> RepositoryResult<ReorderShelfPlacementsResponse> {
+        self.client
+            .reorder_shelf_placements(&request)
+            .await
+            .map_err(map_collection_update_error)
+    }
+
+    async fn list_tmdb_collections(
+        &self,
+        request: TmdbListCollectionsRequest,
+    ) -> RepositoryResult<TmdbListCollectionsResponse> {
+        self.client
+            .list_tmdb_collections(&request)
+            .await
+            .map_err(map_collection_query_error)
+    }
+
+    async fn import_tmdb_collection(
+        &self,
+        request: TmdbImportCollectionRequest,
+    ) -> RepositoryResult<TmdbImportCollectionResponse> {
+        self.client
+            .import_tmdb_collection(&request)
+            .await
+            .map_err(map_collection_create_error)
+    }
+
+    async fn refresh_tmdb_collection(
+        &self,
+        request: TmdbImportCollectionRequest,
+    ) -> RepositoryResult<TmdbImportCollectionResponse> {
+        self.client
+            .refresh_tmdb_collection(&request)
+            .await
+            .map_err(map_collection_update_error)
     }
 
     async fn fetch_filtered_indices(

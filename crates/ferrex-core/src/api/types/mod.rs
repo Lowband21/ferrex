@@ -3,6 +3,8 @@
 //! specialized namespaces instead of the entire API layer.
 
 pub mod admin;
+mod collection_rule_validation;
+pub mod collections;
 pub mod demo;
 pub mod discovery;
 pub mod filters;
@@ -13,12 +15,14 @@ pub mod media_repo_sync;
 pub mod responses;
 pub mod scan;
 pub mod setup;
+pub mod system_collections;
 pub mod users_admin;
 
 pub use admin::{
     MediaRootBreadcrumb, MediaRootBrowseRequest, MediaRootBrowseResponse,
     MediaRootEntry, MediaRootEntryKind,
 };
+pub use collections::*;
 pub use demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
 pub use discovery::{
     DISCOVERY_SECTION_AUDIENCE_RATING_PICKS, DISCOVERY_SECTION_CONTINUE_SERIES,
@@ -60,6 +64,7 @@ pub use scan::{
     ScanCommandRequest, ScanLifecycleStatus, ScanRunMode, ScanSnapshotDto,
     ScanStartDisposition, StartScanRequest,
 };
+pub use system_collections::*;
 pub use users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 
 /// Curated exports relied on by the UI/player crates.
@@ -68,6 +73,7 @@ pub mod player {
         MediaRootBreadcrumb, MediaRootBrowseRequest, MediaRootBrowseResponse,
         MediaRootEntry, MediaRootEntryKind,
     };
+    pub use super::collections::*;
     pub use super::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
     pub use super::discovery::{
         DISCOVERY_SECTION_AUDIENCE_RATING_PICKS,
@@ -110,6 +116,7 @@ pub mod player {
         ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,
         StartClaimResponse,
     };
+    pub use super::system_collections::*;
     pub use super::users_admin::{
         AdminUserInfo, CreateUserRequest, UpdateUserRequest,
     };

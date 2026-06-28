@@ -135,6 +135,13 @@ impl ViewIdentifier for ViewState {
                     Some(episode_id.as_uuid()),
                 )
             }
+            ViewState::CollectionDetail { collection_id } => {
+                ScrollPositionManager::generate_key(
+                    "collection_detail",
+                    None,
+                    Some(collection_id.as_uuid()),
+                )
+            }
             ViewState::LibraryManagement => {
                 ScrollPositionManager::generate_key(
                     "library_management",
@@ -324,6 +331,7 @@ impl ScrollPositionManager {
     fn tab_scroll_key(tab_id: &TabId) -> String {
         match tab_id {
             TabId::Home => "tab.all".to_string(),
+            TabId::Collections => "tab.collections".to_string(),
             TabId::Library(id) => {
                 format!("tab.library.{}", id)
             }

@@ -1,6 +1,9 @@
 //! Common UI types moved from monolithic state
 
-use ferrex_core::player_prelude::{EpisodeID, MovieID, SeasonID, SeriesID};
+use ferrex_core::{
+    api::types::collections::CollectionId,
+    player_prelude::{EpisodeID, MovieID, SeasonID, SeriesID},
+};
 
 /// View state representing which screen/page is currently shown
 #[derive(Debug, Clone, Default)]
@@ -34,6 +37,9 @@ pub enum ViewState {
         episode_id: EpisodeID, // Keep as string for now
         backdrop_handle: Option<iced::widget::image::Handle>, // Cached backdrop handle
     },
+    CollectionDetail {
+        collection_id: CollectionId,
+    },
     UserSettings, // User settings and preferences view
 }
 
@@ -59,6 +65,7 @@ impl ViewState {
                 | ViewState::SeriesDetail { .. }
                 | ViewState::SeasonDetail { .. }
                 | ViewState::EpisodeDetail { .. }
+                | ViewState::CollectionDetail { .. }
         )
     }
 
@@ -77,7 +84,8 @@ impl ViewState {
                 ViewState::MovieDetail { .. }
                 | ViewState::SeriesDetail { .. }
                 | ViewState::SeasonDetail { .. }
-                | ViewState::EpisodeDetail { .. } => {
+                | ViewState::EpisodeDetail { .. }
+                | ViewState::CollectionDetail { .. } => {
                     Some(crate::infra::constants::layout::header::HEIGHT)
                 } // Same header height
                 ViewState::LibraryManagement
@@ -102,6 +110,7 @@ impl ViewState {
             content_padding: match self {
                 ViewState::Library => 0.0, // No padding, grid goes edge to edge
                 ViewState::Player => 0.0,
+                ViewState::CollectionDetail { .. } => 32.0,
                 _ => 20.0, // Standard content padding
             },
         }

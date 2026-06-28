@@ -7,7 +7,7 @@ use ferrex_core::types::watch::{
     EpisodeKey, NextEpisode, SeasonWatchStatus, SeriesWatchStatus,
 };
 use ferrex_core::{
-    api::types::ApiResponse,
+    api::types::{ApiResponse, MarkSystemCollectionsStaleRequest},
     domain::users::user::User,
     domain::watch::{
         ContinueWatchingItem, UpdateProgressRequest, UserWatchState,
@@ -219,6 +219,29 @@ fn require_media_type(
     }
 }
 
+async fn mark_system_discovery_watch_state_stale(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<(), (StatusCode, String)> {
+    state
+        .unit_of_work()
+        .collections
+        .mark_system_collections_stale(
+            MarkSystemCollectionsStaleRequest::watch_state(user_id, None),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "Failed to mark system discovery collections stale: {}",
+                    e
+                ),
+            )
+        })
+}
+
 async fn resolve_episode_key_for_logical_media(
     state: &AppState,
     logical_media_id: Uuid,
@@ -316,6 +339,7 @@ pub async fn update_progress_handler(
                 format!("Failed to update progress: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -405,6 +429,7 @@ pub async fn clear_progress_handler(
                 format!("Failed to clear progress: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -437,6 +462,7 @@ pub async fn mark_movie_watched_handler(
                 format!("Failed to mark movie as watched: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -468,6 +494,7 @@ pub async fn mark_movie_unwatched_handler(
                 format!("Failed to mark movie as unwatched: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -503,6 +530,7 @@ pub async fn mark_episode_watched_handler(
                 format!("Failed to mark episode as watched: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -537,6 +565,7 @@ pub async fn mark_episode_unwatched_handler(
                 format!("Failed to mark episode as unwatched: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -558,6 +587,7 @@ pub async fn mark_series_watched_handler(
                 format!("Failed to mark series as watched: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -579,6 +609,7 @@ pub async fn mark_series_unwatched_handler(
                 format!("Failed to mark series as unwatched: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -658,6 +689,7 @@ pub async fn mark_completed_handler(
                 format!("Failed to mark as completed: {}", e),
             )
         })?;
+    mark_system_discovery_watch_state_stale(&state, user.id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -85,6 +85,12 @@ impl From<MediaError> for AppError {
     fn from(err: MediaError) -> Self {
         match err {
             MediaError::NotFound(msg) => Self::not_found(msg),
+            MediaError::InvalidMedia(msg) => Self::bad_request(msg),
+            MediaError::Conflict(msg) => Self::conflict(msg),
+            MediaError::ConcurrencyLimit(msg) => Self::rate_limited(msg),
+            MediaError::Cancelled(msg) => {
+                Self::new(StatusCode::REQUEST_TIMEOUT, msg)
+            }
             MediaError::Internal(msg) => Self::internal(msg),
             _ => Self::internal(err.to_string()),
         }

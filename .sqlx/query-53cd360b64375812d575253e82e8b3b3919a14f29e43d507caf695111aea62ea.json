@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH resolved AS (\n                SELECT COALESCE(\n                    (\n                        SELECT id\n                        FROM collection_definitions\n                        WHERE stable_key = $1\n                        LIMIT 1\n                    ),\n                    uuidv7()\n                ) AS id\n            ), upsert AS (\n                INSERT INTO collection_definitions (\n                    id,\n                    stable_key,\n                    external_key,\n                    title,\n                    description,\n                    kind,\n                    source,\n                    owner_type,\n                    owner_user_id,\n                    owner_device_id,\n                    owner_display_name,\n                    scope,\n                    library_id,\n                    visibility,\n                    presentation,\n                    media_scope,\n                    duplicate_policy,\n                    artwork,\n                    theme,\n                    provenance,\n                    contract_version,\n                    revision,\n                    etag,\n                    archived_at,\n                    deleted_at,\n                    updated_at\n                )\n                SELECT\n                    id,\n                    $1,\n                    NULL,\n                    $2,\n                    $3,\n                    'system',\n                    'system',\n                    'system',\n                    NULL,\n                    NULL,\n                    'Ferrex',\n                    $4::varchar,\n                    $5,\n                    'system',\n                    'shelf',\n                    $6::jsonb,\n                    'deduplicate_media',\n                    $7::jsonb,\n                    $8::jsonb,\n                    $9::jsonb,\n                    $10,\n                    0,\n                    concat('collection:', id::text, ':v0'),\n                    NULL,\n                    NULL,\n                    NOW()\n                FROM resolved\n                ON CONFLICT (stable_key) DO UPDATE SET\n                    title = EXCLUDED.title,\n                    description = EXCLUDED.description,\n                    kind = 'system',\n                    source = 'system',\n                    owner_type = 'system',\n                    owner_user_id = NULL,\n                    owner_device_id = NULL,\n                    owner_display_name = 'Ferrex',\n                    scope = EXCLUDED.scope,\n                    library_id = EXCLUDED.library_id,\n                    visibility = 'system',\n                    presentation = 'shelf',\n                    media_scope = EXCLUDED.media_scope,\n                    duplicate_policy = EXCLUDED.duplicate_policy,\n                    artwork = EXCLUDED.artwork,\n                    theme = EXCLUDED.theme,\n                    provenance = EXCLUDED.provenance,\n                    archived_at = NULL,\n                    deleted_at = NULL,\n                    updated_at = CASE\n                        WHEN collection_definitions.title IS DISTINCT FROM EXCLUDED.title\n                          OR collection_definitions.description IS DISTINCT FROM EXCLUDED.description\n                          OR collection_definitions.scope IS DISTINCT FROM EXCLUDED.scope\n                          OR collection_definitions.library_id IS DISTINCT FROM EXCLUDED.library_id\n                          OR collection_definitions.media_scope IS DISTINCT FROM EXCLUDED.media_scope\n                          OR collection_definitions.provenance IS DISTINCT FROM EXCLUDED.provenance\n                        THEN NOW()\n                        ELSE collection_definitions.updated_at\n                    END,\n                    etag = COALESCE(\n                        collection_definitions.etag,\n                        concat('collection:', collection_definitions.id::text, ':v', collection_definitions.revision)\n                    )\n                RETURNING id\n            )\n            SELECT id AS \"id!\" FROM upsert\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Varchar",
+        "Uuid",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "53cd360b64375812d575253e82e8b3b3919a14f29e43d507caf695111aea62ea"
+}

@@ -201,7 +201,8 @@ impl ScanOrchestrator {
             correlations.clone(),
         )
         .with_delta_repository(delta_repo)
-        .with_intelligence_repository(unit_of_work.intelligence.clone());
+        .with_intelligence_repository(unit_of_work.intelligence.clone())
+        .with_collection_repository(unit_of_work.collections.clone());
         if config.transcript_indexing.enabled {
             let timed_text_config =
                 TimedTextExtractionConfig::from_indexing_config(

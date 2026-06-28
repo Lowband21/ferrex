@@ -101,8 +101,8 @@ pub fn handle_tab_grid_scrolled(
                 // Update the grid state for virtual scrolling calculations
                 lib_state.update_scroll(viewport);
             }
-            TabState::Home(_all_state) => {
-                // All tab uses carousel, not virtual grid - no grid state to update
+            TabState::Home(_) | TabState::Collections(_) => {
+                // Home and Collections tabs do not use the library virtual grid.
             }
         }
     }

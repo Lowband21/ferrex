@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO collection_shelf_placements (\n                collection_id,\n                collection_stable_key,\n                surface,\n                shelf_key,\n                placement_scope,\n                placement_scope_key,\n                scope_user_id,\n                scope_library_id,\n                visibility,\n                presentation,\n                pinned,\n                pinned_at,\n                position,\n                position_key,\n                hidden_at,\n                metadata,\n                updated_at\n            ) VALUES (\n                $1, $2, $3::varchar, $4, $5::varchar, $6,\n                $7, $8, 'system', 'shelf', $9, CASE WHEN $9 THEN NOW() ELSE NULL END,\n                $10, ($11::text)::numeric, NULL, $12::jsonb, NOW()\n            )\n            ON CONFLICT (\n                surface,\n                shelf_key,\n                placement_scope,\n                placement_scope_key,\n                collection_id\n            ) DO UPDATE SET\n                collection_stable_key = EXCLUDED.collection_stable_key,\n                scope_user_id = EXCLUDED.scope_user_id,\n                scope_library_id = EXCLUDED.scope_library_id,\n                visibility = 'system',\n                presentation = 'shelf',\n                pinned = EXCLUDED.pinned,\n                pinned_at = CASE\n                    WHEN EXCLUDED.pinned THEN COALESCE(collection_shelf_placements.pinned_at, NOW())\n                    ELSE NULL\n                END,\n                position = EXCLUDED.position,\n                position_key = EXCLUDED.position_key,\n                hidden_at = NULL,\n                metadata = EXCLUDED.metadata,\n                updated_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Varchar",
+        "Text",
+        "Varchar",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Int4",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b27136d798ed82cb63eaddc6e1986f03ae7082f8cdaa7a4e24764a52478db211"
+}

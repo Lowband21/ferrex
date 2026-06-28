@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                collection_id,\n                name,\n                MIN(poster_path) AS \"poster_path?\",\n                COUNT(*)::bigint AS \"item_count!\"\n            FROM movie_collection_membership\n            GROUP BY collection_id, name\n            ORDER BY name, collection_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "collection_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "poster_path?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "item_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "ad6b28aa4dbf0c3c48117c4e75b06f1d0ff1f1d13f1417646185799cbd4a07b3"
+}

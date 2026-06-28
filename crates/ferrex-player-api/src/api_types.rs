@@ -6,6 +6,10 @@
 
 // Curated surface from ferrex-core for player-facing code
 pub use ferrex_contracts::prelude::{EpisodeLike, SeasonLike};
+pub use ferrex_core::api::routes::v1::{
+    collections as collection_routes, shelves as shelf_routes,
+};
+pub use ferrex_core::api::types::collections::*;
 pub use ferrex_core::api::types::intelligence::*;
 pub use ferrex_core::player_prelude::{
     AdminUserInfo, ApiResponse, BatchMediaRequest, BatchMediaResponse,

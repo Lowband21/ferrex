@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO collection_sources (\n                collection_id,\n                provider,\n                source_kind,\n                source_key,\n                source_scope_key,\n                title,\n                refreshed_at,\n                updated_at\n            ) VALUES ($1, 'tmdb', $2::varchar, $3, 'global', $4, NOW(), NOW())\n            ON CONFLICT (provider, source_kind, source_key, source_scope_key)\n            DO UPDATE SET\n                collection_id = EXCLUDED.collection_id,\n                title = EXCLUDED.title,\n                refreshed_at = NOW(),\n                updated_at = NOW()\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a0599a60a10002f030963ec4d2a605be1a3260ccbbcc96b5a0859f141db26c55"
+}

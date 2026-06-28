@@ -1,0 +1,85 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                schema_version,\n                collection_id,\n                surface::text AS \"surface!\",\n                shelf_key,\n                position,\n                pinned,\n                presentation::text AS \"presentation!\",\n                visibility::text AS \"visibility!\",\n                created_at,\n                updated_at\n            FROM collection_shelf_placements\n            WHERE surface = $1::varchar\n              AND shelf_key = $2\n              AND placement_scope = $3::varchar\n              AND placement_scope_key = $4\n              AND hidden_at IS NULL\n            ORDER BY position_key, id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "schema_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "collection_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "surface!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "shelf_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "pinned",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "presentation!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "visibility!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "09a666df4d29e2f4ad60b3e77e4bb2482a60522681cf3f33d5eacc4474df99e3"
+}

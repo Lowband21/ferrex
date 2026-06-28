@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO collection_manual_memberships (\n                    collection_id,\n                    item_key,\n                    media_type,\n                    media_id,\n                    title_snapshot,\n                    subtitle_snapshot,\n                    position_key,\n                    availability_status,\n                    availability_reason,\n                    availability_checked_at,\n                    added_by\n                ) VALUES (\n                    $1, $2, ($3::text)::media_type, $4, $5, $6,\n                    ($7::text)::numeric, $8::varchar, $9, NOW(), $10\n                )\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Varchar",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d82a84de4aa95bca6b0fa4812de2dd4c821c41b96bb265a993f24945eee117ee"
+}

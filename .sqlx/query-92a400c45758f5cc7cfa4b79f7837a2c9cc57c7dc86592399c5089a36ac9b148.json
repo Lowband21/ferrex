@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT state::text AS \"state!\", error_message\n        FROM collection_materializations\n        WHERE collection_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "error_message",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      true
+    ]
+  },
+  "hash": "92a400c45758f5cc7cfa4b79f7837a2c9cc57c7dc86592399c5089a36ac9b148"
+}

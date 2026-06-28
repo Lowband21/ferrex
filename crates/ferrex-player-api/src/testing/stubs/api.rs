@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
+use ferrex_core::api::types::collections::*;
 use ferrex_core::domain::users::auth::{
     device::AuthDeviceStatus, domain::value_objects::SessionScope,
 };
@@ -21,8 +22,8 @@ use ferrex_core::player_prelude::{
     UpdateProgressRequest, User, UserPermissions, UserPreferences,
     UserWatchState,
 };
-use ferrex_model::MovieReferenceBatchSize;
 use ferrex_model::image::ImageQuery;
+use ferrex_model::{MediaID, MovieID, MovieReferenceBatchSize};
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
 
@@ -41,6 +42,12 @@ pub struct TestApiService {
 struct InnerApiState {
     libraries: Vec<Library>,
     library_media: HashMap<Uuid, Vec<Media>>,
+    collections: HashMap<CollectionId, CollectionRecord>,
+    collection_order: Vec<CollectionId>,
+    shelf_placements: Vec<ShelfPlacement>,
+    tmdb_collections: Vec<TmdbCollectionSummary>,
+    next_collection_query_error: Option<String>,
+    next_collection_write_error: Option<String>,
     watch_state: UserWatchState,
     setup_required: bool,
     setup_token_required: bool,
@@ -51,6 +58,15 @@ struct InnerApiState {
     current_permissions: Option<UserPermissions>,
     playback_ticket_result: Option<Result<String, String>>,
 }
+
+#[derive(Debug, Clone)]
+struct CollectionRecord {
+    detail: CollectionDetail,
+    items: Vec<CollectionMember>,
+}
+
+type CollectionFixtures =
+    (HashMap<CollectionId, CollectionRecord>, Vec<CollectionId>);
 
 impl Default for TestApiService {
     fn default() -> Self {
@@ -63,6 +79,7 @@ impl TestApiService {
         let base_url_string = base_url.into();
         let library = sample_library("Sample Library");
         let devices = vec![sample_device(Uuid::now_v7())];
+        let (collections, collection_order) = sample_collections();
 
         let sample_user = sample_user("demo_admin");
         let sample_permissions = sample_permissions(sample_user.id);
@@ -71,6 +88,12 @@ impl TestApiService {
             inner: Arc::new(RwLock::new(InnerApiState {
                 libraries: vec![library],
                 library_media: HashMap::new(),
+                collections,
+                collection_order,
+                shelf_placements: Vec::new(),
+                tmdb_collections: sample_tmdb_collections(),
+                next_collection_query_error: None,
+                next_collection_write_error: None,
                 watch_state: UserWatchState::new(),
                 setup_required: true,
                 setup_token_required: false,
@@ -125,6 +148,295 @@ impl TestApiService {
         if let Ok(mut guard) = self.inner.write() {
             guard.playback_ticket_result = Some(Err(message.into()));
         }
+    }
+
+    /// Seed or replace a collection detail in the in-memory API stub.
+    pub fn upsert_collection(
+        &self,
+        detail: CollectionDetail,
+        items: Vec<CollectionMember>,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            let collection_id = detail.summary.identity.id;
+            if !guard.collection_order.contains(&collection_id) {
+                guard.collection_order.push(collection_id);
+            }
+            guard
+                .collections
+                .insert(collection_id, CollectionRecord { detail, items });
+            guard.sync_collection(collection_id);
+        }
+    }
+
+    /// Append an item to an existing collection for focused UI tests.
+    pub fn push_collection_item(
+        &self,
+        collection_id: CollectionId,
+        item: CollectionMember,
+    ) {
+        if let Ok(mut guard) = self.inner.write()
+            && let Some(record) = guard.collections.get_mut(&collection_id)
+        {
+            record.items.push(item);
+            guard.sync_collection(collection_id);
+        }
+    }
+
+    /// Add a TMDB list/collection summary returned by the test stub.
+    pub fn push_tmdb_collection(&self, summary: TmdbCollectionSummary) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.tmdb_collections.push(summary);
+        }
+    }
+
+    /// Cause the next collection read operation to fail.
+    pub fn fail_next_collection_query(&self, message: impl Into<String>) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.next_collection_query_error = Some(message.into());
+        }
+    }
+
+    /// Cause the next collection write operation to fail.
+    pub fn fail_next_collection_write(&self, message: impl Into<String>) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.next_collection_write_error = Some(message.into());
+        }
+    }
+}
+
+impl InnerApiState {
+    fn take_collection_query_error(&mut self) -> Option<String> {
+        self.next_collection_query_error.take()
+    }
+
+    fn take_collection_write_error(&mut self) -> Option<String> {
+        self.next_collection_write_error.take()
+    }
+
+    fn sync_collection(&mut self, collection_id: CollectionId) {
+        if let Some(record) = self.collections.get_mut(&collection_id) {
+            record.items.sort_by(|left, right| {
+                left.position
+                    .cmp(&right.position)
+                    .then_with(|| left.item_key.cmp(&right.item_key))
+            });
+            let item_count = record.items.len() as u32;
+            record.detail.summary.item_count = item_count;
+            record.detail.summary.materialization.item_count = item_count;
+            record.detail.items_preview =
+                record.items.iter().take(12).cloned().collect();
+        }
+    }
+
+    fn collection_record(
+        &self,
+        collection_id: CollectionId,
+    ) -> RepositoryResult<&CollectionRecord> {
+        self.collections.get(&collection_id).ok_or_else(|| {
+            RepositoryError::NotFound {
+                entity_type: "Collection".into(),
+                id: collection_id.to_string(),
+            }
+        })
+    }
+
+    fn collection_record_mut(
+        &mut self,
+        collection_id: CollectionId,
+    ) -> RepositoryResult<&mut CollectionRecord> {
+        self.collections.get_mut(&collection_id).ok_or_else(|| {
+            RepositoryError::NotFound {
+                entity_type: "Collection".into(),
+                id: collection_id.to_string(),
+            }
+        })
+    }
+}
+
+fn paginate<T: Clone>(
+    values: &[T],
+    page: &CollectionPagination,
+) -> (Vec<T>, CollectionPageInfo) {
+    let total = values.len();
+    let limit = if page.limit == 0 {
+        DEFAULT_COLLECTION_PAGE_LIMIT
+    } else {
+        page.limit.min(MAX_COLLECTION_PAGE_LIMIT)
+    } as usize;
+    let offset = page
+        .cursor
+        .as_deref()
+        .and_then(|cursor| cursor.parse::<usize>().ok())
+        .unwrap_or(0)
+        .min(total);
+    let end = offset.saturating_add(limit).min(total);
+    let next_cursor = (end < total).then(|| end.to_string());
+
+    (
+        values[offset..end].to_vec(),
+        CollectionPageInfo {
+            next_cursor,
+            limit: limit as u16,
+            total: total as u64,
+        },
+    )
+}
+
+fn collection_media_scope_matches(
+    scope: &CollectionMediaScope,
+    media_type: CollectionMediaKind,
+) -> bool {
+    match scope {
+        CollectionMediaScope::All => true,
+        CollectionMediaScope::Types { media_types } => {
+            media_types.contains(&media_type)
+        }
+        CollectionMediaScope::Library { media_types, .. } => {
+            media_types.is_empty() || media_types.contains(&media_type)
+        }
+        CollectionMediaScope::ExplicitItems { .. } => true,
+    }
+}
+
+fn detail_with_expansions(
+    record: &CollectionRecord,
+    placements: &[ShelfPlacement],
+    request: &GetCollectionDetailRequest,
+) -> CollectionDetail {
+    let mut detail = record.detail.clone();
+    detail.summary.item_count = record.items.len() as u32;
+    detail.summary.materialization.item_count = record.items.len() as u32;
+
+    if !request.include_rule {
+        detail.rule = None;
+    }
+    if request.include_items_preview {
+        detail.items_preview = record.items.iter().take(12).cloned().collect();
+    } else {
+        detail.items_preview.clear();
+    }
+    if request.include_shelf_placements {
+        detail.shelf_placements = placements
+            .iter()
+            .filter(|placement| {
+                placement.collection_id == detail.summary.identity.id
+            })
+            .cloned()
+            .collect();
+    } else {
+        detail.shelf_placements.clear();
+    }
+
+    detail
+}
+
+fn bump_collection_version(summary: &mut CollectionSummary) {
+    summary.version.revision = summary.version.revision.saturating_add(1);
+    summary.version.etag = Some(format!(
+        "collection-{}-{}",
+        summary.identity.id, summary.version.revision
+    ));
+    summary.timestamps.updated_at = Utc::now();
+}
+
+fn ensure_expected_revision(
+    summary: &CollectionSummary,
+    expected_revision: Option<u64>,
+) -> RepositoryResult<()> {
+    if let Some(expected) = expected_revision
+        && summary.version.revision != expected
+    {
+        return Err(RepositoryError::UpdateFailed(format!(
+            "Collection version conflict: expected revision {}, found {}",
+            expected, summary.version.revision
+        )));
+    }
+    Ok(())
+}
+
+fn collection_rule_hash(
+    rule: &DynamicCollectionRule,
+) -> RepositoryResult<(String, String)> {
+    let input = rule.rule_hash_input_json().map_err(|error| {
+        RepositoryError::SerializationError(error.to_string())
+    })?;
+    let hash = rule.rule_hash().map_err(|error| {
+        RepositoryError::SerializationError(error.to_string())
+    })?;
+    Ok((input, hash))
+}
+
+fn validate_rule(
+    rule: &DynamicCollectionRule,
+) -> RepositoryResult<ValidateCollectionRuleResponse> {
+    Ok(ValidateCollectionRuleResponse::from_rule(rule))
+}
+
+fn apply_rule_limit(
+    mut items: Vec<CollectionMember>,
+    rule: &DynamicCollectionRule,
+) -> Vec<CollectionMember> {
+    items.sort_by(|left, right| {
+        left.position
+            .cmp(&right.position)
+            .then_with(|| left.item_key.cmp(&right.item_key))
+    });
+    if let Some(max_items) = rule.limit.max_items {
+        items.truncate(max_items as usize);
+    }
+    items
+}
+
+fn collection_detail_from_create(
+    request: CreateCollectionRequest,
+) -> CollectionDetail {
+    let now = Utc::now();
+    let id = CollectionId::new();
+    let provenance = request.provenance.unwrap_or(CollectionProvenance {
+        source: request.source,
+        ..CollectionProvenance::default()
+    });
+    let materialization_state = if request.rule.is_some() {
+        CollectionMaterializationState::Pending
+    } else {
+        CollectionMaterializationState::Ready
+    };
+
+    CollectionDetail {
+        summary: CollectionSummary {
+            identity: CollectionIdentity::for_id(id),
+            title: request.title,
+            description: request.description,
+            kind: request.kind,
+            source: request.source,
+            owner: request.owner,
+            scope: request.scope,
+            visibility: request.visibility,
+            presentation: request.presentation,
+            media_scope: request.media_scope,
+            duplicate_policy: request.duplicate_policy,
+            artwork: request.artwork,
+            theme: request.theme,
+            provenance,
+            version: CollectionVersion {
+                revision: 1,
+                etag: Some(format!("collection-{}-1", id)),
+                ..CollectionVersion::default()
+            },
+            timestamps: CollectionTimestamps {
+                created_at: now,
+                updated_at: now,
+                archived_at: None,
+            },
+            item_count: 0,
+            materialization: CollectionMaterializationStatus {
+                state: materialization_state,
+                ..CollectionMaterializationStatus::default()
+            },
+        },
+        rule: request.rule,
+        items_preview: Vec::new(),
+        shelf_placements: Vec::new(),
     }
 }
 
@@ -571,6 +883,828 @@ impl ApiService for TestApiService {
         Ok(Vec::new())
     }
 
+    async fn list_collections(
+        &self,
+        request: ListCollectionsRequest,
+    ) -> RepositoryResult<ListCollectionsResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_query_error() {
+            return Err(RepositoryError::QueryFailed(message));
+        }
+
+        let mut summaries = Vec::new();
+        for collection_id in &guard.collection_order {
+            let Some(record) = guard.collections.get(collection_id) else {
+                continue;
+            };
+            let summary = &record.detail.summary;
+            if !request.include_archived
+                && summary.timestamps.archived_at.is_some()
+            {
+                continue;
+            }
+            if let Some(kind) = request.kind
+                && summary.kind != kind
+            {
+                continue;
+            }
+            if let Some(scope) = request.scope
+                && summary.scope != scope
+            {
+                continue;
+            }
+            if let Some(visibility) = request.visibility
+                && summary.visibility != visibility
+            {
+                continue;
+            }
+            if let Some(media_type) = request.media_type
+                && !collection_media_scope_matches(
+                    &summary.media_scope,
+                    media_type,
+                )
+            {
+                continue;
+            }
+
+            let mut summary = summary.clone();
+            if request.include_item_counts {
+                summary.item_count = record.items.len() as u32;
+                summary.materialization.item_count = record.items.len() as u32;
+            }
+            summaries.push(summary);
+        }
+
+        let (collections, page) = paginate(&summaries, &request.page);
+        Ok(ListCollectionsResponse { collections, page })
+    }
+
+    async fn get_collection_detail(
+        &self,
+        collection_id: CollectionId,
+        request: GetCollectionDetailRequest,
+    ) -> RepositoryResult<GetCollectionDetailResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_query_error() {
+            return Err(RepositoryError::QueryFailed(message));
+        }
+
+        let record = guard.collection_record(collection_id)?;
+        Ok(GetCollectionDetailResponse {
+            collection: detail_with_expansions(
+                record,
+                &guard.shelf_placements,
+                &request,
+            ),
+        })
+    }
+
+    async fn list_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ListCollectionItemsRequest,
+    ) -> RepositoryResult<ListCollectionItemsResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_query_error() {
+            return Err(RepositoryError::QueryFailed(message));
+        }
+
+        let record = guard.collection_record(collection_id)?;
+        let items: Vec<_> = record
+            .items
+            .iter()
+            .filter(|item| {
+                request
+                    .availability
+                    .is_none_or(|status| item.availability.status == status)
+            })
+            .cloned()
+            .collect();
+        let (items, page) = paginate(&items, &request.page);
+        Ok(ListCollectionItemsResponse {
+            collection_id,
+            items,
+            page,
+            materialization: record.detail.summary.materialization.clone(),
+            version: record.detail.summary.version.clone(),
+        })
+    }
+
+    async fn create_collection(
+        &self,
+        request: CreateCollectionRequest,
+    ) -> RepositoryResult<CreateCollectionResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::CreateFailed(message));
+        }
+
+        let detail = collection_detail_from_create(request);
+        let collection_id = detail.summary.identity.id;
+        guard.collection_order.push(collection_id);
+        guard.collections.insert(
+            collection_id,
+            CollectionRecord {
+                detail: detail.clone(),
+                items: Vec::new(),
+            },
+        );
+        Ok(CreateCollectionResponse { collection: detail })
+    }
+
+    async fn update_collection(
+        &self,
+        collection_id: CollectionId,
+        request: UpdateCollectionRequest,
+    ) -> RepositoryResult<UpdateCollectionResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let record = guard.collection_record_mut(collection_id)?;
+        ensure_expected_revision(
+            &record.detail.summary,
+            request.expected_revision,
+        )?;
+
+        if let Some(title) = request.title {
+            record.detail.summary.title = title;
+        }
+        if let Some(description) = request.description {
+            record.detail.summary.description = Some(description);
+        }
+        if let Some(visibility) = request.visibility {
+            record.detail.summary.visibility = visibility;
+        }
+        if let Some(presentation) = request.presentation {
+            record.detail.summary.presentation = presentation;
+        }
+        if let Some(media_scope) = request.media_scope {
+            record.detail.summary.media_scope = media_scope;
+        }
+        if let Some(duplicate_policy) = request.duplicate_policy {
+            record.detail.summary.duplicate_policy = duplicate_policy;
+        }
+        if let Some(artwork) = request.artwork {
+            record.detail.summary.artwork = artwork;
+        }
+        if let Some(theme) = request.theme {
+            record.detail.summary.theme = theme;
+        }
+        if let Some(rule) = request.rule {
+            record.detail.rule = Some(rule);
+            record.detail.summary.kind = CollectionKind::DynamicRule;
+            record.detail.summary.source = CollectionSource::DynamicRule;
+            record.detail.summary.materialization.state =
+                CollectionMaterializationState::Stale;
+        }
+        bump_collection_version(&mut record.detail.summary);
+        guard.sync_collection(collection_id);
+
+        let record = guard.collection_record(collection_id)?;
+        Ok(UpdateCollectionResponse {
+            collection: detail_with_expansions(
+                record,
+                &guard.shelf_placements,
+                &GetCollectionDetailRequest {
+                    include_rule: true,
+                    include_items_preview: true,
+                    include_shelf_placements: true,
+                },
+            ),
+        })
+    }
+
+    async fn archive_collection(
+        &self,
+        collection_id: CollectionId,
+        request: ArchiveCollectionRequest,
+    ) -> RepositoryResult<ArchiveCollectionResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let record = guard.collection_record_mut(collection_id)?;
+        ensure_expected_revision(
+            &record.detail.summary,
+            request.expected_revision,
+        )?;
+        let archived_at = request.archived.then(Utc::now);
+        record.detail.summary.timestamps.archived_at = archived_at;
+        bump_collection_version(&mut record.detail.summary);
+        Ok(ArchiveCollectionResponse {
+            collection_id,
+            archived_at,
+            version: record.detail.summary.version.clone(),
+        })
+    }
+
+    async fn delete_collection(
+        &self,
+        collection_id: CollectionId,
+        request: DeleteCollectionRequest,
+    ) -> RepositoryResult<DeleteCollectionResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let deleted_at = Utc::now();
+        let version = {
+            let record = guard.collection_record_mut(collection_id)?;
+            ensure_expected_revision(
+                &record.detail.summary,
+                request.expected_revision,
+            )?;
+            bump_collection_version(&mut record.detail.summary);
+            record.detail.summary.version.clone()
+        };
+        guard.collections.remove(&collection_id);
+        guard
+            .collection_order
+            .retain(|candidate| *candidate != collection_id);
+        guard
+            .shelf_placements
+            .retain(|placement| placement.collection_id != collection_id);
+
+        Ok(DeleteCollectionResponse {
+            collection_id,
+            deleted_at,
+            version,
+        })
+    }
+
+    async fn manual_add_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualAddCollectionItemsRequest,
+    ) -> RepositoryResult<ManualAddCollectionItemsResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let record = guard.collection_record_mut(collection_id)?;
+        ensure_expected_revision(
+            &record.detail.summary,
+            request.expected_revision,
+        )?;
+        let policy = request
+            .duplicate_policy
+            .unwrap_or(record.detail.summary.duplicate_policy);
+        let mut results = Vec::with_capacity(request.items.len());
+        let mut changed = false;
+
+        for item in request.items {
+            let item_key = CollectionMemberKey::for_media(&item.media_id);
+            let already_present = record
+                .items
+                .iter()
+                .any(|member| member.item_key == item_key);
+
+            if already_present {
+                match policy {
+                    CollectionDuplicatePolicy::RejectDuplicates => {
+                        return Err(RepositoryError::UpdateFailed(format!(
+                            "Duplicate collection item conflict: {} already exists in {}",
+                            item_key, collection_id
+                        )));
+                    }
+                    CollectionDuplicatePolicy::KeepAll => {}
+                    CollectionDuplicatePolicy::DeduplicateMedia
+                    | CollectionDuplicatePolicy::DeduplicateLogical => {
+                        results.push(CollectionManualAddResult {
+                            item_key,
+                            status: CollectionManualAddStatus::DuplicateSkipped,
+                            message: Some(
+                                "Item is already present in this collection"
+                                    .into(),
+                            ),
+                        });
+                        continue;
+                    }
+                }
+            }
+
+            let position = item.position.unwrap_or_else(|| {
+                record
+                    .items
+                    .iter()
+                    .map(|member| member.position)
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1)
+            });
+            let mut member = CollectionMember::new(
+                item.media_id,
+                item.title_override
+                    .unwrap_or_else(|| item.media_id.to_string()),
+                position,
+            );
+            member.added_at = Some(Utc::now());
+            record.items.push(member);
+            results.push(CollectionManualAddResult {
+                item_key,
+                status: CollectionManualAddStatus::Added,
+                message: None,
+            });
+            changed = true;
+        }
+
+        if changed {
+            bump_collection_version(&mut record.detail.summary);
+            guard.sync_collection(collection_id);
+        }
+        let version = guard
+            .collection_record(collection_id)?
+            .detail
+            .summary
+            .version
+            .clone();
+        Ok(ManualAddCollectionItemsResponse {
+            collection_id,
+            results,
+            version,
+        })
+    }
+
+    async fn manual_remove_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualRemoveCollectionItemsRequest,
+    ) -> RepositoryResult<ManualRemoveCollectionItemsResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let record = guard.collection_record_mut(collection_id)?;
+        ensure_expected_revision(
+            &record.detail.summary,
+            request.expected_revision,
+        )?;
+        let mut removed_item_keys = Vec::new();
+        let mut missing_item_keys = Vec::new();
+
+        for item_key in request.item_keys {
+            let before = record.items.len();
+            record.items.retain(|member| member.item_key != item_key);
+            if record.items.len() < before {
+                removed_item_keys.push(item_key);
+            } else {
+                missing_item_keys.push(item_key);
+            }
+        }
+
+        if !removed_item_keys.is_empty() {
+            bump_collection_version(&mut record.detail.summary);
+            guard.sync_collection(collection_id);
+        }
+        let version = guard
+            .collection_record(collection_id)?
+            .detail
+            .summary
+            .version
+            .clone();
+        Ok(ManualRemoveCollectionItemsResponse {
+            collection_id,
+            removed_item_keys,
+            missing_item_keys,
+            version,
+        })
+    }
+
+    async fn manual_reorder_collection_items(
+        &self,
+        collection_id: CollectionId,
+        request: ManualReorderCollectionItemsRequest,
+    ) -> RepositoryResult<ManualReorderCollectionItemsResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let record = guard.collection_record_mut(collection_id)?;
+        ensure_expected_revision(
+            &record.detail.summary,
+            request.expected_revision,
+        )?;
+        let mut changed = false;
+        for order in request.ordering {
+            if let Some(member) = record
+                .items
+                .iter_mut()
+                .find(|member| member.item_key == order.item_key)
+                && member.position != order.position
+            {
+                member.position = order.position;
+                changed = true;
+            }
+        }
+        if changed {
+            bump_collection_version(&mut record.detail.summary);
+            guard.sync_collection(collection_id);
+        }
+        let version = guard
+            .collection_record(collection_id)?
+            .detail
+            .summary
+            .version
+            .clone();
+        Ok(ManualReorderCollectionItemsResponse {
+            collection_id,
+            version,
+        })
+    }
+
+    async fn validate_collection_rule(
+        &self,
+        request: ValidateCollectionRuleRequest,
+    ) -> RepositoryResult<ValidateCollectionRuleResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_query_error() {
+            return Err(RepositoryError::QueryFailed(message));
+        }
+        validate_rule(&request.rule)
+    }
+
+    async fn preview_collection_rule(
+        &self,
+        request: PreviewCollectionRuleRequest,
+    ) -> RepositoryResult<PreviewCollectionRuleResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_query_error() {
+            return Err(RepositoryError::QueryFailed(message));
+        }
+        let validation = validate_rule(&request.rule)?;
+        if !validation.valid {
+            return Ok(PreviewCollectionRuleResponse {
+                items: Vec::new(),
+                page: CollectionPageInfo {
+                    limit: request.page.limit,
+                    ..CollectionPageInfo::default()
+                },
+                materialization: CollectionMaterializationStatus {
+                    state: CollectionMaterializationState::Failed,
+                    last_error: Some(
+                        validation
+                            .errors
+                            .iter()
+                            .map(|error| error.message.as_str())
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    ),
+                    ..CollectionMaterializationStatus::default()
+                },
+                rule_hash_input: validation.rule_hash_input,
+                rule_hash: None,
+            });
+        }
+
+        let items = guard
+            .collections
+            .values()
+            .flat_map(|record| record.items.iter().cloned())
+            .collect::<Vec<_>>();
+        let items = apply_rule_limit(items, &request.rule);
+        let total = items.len() as u32;
+        let (items, page) = paginate(&items, &request.page);
+        Ok(PreviewCollectionRuleResponse {
+            items,
+            page,
+            materialization: CollectionMaterializationStatus {
+                state: CollectionMaterializationState::Ready,
+                item_count: total,
+                rule_hash: validation.rule_hash.clone(),
+                generated_at: Some(Utc::now()),
+                ..CollectionMaterializationStatus::default()
+            },
+            rule_hash_input: validation.rule_hash_input,
+            rule_hash: validation.rule_hash,
+        })
+    }
+
+    async fn refresh_collection_rule(
+        &self,
+        collection_id: CollectionId,
+        request: RefreshCollectionRuleRequest,
+    ) -> RepositoryResult<RefreshCollectionRuleResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let record = guard.collection_record_mut(collection_id)?;
+        let rule = record.detail.rule.as_ref().ok_or_else(|| {
+            RepositoryError::UpdateFailed(format!(
+                "Collection {} does not have a dynamic rule",
+                collection_id
+            ))
+        })?;
+        let (_, rule_hash) = collection_rule_hash(rule)?;
+        if let Some(expected) = request.expected_rule_hash.as_deref()
+            && expected != rule_hash
+        {
+            return Err(RepositoryError::UpdateFailed(format!(
+                "Collection rule conflict: expected hash {}, found {}",
+                expected, rule_hash
+            )));
+        }
+
+        record.detail.summary.materialization =
+            CollectionMaterializationStatus {
+                state: CollectionMaterializationState::Ready,
+                item_count: record.items.len() as u32,
+                rule_hash: Some(rule_hash.clone()),
+                generated_at: Some(Utc::now()),
+                ..CollectionMaterializationStatus::default()
+            };
+        record.detail.summary.provenance.rule_hash = Some(rule_hash);
+        record.detail.summary.provenance.last_refreshed_at = Some(Utc::now());
+        bump_collection_version(&mut record.detail.summary);
+        Ok(RefreshCollectionRuleResponse {
+            collection_id,
+            materialization: record.detail.summary.materialization.clone(),
+            version: record.detail.summary.version.clone(),
+        })
+    }
+
+    async fn list_shelf_placements(
+        &self,
+        request: ListShelfPlacementsRequest,
+    ) -> RepositoryResult<ListShelfPlacementsResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_query_error() {
+            return Err(RepositoryError::QueryFailed(message));
+        }
+
+        let mut placements: Vec<_> = guard
+            .shelf_placements
+            .iter()
+            .filter(|placement| request.include_unpinned || placement.pinned)
+            .filter(|placement| {
+                request
+                    .surface
+                    .is_none_or(|surface| placement.surface == surface)
+            })
+            .filter(|placement| {
+                request
+                    .shelf_key
+                    .as_ref()
+                    .is_none_or(|shelf_key| &placement.shelf_key == shelf_key)
+            })
+            .cloned()
+            .collect();
+        placements.sort_by(|left, right| {
+            left.position
+                .cmp(&right.position)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(ListShelfPlacementsResponse { placements })
+    }
+
+    async fn pin_shelf_placement(
+        &self,
+        request: PinShelfPlacementRequest,
+    ) -> RepositoryResult<PinShelfPlacementResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let summary = guard
+            .collection_record(request.collection_id)?
+            .detail
+            .summary
+            .clone();
+        let now = Utc::now();
+        let position = request.position.unwrap_or_else(|| {
+            guard
+                .shelf_placements
+                .iter()
+                .filter(|placement| {
+                    placement.surface == request.surface
+                        && placement.shelf_key == request.shelf_key
+                })
+                .map(|placement| placement.position)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1)
+        });
+
+        if let Some(placement) =
+            guard.shelf_placements.iter_mut().find(|placement| {
+                placement.collection_id == request.collection_id
+                    && placement.surface == request.surface
+                    && placement.shelf_key == request.shelf_key
+            })
+        {
+            placement.position = position;
+            placement.pinned = request.pinned;
+            if let Some(presentation) = request.presentation {
+                placement.presentation = presentation;
+            }
+            placement.updated_at = now;
+            return Ok(PinShelfPlacementResponse {
+                placement: placement.clone(),
+            });
+        }
+
+        let placement = ShelfPlacement {
+            schema_version: SHELF_PLACEMENT_SCHEMA_VERSION,
+            id: ShelfPlacementId::new(),
+            collection_id: request.collection_id,
+            surface: request.surface,
+            shelf_key: request.shelf_key,
+            position,
+            pinned: request.pinned,
+            presentation: request.presentation.unwrap_or(summary.presentation),
+            visibility: summary.visibility,
+            created_at: now,
+            updated_at: now,
+        };
+        guard.shelf_placements.push(placement.clone());
+        Ok(PinShelfPlacementResponse { placement })
+    }
+
+    async fn reorder_shelf_placements(
+        &self,
+        request: ReorderShelfPlacementsRequest,
+    ) -> RepositoryResult<ReorderShelfPlacementsResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::UpdateFailed(message));
+        }
+
+        let now = Utc::now();
+        for order in request.ordering {
+            if let Some(placement) = guard
+                .shelf_placements
+                .iter_mut()
+                .find(|placement| placement.id == order.placement_id)
+            {
+                placement.position = order.position;
+                placement.updated_at = now;
+            }
+        }
+        guard.shelf_placements.sort_by(|left, right| {
+            left.position
+                .cmp(&right.position)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(ReorderShelfPlacementsResponse {
+            placements: guard.shelf_placements.clone(),
+        })
+    }
+
+    async fn list_tmdb_collections(
+        &self,
+        request: TmdbListCollectionsRequest,
+    ) -> RepositoryResult<TmdbListCollectionsResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_query_error() {
+            return Err(RepositoryError::QueryFailed(message));
+        }
+
+        let collections: Vec<_> = guard
+            .tmdb_collections
+            .iter()
+            .filter(|summary| {
+                request
+                    .import_kind
+                    .is_none_or(|kind| summary.import_kind == kind)
+            })
+            .cloned()
+            .collect();
+        let (collections, page) = paginate(&collections, &request.page);
+        Ok(TmdbListCollectionsResponse { collections, page })
+    }
+
+    async fn import_tmdb_collection(
+        &self,
+        request: TmdbImportCollectionRequest,
+    ) -> RepositoryResult<TmdbImportCollectionResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(message) = guard.take_collection_write_error() {
+            return Err(RepositoryError::CreateFailed(message));
+        }
+
+        let now = Utc::now();
+        let existing_id =
+            guard
+                .collections
+                .iter()
+                .find_map(|(collection_id, record)| {
+                    (record.detail.summary.source == CollectionSource::Tmdb
+                        && record
+                            .detail
+                            .summary
+                            .provenance
+                            .external_id
+                            .as_deref()
+                            == Some(request.tmdb_id.as_str()))
+                    .then_some(*collection_id)
+                });
+
+        if let Some(collection_id) = existing_id {
+            if !request.refresh_existing {
+                return Err(RepositoryError::CreateFailed(format!(
+                    "Duplicate TMDB collection conflict: {} is already imported",
+                    request.tmdb_id
+                )));
+            }
+            let placements = guard.shelf_placements.clone();
+            let record = guard.collection_record_mut(collection_id)?;
+            record.detail.summary.provenance.last_refreshed_at = Some(now);
+            bump_collection_version(&mut record.detail.summary);
+            let imported_items = record.items.len() as u32;
+            let collection = detail_with_expansions(
+                record,
+                &placements,
+                &GetCollectionDetailRequest {
+                    include_rule: true,
+                    include_items_preview: true,
+                    include_shelf_placements: true,
+                },
+            );
+            return Ok(TmdbImportCollectionResponse {
+                collection,
+                imported_items,
+                skipped_items: 0,
+                warnings: Vec::new(),
+            });
+        }
+
+        let tmdb_summary = guard
+            .tmdb_collections
+            .iter()
+            .find(|summary| summary.tmdb_id == request.tmdb_id)
+            .cloned();
+        let title = request
+            .title_override
+            .clone()
+            .or_else(|| {
+                tmdb_summary.as_ref().map(|summary| summary.title.clone())
+            })
+            .unwrap_or_else(|| format!("TMDB {}", request.tmdb_id));
+        let description = tmdb_summary.and_then(|summary| summary.description);
+        let kind = match request.import_kind {
+            TmdbCollectionImportKind::Collection => {
+                CollectionKind::TmdbCollection
+            }
+            TmdbCollectionImportKind::List
+            | TmdbCollectionImportKind::Keyword => CollectionKind::TmdbList,
+        };
+        let detail = collection_detail_from_create(CreateCollectionRequest {
+            title,
+            description,
+            kind,
+            source: CollectionSource::Tmdb,
+            owner: request.owner,
+            scope: CollectionScope::Global,
+            visibility: request.visibility,
+            presentation: request.presentation,
+            media_scope: request.media_scope,
+            duplicate_policy: request.duplicate_policy,
+            artwork: CollectionArtwork::default(),
+            theme: CollectionTheme::default(),
+            provenance: Some(CollectionProvenance {
+                source: CollectionSource::Tmdb,
+                imported_from: Some("tmdb".into()),
+                external_id: Some(request.tmdb_id.clone()),
+                generated_by: None,
+                rule_hash: None,
+                last_refreshed_at: Some(now),
+            }),
+            rule: None,
+        });
+        let collection_id = detail.summary.identity.id;
+        guard.collection_order.push(collection_id);
+        guard.collections.insert(
+            collection_id,
+            CollectionRecord {
+                detail: detail.clone(),
+                items: Vec::new(),
+            },
+        );
+        Ok(TmdbImportCollectionResponse {
+            collection: detail,
+            imported_items: 0,
+            skipped_items: 0,
+            warnings: Vec::new(),
+        })
+    }
+
+    async fn refresh_tmdb_collection(
+        &self,
+        mut request: TmdbImportCollectionRequest,
+    ) -> RepositoryResult<TmdbImportCollectionResponse> {
+        request.refresh_existing = true;
+        self.import_tmdb_collection(request).await
+    }
+
     async fn fetch_filtered_indices(
         &self,
         _library_id: Uuid,
@@ -745,6 +1879,91 @@ impl ApiService for TestApiService {
     }
 }
 
+fn sample_collections() -> CollectionFixtures {
+    let now = Utc::now();
+    let collection_id = CollectionId::new();
+    let first_movie = MediaID::Movie(MovieID(Uuid::now_v7()));
+    let second_movie = MediaID::Movie(MovieID(Uuid::now_v7()));
+    let items = vec![
+        CollectionMember {
+            added_at: Some(now - Duration::minutes(10)),
+            ..CollectionMember::new(first_movie, "First Sample Movie", 1)
+        },
+        CollectionMember {
+            added_at: Some(now - Duration::minutes(5)),
+            ..CollectionMember::new(second_movie, "Second Sample Movie", 2)
+        },
+    ];
+    let detail = CollectionDetail {
+        summary: CollectionSummary {
+            identity: CollectionIdentity::for_id(collection_id),
+            title: "Sample Collection".into(),
+            description: Some(
+                "A stable in-memory collection for UI tests".into(),
+            ),
+            kind: CollectionKind::Manual,
+            source: CollectionSource::Manual,
+            owner: CollectionOwner::default(),
+            scope: CollectionScope::User,
+            visibility: CollectionVisibility::Private,
+            presentation: CollectionPresentationMode::Shelf,
+            media_scope: CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Movie],
+            },
+            duplicate_policy: CollectionDuplicatePolicy::DeduplicateMedia,
+            artwork: CollectionArtwork::default(),
+            theme: CollectionTheme::default(),
+            provenance: CollectionProvenance::default(),
+            version: CollectionVersion {
+                revision: 1,
+                etag: Some(format!("collection-{}-1", collection_id)),
+                ..CollectionVersion::default()
+            },
+            timestamps: CollectionTimestamps {
+                created_at: now - Duration::days(1),
+                updated_at: now,
+                archived_at: None,
+            },
+            item_count: items.len() as u32,
+            materialization: CollectionMaterializationStatus {
+                state: CollectionMaterializationState::Ready,
+                item_count: items.len() as u32,
+                generated_at: Some(now),
+                ..CollectionMaterializationStatus::default()
+            },
+        },
+        rule: None,
+        items_preview: items.clone(),
+        shelf_placements: Vec::new(),
+    };
+
+    (
+        HashMap::from([(collection_id, CollectionRecord { detail, items })]),
+        vec![collection_id],
+    )
+}
+
+fn sample_tmdb_collections() -> Vec<TmdbCollectionSummary> {
+    vec![
+        TmdbCollectionSummary {
+            tmdb_id: "550".into(),
+            title: "Sample TMDB List".into(),
+            description: Some("A stable TMDB list fixture".into()),
+            import_kind: TmdbCollectionImportKind::List,
+            poster_path: Some("/sample-list.jpg".into()),
+            item_count: 12,
+        },
+        TmdbCollectionSummary {
+            tmdb_id: "collection-42".into(),
+            title: "Sample TMDB Collection".into(),
+            description: None,
+            import_kind: TmdbCollectionImportKind::Collection,
+            poster_path: None,
+            item_count: 3,
+        },
+    ]
+}
+
 fn sample_library(name: &str) -> Library {
     Library {
         id: LibraryId::new(),
@@ -823,5 +2042,366 @@ fn sample_permissions(user_id: Uuid) -> UserPermissions {
             ("user:create".into(), true),
         ]),
         permission_details: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_request(title: &str) -> CreateCollectionRequest {
+        CreateCollectionRequest {
+            title: title.into(),
+            description: None,
+            kind: CollectionKind::Manual,
+            source: CollectionSource::Manual,
+            owner: CollectionOwner::default(),
+            scope: CollectionScope::User,
+            visibility: CollectionVisibility::Private,
+            presentation: CollectionPresentationMode::Shelf,
+            media_scope: CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Movie],
+            },
+            duplicate_policy: CollectionDuplicatePolicy::DeduplicateMedia,
+            artwork: CollectionArtwork::default(),
+            theme: CollectionTheme::default(),
+            provenance: None,
+            rule: None,
+        }
+    }
+
+    fn manual_item(title: &str, position: u32) -> CollectionManualAddItem {
+        CollectionManualAddItem {
+            media_id: MediaID::Movie(MovieID(Uuid::now_v7())),
+            title_override: Some(title.into()),
+            position: Some(position),
+        }
+    }
+
+    #[tokio::test]
+    async fn collection_stub_lists_details_pages_and_reorders_items() {
+        let service = TestApiService::default();
+        service
+            .create_collection(create_request("Second Collection"))
+            .await
+            .expect("seed second collection");
+
+        let first_page = service
+            .list_collections(ListCollectionsRequest {
+                page: CollectionPagination {
+                    cursor: None,
+                    limit: 1,
+                },
+                include_item_counts: true,
+                ..ListCollectionsRequest::default()
+            })
+            .await
+            .expect("list collections");
+        assert_eq!(first_page.collections.len(), 1);
+        assert_eq!(first_page.page.total, 2);
+        assert_eq!(first_page.page.next_cursor.as_deref(), Some("1"));
+
+        let collection_id = first_page.collections[0].identity.id;
+        let detail = service
+            .get_collection_detail(
+                collection_id,
+                GetCollectionDetailRequest {
+                    include_rule: true,
+                    include_items_preview: true,
+                    include_shelf_placements: false,
+                },
+            )
+            .await
+            .expect("collection detail");
+        assert_eq!(detail.collection.items_preview.len(), 2);
+
+        let first_items_page = service
+            .list_collection_items(
+                collection_id,
+                ListCollectionItemsRequest {
+                    page: CollectionPagination {
+                        cursor: None,
+                        limit: 1,
+                    },
+                    availability: Some(
+                        CollectionMemberAvailabilityStatus::Available,
+                    ),
+                },
+            )
+            .await
+            .expect("list collection items");
+        assert_eq!(first_items_page.items.len(), 1);
+        assert_eq!(first_items_page.page.total, 2);
+
+        let all_items = service
+            .list_collection_items(
+                collection_id,
+                ListCollectionItemsRequest::default(),
+            )
+            .await
+            .expect("all items")
+            .items;
+        let last_key = all_items[1].item_key.clone();
+        let first_key = all_items[0].item_key.clone();
+        service
+            .manual_reorder_collection_items(
+                collection_id,
+                ManualReorderCollectionItemsRequest {
+                    ordering: vec![
+                        CollectionManualOrder {
+                            item_key: last_key.clone(),
+                            position: 1,
+                        },
+                        CollectionManualOrder {
+                            item_key: first_key,
+                            position: 2,
+                        },
+                    ],
+                    expected_revision: Some(1),
+                },
+            )
+            .await
+            .expect("reorder items");
+
+        let reordered = service
+            .list_collection_items(
+                collection_id,
+                ListCollectionItemsRequest::default(),
+            )
+            .await
+            .expect("reordered items")
+            .items;
+        assert_eq!(reordered[0].item_key, last_key);
+    }
+
+    #[tokio::test]
+    async fn collection_stub_reports_version_and_duplicate_conflicts() {
+        let service = TestApiService::default();
+        let mut request = create_request("No Duplicates");
+        request.duplicate_policy = CollectionDuplicatePolicy::RejectDuplicates;
+        let collection = service
+            .create_collection(request)
+            .await
+            .expect("create collection")
+            .collection;
+        let collection_id = collection.summary.identity.id;
+        let item = manual_item("Arrival", 1);
+        let media_id = item.media_id;
+
+        service
+            .manual_add_collection_items(
+                collection_id,
+                ManualAddCollectionItemsRequest {
+                    items: vec![item],
+                    duplicate_policy: None,
+                    expected_revision: Some(1),
+                },
+            )
+            .await
+            .expect("add item");
+
+        let duplicate = service
+            .manual_add_collection_items(
+                collection_id,
+                ManualAddCollectionItemsRequest {
+                    items: vec![CollectionManualAddItem {
+                        media_id,
+                        title_override: Some("Arrival duplicate".into()),
+                        position: Some(2),
+                    }],
+                    duplicate_policy: None,
+                    expected_revision: Some(2),
+                },
+            )
+            .await
+            .expect_err("duplicate item should fail closed");
+        assert!(duplicate.to_string().contains("Duplicate collection item"));
+
+        let stale_update = service
+            .update_collection(
+                collection_id,
+                UpdateCollectionRequest {
+                    title: Some("Stale title".into()),
+                    expected_revision: Some(1),
+                    ..UpdateCollectionRequest::default()
+                },
+            )
+            .await
+            .expect_err("stale revision should fail");
+        assert!(stale_update.to_string().contains("version conflict"));
+
+        let deleted = service
+            .delete_collection(
+                collection_id,
+                DeleteCollectionRequest {
+                    reason: Some("stub cleanup".into()),
+                    expected_revision: Some(2),
+                },
+            )
+            .await
+            .expect("delete collection");
+        assert_eq!(deleted.collection_id, collection_id);
+        assert_eq!(deleted.version.revision, 3);
+        let remaining = service
+            .list_collections(ListCollectionsRequest::default())
+            .await
+            .expect("list after delete");
+        assert!(
+            remaining
+                .collections
+                .iter()
+                .all(|summary| summary.identity.id != collection_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn collection_stub_handles_rules_shelves_and_tmdb_refreshes() {
+        let service = TestApiService::default();
+        let sample_id = service
+            .list_collections(ListCollectionsRequest::default())
+            .await
+            .expect("list default collections")
+            .collections[0]
+            .identity
+            .id;
+
+        let mut request = create_request("Dynamic Picks");
+        request.kind = CollectionKind::DynamicRule;
+        request.source = CollectionSource::DynamicRule;
+        request.rule = Some(DynamicCollectionRule::default());
+        let dynamic = service
+            .create_collection(request)
+            .await
+            .expect("create dynamic collection")
+            .collection;
+        let dynamic_id = dynamic.summary.identity.id;
+        let rule = dynamic.rule.clone().expect("dynamic rule");
+
+        let validation = service
+            .validate_collection_rule(ValidateCollectionRuleRequest {
+                rule: rule.clone(),
+            })
+            .await
+            .expect("validate rule");
+        assert!(validation.valid);
+        let preview = service
+            .preview_collection_rule(PreviewCollectionRuleRequest {
+                rule: rule.clone(),
+                page: CollectionPagination {
+                    cursor: None,
+                    limit: 1,
+                },
+            })
+            .await
+            .expect("preview rule");
+        assert_eq!(preview.items.len(), 1);
+        assert_eq!(preview.page.total, 2);
+
+        let refreshed = service
+            .refresh_collection_rule(
+                dynamic_id,
+                RefreshCollectionRuleRequest {
+                    force: true,
+                    expected_rule_hash: validation.rule_hash,
+                },
+            )
+            .await
+            .expect("refresh rule");
+        assert_eq!(
+            refreshed.materialization.state,
+            CollectionMaterializationState::Ready
+        );
+
+        let first = service
+            .pin_shelf_placement(PinShelfPlacementRequest {
+                collection_id: sample_id,
+                surface: ShelfSurface::Home,
+                shelf_key: "home.collections".into(),
+                pinned: true,
+                position: Some(1),
+                presentation: None,
+            })
+            .await
+            .expect("pin first")
+            .placement;
+        let second = service
+            .pin_shelf_placement(PinShelfPlacementRequest {
+                collection_id: dynamic_id,
+                surface: ShelfSurface::Home,
+                shelf_key: "home.collections".into(),
+                pinned: true,
+                position: Some(2),
+                presentation: Some(CollectionPresentationMode::Hero),
+            })
+            .await
+            .expect("pin second")
+            .placement;
+        service
+            .reorder_shelf_placements(ReorderShelfPlacementsRequest {
+                ordering: vec![
+                    ShelfPlacementOrder {
+                        placement_id: second.id,
+                        position: 1,
+                    },
+                    ShelfPlacementOrder {
+                        placement_id: first.id,
+                        position: 2,
+                    },
+                ],
+            })
+            .await
+            .expect("reorder shelves");
+        let shelves = service
+            .list_shelf_placements(ListShelfPlacementsRequest {
+                surface: Some(ShelfSurface::Home),
+                shelf_key: Some("home.collections".into()),
+                include_unpinned: false,
+            })
+            .await
+            .expect("list shelves");
+        assert_eq!(shelves.placements[0].id, second.id);
+
+        let tmdb_page = service
+            .list_tmdb_collections(TmdbListCollectionsRequest::default())
+            .await
+            .expect("list tmdb collections");
+        assert_eq!(tmdb_page.collections.len(), 2);
+
+        let import_request = TmdbImportCollectionRequest {
+            tmdb_id: "550".into(),
+            import_kind: TmdbCollectionImportKind::List,
+            title_override: None,
+            owner: CollectionOwner::default(),
+            visibility: CollectionVisibility::Shared,
+            presentation: CollectionPresentationMode::Shelf,
+            duplicate_policy: CollectionDuplicatePolicy::DeduplicateMedia,
+            media_scope: CollectionMediaScope::All,
+            refresh_existing: false,
+        };
+        let imported = service
+            .import_tmdb_collection(import_request.clone())
+            .await
+            .expect("import tmdb collection");
+        assert_eq!(imported.collection.summary.source, CollectionSource::Tmdb);
+
+        let duplicate = service
+            .import_tmdb_collection(import_request.clone())
+            .await
+            .expect_err("duplicate tmdb import should fail");
+        assert!(duplicate.to_string().contains("Duplicate TMDB collection"));
+
+        let refreshed = service
+            .refresh_tmdb_collection(import_request)
+            .await
+            .expect("refresh tmdb import");
+        assert_eq!(
+            refreshed
+                .collection
+                .summary
+                .provenance
+                .external_id
+                .as_deref(),
+            Some("550")
+        );
     }
 }

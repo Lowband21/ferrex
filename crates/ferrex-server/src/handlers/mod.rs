@@ -5,6 +5,8 @@
 
 /// Administrative handlers for demo controls, media roots, scan history, and developer utilities.
 pub mod admin;
+/// Collection browsing, rule preview, and manual-editing handlers.
+pub mod collections;
 /// Local-network discovery handler for client bootstrap.
 pub mod discovery;
 /// Websocket upgrade handler for realtime events.

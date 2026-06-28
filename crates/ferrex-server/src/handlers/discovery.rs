@@ -81,6 +81,10 @@ pub async fn get_explore_handler(
 ) -> Result<Json<ApiResponse<DiscoveryResponse>>, AppError> {
     let limit = params.section_limit();
     let uow = state.unit_of_work();
+    let system_definitions = system_global_explore_collections(user.id);
+    uow.collections
+        .ensure_system_collections(&system_definitions)
+        .await?;
 
     let recently_added = query_movie_shelf(
         uow.as_ref(),
@@ -113,6 +117,7 @@ pub async fn get_explore_handler(
     .await?;
 
     let sections = movie_discovery_sections(
+        &system_definitions,
         recently_added,
         recently_released,
         audience_rating_picks,
@@ -130,6 +135,10 @@ pub async fn get_resume_handler(
 ) -> Result<Json<ApiResponse<DiscoveryResponse>>, AppError> {
     let limit = params.section_limit();
     let uow = state.unit_of_work();
+    let system_definition = system_resume_collection(user.id);
+    uow.collections
+        .ensure_system_collections(std::slice::from_ref(&system_definition))
+        .await?;
     let continue_items = uow
         .watch_status
         .get_continue_watching(user.id, limit)
@@ -139,13 +148,7 @@ pub async fn get_resume_handler(
         .map(discovery_item_from_continue_watching)
         .collect();
 
-    let section = DiscoverySection::continue_row(
-        DISCOVERY_SECTION_RESUME,
-        "Resume",
-        Some("Pick up where you left off".to_string()),
-        items,
-        limit,
-    );
+    let section = system_definition.section(items, limit);
 
     Ok(Json(ApiResponse::success(DiscoveryResponse::new(vec![
         section,
@@ -177,12 +180,22 @@ pub async fn get_library_discovery_handler(
         return Err(AppError::not_found("Library not found"));
     }
 
+    let system_definitions = system_library_discovery_collections(
+        user.id,
+        library_id,
+        library.library_type,
+    );
+    uow.collections
+        .ensure_system_collections(&system_definitions)
+        .await?;
+
     let sections = match library.library_type {
         LibraryType::Movies => {
             query_movie_library_sections(
                 uow.as_ref(),
                 user.id,
                 library_id,
+                &system_definitions,
                 limit,
             )
             .await?
@@ -192,6 +205,7 @@ pub async fn get_library_discovery_handler(
                 uow.as_ref(),
                 user.id,
                 library_id,
+                &system_definitions,
                 limit,
             )
             .await?
@@ -205,6 +219,7 @@ async fn query_movie_library_sections(
     uow: &AppUnitOfWork,
     user_id: Uuid,
     library_id: LibraryId,
+    system_definitions: &[SystemCollectionDefinition],
     limit: usize,
 ) -> Result<Vec<DiscoverySection>, AppError> {
     let recently_added = query_movie_shelf(
@@ -238,6 +253,7 @@ async fn query_movie_library_sections(
     .await?;
 
     Ok(movie_discovery_sections(
+        system_definitions,
         recently_added,
         recently_released,
         audience_rating_picks,
@@ -249,6 +265,7 @@ async fn query_series_library_sections(
     uow: &AppUnitOfWork,
     user_id: Uuid,
     library_id: LibraryId,
+    system_definitions: &[SystemCollectionDefinition],
     limit: usize,
 ) -> Result<Vec<DiscoverySection>, AppError> {
     let candidates =
@@ -258,6 +275,7 @@ async fn query_series_library_sections(
     Ok(series_library_discovery_sections(
         &candidates,
         library_id,
+        system_definitions,
         limit,
     ))
 }
@@ -265,6 +283,7 @@ async fn query_series_library_sections(
 fn series_library_discovery_sections(
     candidates: &[SeriesDiscoveryCandidate],
     library_id: LibraryId,
+    system_definitions: &[SystemCollectionDefinition],
     limit: usize,
 ) -> Vec<DiscoverySection> {
     let continue_series =
@@ -275,77 +294,46 @@ fn series_library_discovery_sections(
         recently_added_series_shelf_items(candidates, library_id, limit);
     let mut sections = Vec::new();
 
-    push_section_if_not_empty(
-        &mut sections,
-        DiscoverySection::continue_row(
-            DISCOVERY_SECTION_CONTINUE_SERIES,
-            "Continue series",
-            Some("Resume an episode or play what is next".to_string()),
-            continue_series,
-            limit,
-        ),
-    );
-    push_section_if_not_empty(
-        &mut sections,
-        DiscoverySection::poster_row(
-            DISCOVERY_SECTION_UNWATCHED_SERIES,
-            "Unwatched series",
-            Some("Series you have not started in this library".to_string()),
-            unwatched_series,
-            limit,
-        ),
-    );
-    push_section_if_not_empty(
-        &mut sections,
-        DiscoverySection::poster_row(
-            DISCOVERY_SECTION_RECENTLY_ADDED,
-            "Recently added",
-            Some("New series in this library".to_string()),
-            recently_added,
-            limit,
-        ),
-    );
+    for definition in system_definitions {
+        let items = match definition.shelf {
+            SystemDiscoveryShelf::ContinueSeries => continue_series.clone(),
+            SystemDiscoveryShelf::UnwatchedSeries => unwatched_series.clone(),
+            SystemDiscoveryShelf::RecentlyAddedSeries => recently_added.clone(),
+            _ => Vec::new(),
+        };
+        push_section_if_not_empty(
+            &mut sections,
+            definition.section(items, limit),
+        );
+    }
 
     sections
 }
 
 fn movie_discovery_sections(
+    system_definitions: &[SystemCollectionDefinition],
     recently_added: Vec<DiscoveryItem>,
     recently_released: Vec<DiscoveryItem>,
     audience_rating_picks: Vec<DiscoveryItem>,
     limit: usize,
 ) -> Vec<DiscoverySection> {
     let mut sections = Vec::new();
-    push_section_if_not_empty(
-        &mut sections,
-        DiscoverySection::poster_row(
-            DISCOVERY_SECTION_RECENTLY_ADDED,
-            "Recently added",
-            Some("New in your library".to_string()),
-            recently_added,
-            limit,
-        ),
-    );
-    push_section_if_not_empty(
-        &mut sections,
-        DiscoverySection::poster_row(
-            DISCOVERY_SECTION_RECENTLY_RELEASED,
-            "Recently released",
-            Some("Recent releases available in your library".to_string()),
-            recently_released,
-            limit,
-        ),
-    );
-    push_section_if_not_empty(
-        &mut sections,
-        DiscoverySection::poster_row(
-            DISCOVERY_SECTION_AUDIENCE_RATING_PICKS,
-            "Audience rating picks",
-            Some("Highly rated titles with metadata".to_string()),
-            audience_rating_picks,
-            limit,
-        ),
-    );
+    for definition in system_definitions {
+        let items = match definition.shelf {
+            SystemDiscoveryShelf::RecentlyAddedMovies => recently_added.clone(),
+            SystemDiscoveryShelf::RecentlyReleasedMovies => {
+                recently_released.clone()
+            }
+            SystemDiscoveryShelf::AudienceRatingPicks => {
+                audience_rating_picks.clone()
+            }
+            _ => Vec::new(),
+        };
+        push_section_if_not_empty(
+            &mut sections,
+            definition.section(items, limit),
+        );
+    }
     sections
 }
 
@@ -1147,6 +1135,68 @@ mod tests {
     }
 
     #[test]
+    fn movie_sections_follow_system_definition_metadata_and_limits() {
+        let user_id = Uuid::from_u128(1_000);
+        let added_id = MovieID(Uuid::from_u128(1_001));
+        let released_id = MovieID(Uuid::from_u128(1_002));
+        let rating_id = MovieID(Uuid::from_u128(1_003));
+        let definitions = system_global_explore_collections(user_id);
+
+        let sections = movie_discovery_sections(
+            &definitions,
+            vec![
+                DiscoveryItem::new(MediaID::Movie(added_id), "Added first"),
+                DiscoveryItem::new(
+                    MediaID::Movie(MovieID(Uuid::from_u128(1_004))),
+                    "Added second",
+                ),
+            ],
+            vec![DiscoveryItem::new(
+                MediaID::Movie(released_id),
+                "Released first",
+            )],
+            vec![DiscoveryItem::new(MediaID::Movie(rating_id), "Rated first")],
+            1,
+        );
+
+        assert_eq!(
+            sections
+                .iter()
+                .map(|section| section.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                DISCOVERY_SECTION_RECENTLY_ADDED,
+                DISCOVERY_SECTION_RECENTLY_RELEASED,
+                DISCOVERY_SECTION_AUDIENCE_RATING_PICKS,
+            ]
+        );
+        assert_eq!(
+            sections
+                .iter()
+                .map(|section| section.title.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Recently added",
+                "Recently released",
+                "Audience rating picks",
+            ]
+        );
+        assert_eq!(
+            sections
+                .iter()
+                .map(|section| section.items.len())
+                .collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
+        assert_eq!(sections[0].items[0].media_id, MediaID::Movie(added_id));
+        assert_eq!(sections[1].items[0].media_id, MediaID::Movie(released_id));
+        assert_eq!(sections[2].items[0].media_id, MediaID::Movie(rating_id));
+        assert!(sections.iter().all(|section| {
+            section.layout_hint == DiscoveryLayoutHint::PosterRow
+        }));
+    }
+
+    #[test]
     fn scoped_continue_context_mapping_filters_cross_library_rows() {
         let library_id = LibraryId(Uuid::from_u128(70));
         let other_library_id = LibraryId(Uuid::from_u128(71));
@@ -1464,8 +1514,17 @@ mod tests {
             candidate(unwatched_id, library_id, "Fresh Show", 100, None),
         ];
 
-        let sections =
-            series_library_discovery_sections(&candidates, library_id, 10);
+        let definitions = system_library_discovery_collections(
+            Uuid::from_u128(900),
+            library_id,
+            LibraryType::Series,
+        );
+        let sections = series_library_discovery_sections(
+            &candidates,
+            library_id,
+            &definitions,
+            10,
+        );
 
         assert_eq!(
             sections

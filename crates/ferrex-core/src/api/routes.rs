@@ -75,6 +75,36 @@ pub mod v1 {
         pub const RESUME: &str = v1_path!("/discovery/resume");
     }
 
+    pub mod collections {
+        pub const COLLECTION: &str = v1_path!("/collections");
+        pub const ITEM: &str = v1_path!("/collections/{collection_id}");
+        pub const ITEMS: &str = v1_path!("/collections/{collection_id}/items");
+        pub const ARCHIVE: &str =
+            v1_path!("/collections/{collection_id}/archive");
+        pub const MANUAL_ADD_ITEMS: &str =
+            v1_path!("/collections/{collection_id}/items:manual-add");
+        pub const MANUAL_REMOVE_ITEMS: &str =
+            v1_path!("/collections/{collection_id}/items:manual-remove");
+        pub const MANUAL_REORDER_ITEMS: &str =
+            v1_path!("/collections/{collection_id}/items:reorder");
+        pub const RULE_VALIDATE: &str = v1_path!("/collections/rules:validate");
+        pub const RULE_PREVIEW: &str = v1_path!("/collections/rules:preview");
+        pub const RULE_REFRESH: &str =
+            v1_path!("/collections/{collection_id}/rule:refresh");
+
+        pub mod tmdb {
+            pub const IMPORT: &str = v1_path!("/collections/tmdb/import");
+            pub const LIST: &str = v1_path!("/collections/tmdb/lists");
+        }
+    }
+
+    pub mod shelves {
+        pub const PLACEMENTS: &str = v1_path!("/shelves/placements");
+        pub const PIN_PLACEMENT: &str = v1_path!("/shelves/placements:pin");
+        pub const REORDER_PLACEMENTS: &str =
+            v1_path!("/shelves/placements:reorder");
+    }
+
     pub mod intelligence {
         pub const LIBRARY_OVERVIEW: &str =
             v1_path!("/intelligence/libraries/overview");

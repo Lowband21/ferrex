@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT state::text AS \"state!\", rule_hash, evaluated_at, total_count, visible_count\n        FROM collection_materializations\n        WHERE collection_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "rule_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "evaluated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "visible_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b11b56f182e1b3cc14cf4c20e0e815dd980e56774dc2618df6fc6b0bdc808b4b"
+}

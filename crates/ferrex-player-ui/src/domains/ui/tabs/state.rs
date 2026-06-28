@@ -6,14 +6,23 @@ use crate::infra::api_types::{LibraryType, Media};
 // no poster-checking helpers needed; core compare_media handles poster-first
 use super::HomeFocusState;
 use crate::infra::repository::accessor::{Accessor, ReadOnly};
-use ferrex_core::player_prelude::{
-    ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedModel,
-    ArchivedMovieReference, ArchivedSeries, LibraryId, MediaID, MediaIDLike,
-    MediaOps, MovieID, SeriesID, SortBy, SortOrder, compare_media,
+use ferrex_core::{
+    api::types::collections::{
+        CollectionDetail, CollectionId, CollectionMaterializationStatus,
+        CollectionMediaKind, CollectionMediaScope, CollectionMember,
+        CollectionMemberKey, CollectionPageInfo, CollectionSummary,
+        CollectionVersion,
+    },
+    player_prelude::{
+        ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedModel,
+        ArchivedMovieReference, ArchivedSeries, LibraryId, MediaID,
+        MediaIDLike, MediaOps, MovieID, SeriesID, SortBy, SortOrder,
+        compare_media,
+    },
 };
 use iced::widget::Id;
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::{cmp::Ordering, fmt};
 use uuid::Uuid;
 
 /// State for an individual tab
@@ -21,6 +30,9 @@ use uuid::Uuid;
 pub enum TabState {
     /// State for the home tab showing curated content
     Home(Box<HomeTabState>),
+
+    /// State for the collections tab showing server-side collection summaries
+    Collections(Box<CollectionsTabState>),
 
     /// State for a library-specific tab
     Library(Box<LibraryTabState>),
@@ -40,6 +52,11 @@ impl TabState {
         TabState::Home(Box::new(HomeTabState::new(accessor)))
     }
 
+    /// Create a new Collections tab state
+    pub fn new_collections() -> Self {
+        TabState::Collections(Box::new(CollectionsTabState::new()))
+    }
+
     /// Create a new Library tab state
     pub fn new_library(
         library_id: LibraryId,
@@ -57,7 +74,7 @@ impl TabState {
     pub fn grid_state(&self) -> Option<&VirtualGridState> {
         match self {
             TabState::Library(state) => Some(&state.grid_state),
-            TabState::Home(_) => None,
+            TabState::Home(_) | TabState::Collections(_) => None,
         }
     }
 
@@ -65,7 +82,7 @@ impl TabState {
     pub fn grid_state_mut(&mut self) -> Option<&mut VirtualGridState> {
         match self {
             TabState::Library(state) => Some(&mut state.grid_state),
-            TabState::Home(_) => None,
+            TabState::Home(_) | TabState::Collections(_) => None,
         }
     }
 
@@ -73,9 +90,8 @@ impl TabState {
     pub fn get_visible_items(&self) -> Vec<ArchivedMediaID> {
         match self {
             TabState::Library(state) => state.get_visible_items(),
-            TabState::Home(_) => {
-                // Home  tab uses carousel view, not virtual grid
-                // Return empty for now - could be extended to return carousel visible items
+            TabState::Home(_) | TabState::Collections(_) => {
+                // Home and Collections tabs do not use the library virtual grid.
                 Vec::new()
             }
         }
@@ -85,9 +101,8 @@ impl TabState {
     pub fn get_prefetch_items(&self) -> Vec<ArchivedMediaID> {
         match self {
             TabState::Library(state) => state.get_preload_items(),
-            TabState::Home(_) => {
-                // Home  tab uses carousel view, not virtual grid
-                // Return empty for now - could be extended to return carousel visible items
+            TabState::Home(_) | TabState::Collections(_) => {
+                // Home and Collections tabs do not use the library virtual grid.
                 Vec::new()
             }
         }
@@ -438,6 +453,683 @@ impl HomeTabState {
     //pub fn set_repo_accessor(&mut self, accessor: Option<&UIMediaAccessor>) {
     //    self.view_model.set_repo_accessor(accessor);
     //}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionsLoadState {
+    NotLoaded,
+    Loading,
+    Loaded,
+    Empty,
+    Error(String),
+}
+
+impl Default for CollectionsLoadState {
+    fn default() -> Self {
+        Self::NotLoaded
+    }
+}
+
+impl CollectionsLoadState {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Loaded | Self::Empty)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CollectionDetailLoadState {
+    NotLoaded,
+    Loading,
+    Loaded(CollectionDetail),
+    Error(String),
+}
+
+impl Default for CollectionDetailLoadState {
+    fn default() -> Self {
+        Self::NotLoaded
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionItemsLoadState {
+    NotLoaded,
+    Loading,
+    Loaded,
+    LoadingMore,
+    Error(String),
+}
+
+impl Default for CollectionItemsLoadState {
+    fn default() -> Self {
+        Self::NotLoaded
+    }
+}
+
+impl CollectionItemsLoadState {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading | Self::LoadingMore)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectionItemsState {
+    pub items: Vec<CollectionMember>,
+    pub page: Option<CollectionPageInfo>,
+    pub materialization: Option<CollectionMaterializationStatus>,
+    pub load_state: CollectionItemsLoadState,
+}
+
+impl CollectionItemsState {
+    pub fn next_cursor(&self) -> Option<String> {
+        self.page.as_ref().and_then(|page| page.next_cursor.clone())
+    }
+
+    pub fn has_more(&self) -> bool {
+        self.next_cursor().is_some()
+    }
+}
+
+impl Default for CollectionItemsState {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            page: None,
+            materialization: None,
+            load_state: CollectionItemsLoadState::NotLoaded,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionRefreshState {
+    Idle,
+    Refreshing,
+    Error(String),
+}
+
+impl Default for CollectionRefreshState {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum CollectionMediaScopeChoice {
+    #[default]
+    All,
+    Movies,
+    Series,
+    Seasons,
+    Episodes,
+    MoviesAndSeries,
+}
+
+impl CollectionMediaScopeChoice {
+    pub const OPTIONS: [Self; 6] = [
+        Self::All,
+        Self::Movies,
+        Self::Series,
+        Self::Seasons,
+        Self::Episodes,
+        Self::MoviesAndSeries,
+    ];
+
+    pub fn as_scope(self) -> CollectionMediaScope {
+        match self {
+            Self::All => CollectionMediaScope::All,
+            Self::Movies => CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Movie],
+            },
+            Self::Series => CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Series],
+            },
+            Self::Seasons => CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Season],
+            },
+            Self::Episodes => CollectionMediaScope::Types {
+                media_types: vec![CollectionMediaKind::Episode],
+            },
+            Self::MoviesAndSeries => CollectionMediaScope::Types {
+                media_types: vec![
+                    CollectionMediaKind::Movie,
+                    CollectionMediaKind::Series,
+                ],
+            },
+        }
+    }
+
+    pub fn from_scope(scope: &CollectionMediaScope) -> Self {
+        match scope {
+            CollectionMediaScope::All => Self::All,
+            CollectionMediaScope::Types { media_types } => {
+                let has = |kind| media_types.contains(&kind);
+                match media_types.len() {
+                    1 if has(CollectionMediaKind::Movie) => Self::Movies,
+                    1 if has(CollectionMediaKind::Series) => Self::Series,
+                    1 if has(CollectionMediaKind::Season) => Self::Seasons,
+                    1 if has(CollectionMediaKind::Episode) => Self::Episodes,
+                    2 if has(CollectionMediaKind::Movie)
+                        && has(CollectionMediaKind::Series) =>
+                    {
+                        Self::MoviesAndSeries
+                    }
+                    _ => Self::All,
+                }
+            }
+            CollectionMediaScope::Library { media_types, .. } => {
+                if media_types.is_empty() {
+                    Self::All
+                } else {
+                    Self::from_scope(&CollectionMediaScope::Types {
+                        media_types: media_types.clone(),
+                    })
+                }
+            }
+            CollectionMediaScope::ExplicitItems { .. } => Self::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All media",
+            Self::Movies => "Movies only",
+            Self::Series => "Series only",
+            Self::Seasons => "Seasons only",
+            Self::Episodes => "Episodes only",
+            Self::MoviesAndSeries => "Movies and series",
+        }
+    }
+}
+
+impl fmt::Display for CollectionMediaScopeChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionCreateFormState {
+    pub is_open: bool,
+    pub title: String,
+    pub description: String,
+    pub media_scope: CollectionMediaScopeChoice,
+    pub submitting: bool,
+    pub error: Option<String>,
+}
+
+impl Default for CollectionCreateFormState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            title: String::new(),
+            description: String::new(),
+            media_scope: CollectionMediaScopeChoice::All,
+            submitting: false,
+            error: None,
+        }
+    }
+}
+
+impl CollectionCreateFormState {
+    pub fn reset_after_success(&mut self) {
+        let was_open = self.is_open;
+        *self = Self::default();
+        self.is_open = was_open;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionEditFormState {
+    pub title: String,
+    pub description: String,
+    pub media_scope: CollectionMediaScopeChoice,
+    pub is_dirty: bool,
+    pub saving: bool,
+    pub archiving: bool,
+    pub error: Option<String>,
+    pub conflict: bool,
+}
+
+impl Default for CollectionEditFormState {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            description: String::new(),
+            media_scope: CollectionMediaScopeChoice::All,
+            is_dirty: false,
+            saving: false,
+            archiving: false,
+            error: None,
+            conflict: false,
+        }
+    }
+}
+
+impl CollectionEditFormState {
+    pub fn from_summary(summary: &CollectionSummary) -> Self {
+        Self {
+            title: summary.title.clone(),
+            description: summary.description.clone().unwrap_or_default(),
+            media_scope: CollectionMediaScopeChoice::from_scope(
+                &summary.media_scope,
+            ),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionPickerItem {
+    pub media_id: MediaID,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub media_kind: CollectionMediaKind,
+    pub library_id: Option<LibraryId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CollectionMediaPickerState {
+    pub query: String,
+    pub searching: bool,
+    pub results: Vec<CollectionPickerItem>,
+    pub adding: Option<MediaID>,
+    pub error: Option<String>,
+    pub conflict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionItemMutationKind {
+    Removing(CollectionMemberKey),
+    Reordering(CollectionMemberKey),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CollectionItemActionState {
+    pub in_flight: Option<CollectionItemMutationKind>,
+    pub error: Option<String>,
+    pub conflict: bool,
+}
+
+/// State for the desktop Collections tab and detail cache.
+#[derive(Debug)]
+pub struct CollectionsTabState {
+    /// Summaries currently rendered in the Collections tab.
+    pub summaries: Vec<CollectionSummary>,
+
+    /// Current list-loading state.
+    pub load_state: CollectionsLoadState,
+
+    /// Pagination metadata returned by the API for the last refresh.
+    pub page: Option<CollectionPageInfo>,
+
+    /// Scrollable widget id used for desktop tab scroll restoration.
+    pub scrollable_id: Id,
+
+    /// Per-collection detail state, loaded on demand when cards are opened.
+    pub detail_states: HashMap<CollectionId, CollectionDetailLoadState>,
+
+    /// Per-collection paginated member state for the detail grid.
+    pub item_states: HashMap<CollectionId, CollectionItemsState>,
+
+    /// Per-collection refresh affordance state.
+    pub refresh_states: HashMap<CollectionId, CollectionRefreshState>,
+
+    /// Manual collection creation form shown from the Collections tab.
+    pub create_form: CollectionCreateFormState,
+
+    /// Per-collection metadata editing forms, seeded from loaded details.
+    pub edit_forms: HashMap<CollectionId, CollectionEditFormState>,
+
+    /// Per-collection media picker/search state for manual additions.
+    pub picker_states: HashMap<CollectionId, CollectionMediaPickerState>,
+
+    /// Per-collection item mutation state for remove/reorder controls.
+    pub item_action_states: HashMap<CollectionId, CollectionItemActionState>,
+}
+
+impl CollectionsTabState {
+    pub fn new() -> Self {
+        Self {
+            summaries: Vec::new(),
+            load_state: CollectionsLoadState::NotLoaded,
+            page: None,
+            scrollable_id: Id::from("collections-tab"),
+            detail_states: HashMap::new(),
+            item_states: HashMap::new(),
+            refresh_states: HashMap::new(),
+            create_form: CollectionCreateFormState::default(),
+            edit_forms: HashMap::new(),
+            picker_states: HashMap::new(),
+            item_action_states: HashMap::new(),
+        }
+    }
+
+    pub fn should_load_initial(&self) -> bool {
+        matches!(
+            self.load_state,
+            CollectionsLoadState::NotLoaded | CollectionsLoadState::Error(_)
+        )
+    }
+
+    pub fn mark_loading(&mut self) {
+        self.load_state = CollectionsLoadState::Loading;
+    }
+
+    pub fn mark_loaded(
+        &mut self,
+        summaries: Vec<CollectionSummary>,
+        page: CollectionPageInfo,
+    ) {
+        self.summaries = summaries;
+        self.page = Some(page);
+        self.load_state = if self.summaries.is_empty() {
+            CollectionsLoadState::Empty
+        } else {
+            CollectionsLoadState::Loaded
+        };
+    }
+
+    pub fn mark_error(&mut self, message: impl Into<String>) {
+        self.load_state = CollectionsLoadState::Error(message.into());
+    }
+
+    pub fn summary(
+        &self,
+        collection_id: CollectionId,
+    ) -> Option<&CollectionSummary> {
+        self.summaries
+            .iter()
+            .find(|summary| summary.identity.id == collection_id)
+    }
+
+    pub fn mark_detail_loading(&mut self, collection_id: CollectionId) {
+        self.detail_states
+            .insert(collection_id, CollectionDetailLoadState::Loading);
+    }
+
+    pub fn mark_detail_loaded(&mut self, detail: CollectionDetail) {
+        let collection_id = detail.summary.identity.id;
+        if let Some(summary) = self
+            .summaries
+            .iter_mut()
+            .find(|summary| summary.identity.id == collection_id)
+        {
+            *summary = detail.summary.clone();
+        }
+        self.sync_edit_form_from_detail(&detail);
+        self.detail_states
+            .insert(collection_id, CollectionDetailLoadState::Loaded(detail));
+    }
+
+    pub fn mark_detail_error(
+        &mut self,
+        collection_id: CollectionId,
+        message: impl Into<String>,
+    ) {
+        self.detail_states.insert(
+            collection_id,
+            CollectionDetailLoadState::Error(message.into()),
+        );
+    }
+
+    pub fn detail_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionDetailLoadState {
+        self.detail_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn sync_edit_form_from_detail(&mut self, detail: &CollectionDetail) {
+        let collection_id = detail.summary.identity.id;
+        let should_replace = self
+            .edit_forms
+            .get(&collection_id)
+            .map(|form| !form.is_dirty || form.conflict)
+            .unwrap_or(true);
+        if should_replace {
+            self.edit_forms.insert(
+                collection_id,
+                CollectionEditFormState::from_summary(&detail.summary),
+            );
+        }
+    }
+
+    pub fn ensure_edit_form(
+        &mut self,
+        collection_id: CollectionId,
+    ) -> &mut CollectionEditFormState {
+        if !self.edit_forms.contains_key(&collection_id) {
+            let form = self
+                .detail_states
+                .get(&collection_id)
+                .and_then(|state| match state {
+                    CollectionDetailLoadState::Loaded(detail) => Some(
+                        CollectionEditFormState::from_summary(&detail.summary),
+                    ),
+                    CollectionDetailLoadState::NotLoaded
+                    | CollectionDetailLoadState::Loading
+                    | CollectionDetailLoadState::Error(_) => None,
+                })
+                .or_else(|| {
+                    self.summary(collection_id)
+                        .map(CollectionEditFormState::from_summary)
+                })
+                .unwrap_or_default();
+            self.edit_forms.insert(collection_id, form);
+        }
+        self.edit_forms
+            .get_mut(&collection_id)
+            .expect("edit form inserted")
+    }
+
+    pub fn picker_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionMediaPickerState {
+        self.picker_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn picker_state_mut(
+        &mut self,
+        collection_id: CollectionId,
+    ) -> &mut CollectionMediaPickerState {
+        self.picker_states.entry(collection_id).or_default()
+    }
+
+    pub fn item_action_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionItemActionState {
+        self.item_action_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn item_action_state_mut(
+        &mut self,
+        collection_id: CollectionId,
+    ) -> &mut CollectionItemActionState {
+        self.item_action_states.entry(collection_id).or_default()
+    }
+
+    pub fn apply_collection_version(
+        &mut self,
+        collection_id: CollectionId,
+        version: CollectionVersion,
+    ) {
+        if let Some(summary) = self
+            .summaries
+            .iter_mut()
+            .find(|summary| summary.identity.id == collection_id)
+        {
+            summary.version = version.clone();
+        }
+
+        if let Some(CollectionDetailLoadState::Loaded(detail)) =
+            self.detail_states.get_mut(&collection_id)
+        {
+            detail.summary.version = version;
+        }
+    }
+
+    pub fn remove_collection(&mut self, collection_id: CollectionId) {
+        self.summaries
+            .retain(|summary| summary.identity.id != collection_id);
+        self.detail_states.remove(&collection_id);
+        self.item_states.remove(&collection_id);
+        self.refresh_states.remove(&collection_id);
+        self.edit_forms.remove(&collection_id);
+        self.picker_states.remove(&collection_id);
+        self.item_action_states.remove(&collection_id);
+        if self.summaries.is_empty() && self.load_state.is_ready() {
+            self.load_state = CollectionsLoadState::Empty;
+        }
+    }
+
+    pub fn item_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionItemsState {
+        self.item_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn mark_items_loading(
+        &mut self,
+        collection_id: CollectionId,
+        append: bool,
+    ) {
+        let entry = self.item_states.entry(collection_id).or_default();
+        entry.load_state = if append {
+            CollectionItemsLoadState::LoadingMore
+        } else {
+            CollectionItemsLoadState::Loading
+        };
+        if !append {
+            entry.items.clear();
+            entry.page = None;
+        }
+    }
+
+    pub fn mark_items_loaded(
+        &mut self,
+        collection_id: CollectionId,
+        items: Vec<CollectionMember>,
+        page: CollectionPageInfo,
+        materialization: CollectionMaterializationStatus,
+        append: bool,
+    ) {
+        let entry = self.item_states.entry(collection_id).or_default();
+        if append {
+            entry.items.extend(items);
+        } else {
+            entry.items = items;
+        }
+        entry.items.sort_by(|left, right| {
+            left.position
+                .cmp(&right.position)
+                .then_with(|| left.item_key.cmp(&right.item_key))
+        });
+        entry.page = Some(page);
+        entry.materialization = Some(materialization);
+        entry.load_state = CollectionItemsLoadState::Loaded;
+    }
+
+    pub fn mark_items_error(
+        &mut self,
+        collection_id: CollectionId,
+        message: impl Into<String>,
+    ) {
+        let entry = self.item_states.entry(collection_id).or_default();
+        entry.load_state = CollectionItemsLoadState::Error(message.into());
+    }
+
+    pub fn refresh_state(
+        &self,
+        collection_id: CollectionId,
+    ) -> CollectionRefreshState {
+        self.refresh_states
+            .get(&collection_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn mark_refreshing(&mut self, collection_id: CollectionId) {
+        self.refresh_states
+            .insert(collection_id, CollectionRefreshState::Refreshing);
+    }
+
+    pub fn mark_refresh_succeeded(
+        &mut self,
+        collection_id: CollectionId,
+        materialization: CollectionMaterializationStatus,
+        version: CollectionVersion,
+    ) {
+        self.refresh_states
+            .insert(collection_id, CollectionRefreshState::Idle);
+        self.apply_materialization_status(
+            collection_id,
+            materialization,
+            version,
+        );
+    }
+
+    pub fn mark_refresh_error(
+        &mut self,
+        collection_id: CollectionId,
+        message: impl Into<String>,
+    ) {
+        self.refresh_states.insert(
+            collection_id,
+            CollectionRefreshState::Error(message.into()),
+        );
+    }
+
+    fn apply_materialization_status(
+        &mut self,
+        collection_id: CollectionId,
+        materialization: CollectionMaterializationStatus,
+        version: CollectionVersion,
+    ) {
+        if let Some(summary) = self
+            .summaries
+            .iter_mut()
+            .find(|summary| summary.identity.id == collection_id)
+        {
+            summary.materialization = materialization.clone();
+            summary.version = version.clone();
+        }
+
+        if let Some(CollectionDetailLoadState::Loaded(detail)) =
+            self.detail_states.get_mut(&collection_id)
+        {
+            detail.summary.materialization = materialization.clone();
+            detail.summary.version = version;
+        }
+
+        if let Some(items_state) = self.item_states.get_mut(&collection_id) {
+            items_state.materialization = Some(materialization);
+        }
+    }
+}
+
+impl Default for CollectionsTabState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// State for a library-specific tab

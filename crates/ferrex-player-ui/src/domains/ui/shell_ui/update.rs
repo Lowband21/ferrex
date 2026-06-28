@@ -3,7 +3,7 @@ use crate::{
     domains::{
         metadata::demand_planner::DemandSnapshot,
         ui::{
-            search_surface,
+            collections, search_surface,
             tabs::{self, TabId, TabState},
             types::ViewState,
             update_handlers::{
@@ -121,18 +121,15 @@ pub fn update_shell_ui(
         UiShellMessage::SelectScope(scope) => {
             // 1. State guard - prevent redundant work
             let current_scope = match state.domains.ui.state.scope {
-                Scope::Home
-                    if state.domains.ui.state.current_library_id.is_none() =>
+                Scope::Home => Scope::Home,
+                Scope::Collections => Scope::Collections,
+                Scope::Library(id)
+                    if state.domains.ui.state.current_library_id
+                        == Some(id) =>
                 {
-                    Scope::Home
+                    Scope::Library(id)
                 }
-                Scope::Library(id) => {
-                    match state.domains.ui.state.current_library_id {
-                        Some(_) => Scope::Library(id),
-                        None => Scope::Home,
-                    }
-                }
-                _ => Scope::Home, // Default to Curated for any other state
+                Scope::Library(_) => Scope::Home,
             };
 
             if scope == current_scope {
@@ -145,6 +142,7 @@ pub fn update_shell_ui(
 
             state.domains.ui.state.scope = scope;
             state.domains.ui.state.current_library_id = scope.lib_id();
+            state.domains.ui.state.view = ViewState::Library;
 
             // 3. Tab management with scroll restoration
             let tab_id = scope.to_tab_id();
@@ -248,6 +246,34 @@ pub fn update_shell_ui(
                     bump_keep_alive(state);
                 }
 
+                Scope::Collections => {
+                    log::info!("Scope changed to Collections");
+
+                    tasks.push(collections::ensure_collections_loaded(state));
+                    tasks.push(collections::restore_collections_scroll(state));
+
+                    let restored_y = state
+                        .domains
+                        .ui
+                        .state
+                        .scroll_manager
+                        .get_tab_scroll(&TabId::Collections)
+                        .map(|s| s.position)
+                        .unwrap_or(0.0);
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .set_horizontal_scroll_px(0.0);
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .set_vertical_scroll_px(restored_y);
+                }
+
                 Scope::Library(lib_id) => {
                     log::info!("Scope changed to Library({})", lib_id);
 
@@ -309,10 +335,12 @@ pub fn update_shell_ui(
             // 5. Refresh active tab content
             state.tab_manager.refresh_active_tab();
 
-            // 6. Trigger view model update
-            tasks.push(Task::done(DomainMessage::Ui(
-                crate::domains::ui::view_model_ui::ViewModelMessage::UpdateViewModelFilters.into()
-            )));
+            // 6. Trigger view model update for media-backed tabs.
+            if !matches!(scope, Scope::Collections) {
+                tasks.push(Task::done(DomainMessage::Ui(
+                    crate::domains::ui::view_model_ui::ViewModelMessage::UpdateViewModelFilters.into()
+                )));
+            }
 
             // 7. Log diagnostic
             log::trace!(
@@ -399,6 +427,9 @@ pub fn update_shell_ui(
                 navigation_updates::handle_view_episode(state, episode_id);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
+        UiShellMessage::ViewCollection(collection_id) => {
+            collections::open_collection_detail(state, collection_id)
+        }
         UiShellMessage::NavigateHome => {
             // Clear navigation history when going home
             state.domains.ui.state.navigation_history.clear();
@@ -450,18 +481,12 @@ pub fn update_shell_ui(
                     match &previous_view {
                         ViewState::Library => {
                             // Determine library context based on display mode
-                            let library_id = match state.domains.ui.state.scope
-                            {
-                                Scope::Library(lib_id) => Some(lib_id),
-                                Scope::Home => None,
-                            };
+                            let library_id =
+                                state.domains.ui.state.scope.lib_id();
 
                             // Restore scroll state through TabManager with ScrollPositionManager
-                            let tab_id = if let Some(lib_id) = library_id {
-                                TabId::Library(lib_id)
-                            } else {
-                                TabId::Home
-                            };
+                            let tab_id =
+                                state.domains.ui.state.scope.to_tab_id();
 
                             // Use the scroll-aware tab switching which automatically restores position
                             let scaled_layout =
@@ -480,7 +505,9 @@ pub fn update_shell_ui(
                             state.tab_manager.refresh_active_tab();
 
                             // Explicitly restore scroll position after tab switch
-                            let scroll_task = if let Some(tab) =
+                            let scroll_task = if tab_id == TabId::Collections {
+                                collections::restore_collections_scroll(state)
+                            } else if let Some(tab) =
                                 state.tab_manager.get_tab(tab_id)
                             {
                                 if let Some(grid_state) = tab.grid_state() {
@@ -581,10 +608,7 @@ pub fn update_shell_ui(
                     state.domains.ui.state.view = ViewState::Library;
 
                     // Preserve the current display mode and library context
-                    let library_id = match state.domains.ui.state.scope {
-                        Scope::Library(id) => Some(id),
-                        Scope::Home => None,
-                    };
+                    let library_id = state.domains.ui.state.scope.lib_id();
 
                     log::debug!(
                         "NavigateBack with no history: preserving display mode {:?}",

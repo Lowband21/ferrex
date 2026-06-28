@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE collection_definitions\n            SET\n                deleted_at = NOW(),\n                deleted_by = $2,\n                delete_reason = $3,\n                revision = revision + 1,\n                etag = concat('collection:', id::text, ':v', revision + 1),\n                updated_at = NOW()\n            WHERE id = $1\n              AND deleted_at IS NULL\n              AND ($4::bigint IS NULL OR revision = $4)\n            RETURNING\n                deleted_at AS \"deleted_at!\",\n                contract_version,\n                revision,\n                etag\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "deleted_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "contract_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "etag",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8f6546ba068a6d94c491d750886fc317594b23b10fd8b915c8f892d176db0da6"
+}

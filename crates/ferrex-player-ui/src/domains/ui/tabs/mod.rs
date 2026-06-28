@@ -13,7 +13,14 @@ pub mod state;
 
 pub use home_focus::{HomeFocusState, ordered_keys_for_home};
 pub use manager::TabManager;
-pub use state::{HomeTabState, LibraryTabState, TabState};
+pub use state::{
+    CollectionCreateFormState, CollectionDetailLoadState,
+    CollectionEditFormState, CollectionItemActionState,
+    CollectionItemMutationKind, CollectionItemsLoadState, CollectionItemsState,
+    CollectionMediaPickerState, CollectionMediaScopeChoice,
+    CollectionPickerItem, CollectionRefreshState, CollectionsLoadState,
+    CollectionsTabState, HomeTabState, LibraryTabState, TabState,
+};
 
 /// Unique identifier for each tab in the application
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -21,6 +28,9 @@ pub enum TabId {
     /// The Home tab showing curated content from all libraries
     #[default]
     Home,
+
+    /// Collections summary/listing tab
+    Collections,
 
     /// A specific library tab
     Library(LibraryId),
@@ -32,6 +42,11 @@ impl TabId {
         matches!(self, TabId::Home)
     }
 
+    /// Check if this is the Collections tab
+    pub fn is_collections(&self) -> bool {
+        matches!(self, TabId::Collections)
+    }
+
     /// Check if this is a library tab
     pub fn is_library(&self) -> bool {
         matches!(self, TabId::Library(_))
@@ -41,7 +56,7 @@ impl TabId {
     pub fn library_id(&self) -> Option<LibraryId> {
         match self {
             TabId::Library(id) => Some(*id),
-            TabId::Home => None,
+            TabId::Home | TabId::Collections => None,
         }
     }
 }
@@ -50,6 +65,7 @@ impl fmt::Display for TabId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TabId::Home => write!(f, "Home"),
+            TabId::Collections => write!(f, "Collections"),
             TabId::Library(id) => write!(f, "Library({})", id),
         }
     }
