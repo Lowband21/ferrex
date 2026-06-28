@@ -35,8 +35,9 @@ use ferrex_player_ui::{
         types::ViewState,
         views::collections::{
             CollectionItemAction, collection_item_rows,
-            collection_items_view_model, collection_status_summary,
-            collection_summary_row, view_collection_detail, view_collections,
+            collection_items_empty_state_copy, collection_items_view_model,
+            collection_status_summary, collection_summary_row,
+            view_collection_detail, view_collections,
         },
     },
     state::State,
@@ -166,6 +167,69 @@ async fn collection_detail_view_renders_loaded_stub_detail() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn collection_detail_browse_mode_enters_and_exits_editor() {
+    let api = TestApiService::default();
+    let api_service: Arc<dyn ApiService> = Arc::new(api);
+    let payload = load_collection_summaries(api_service.clone())
+        .await
+        .unwrap();
+    let collection_id = payload.summaries[0].identity.id;
+    let detail = api_service
+        .get_collection_detail(
+            collection_id,
+            ferrex_core::api::types::collections::GetCollectionDetailRequest {
+                include_rule: true,
+                include_items_preview: true,
+                include_shelf_placements: true,
+            },
+        )
+        .await
+        .unwrap()
+        .collection;
+
+    let mut state = test_state();
+    state.domains.ui.state.scope = Scope::Collections;
+    state.domains.ui.state.view = ViewState::CollectionDetail { collection_id };
+    if let TabState::Collections(tab) =
+        state.tab_manager.get_or_create_tab(TabId::Collections)
+    {
+        tab.mark_loaded(payload.summaries, payload.page);
+        tab.mark_detail_loaded(detail);
+        assert!(!tab.is_detail_editing(collection_id));
+        assert!(tab.edit_forms.contains_key(&collection_id));
+    }
+
+    let _ = view_collection_detail(&state, collection_id);
+
+    let _ = update_collections_ui(
+        &mut state,
+        CollectionsMessage::EnterEditMode(collection_id),
+    );
+    let Some(TabState::Collections(tab)) =
+        state.tab_manager.get_tab(TabId::Collections)
+    else {
+        panic!("collections tab should exist");
+    };
+    assert!(tab.is_detail_editing(collection_id));
+    assert!(tab.edit_forms.contains_key(&collection_id));
+
+    let _ = view_collection_detail(&state, collection_id);
+
+    let _ = update_collections_ui(
+        &mut state,
+        CollectionsMessage::ExitEditMode(collection_id),
+    );
+    let Some(TabState::Collections(tab)) =
+        state.tab_manager.get_tab(TabId::Collections)
+    else {
+        panic!("collections tab should exist");
+    };
+    assert!(!tab.is_detail_editing(collection_id));
+
+    let _ = view_collection_detail(&state, collection_id);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn collection_detail_loads_paginated_items_in_stable_order() {
     let api = TestApiService::default();
     let api_service: Arc<dyn ApiService> = Arc::new(api);
@@ -274,6 +338,74 @@ fn collection_items_model_hides_unavailable_members_and_preserves_actions() {
         Some(CollectionItemAction::ViewEpisode(episode_id))
     );
     assert!(model.hidden_summary.unwrap().contains("hidden"));
+}
+
+#[test]
+fn collection_item_empty_copy_covers_browse_edit_and_unavailable_states() {
+    let loaded_empty = CollectionItemsState {
+        items: Vec::new(),
+        page: Some(CollectionPageInfo {
+            next_cursor: None,
+            limit: 50,
+            total: 0,
+        }),
+        materialization: None,
+        load_state: CollectionItemsLoadState::Loaded,
+    };
+    let model = collection_items_view_model(Some(&loaded_empty), 0);
+
+    let browse = collection_items_empty_state_copy(
+        &model,
+        Some(&loaded_empty),
+        false,
+        true,
+    )
+    .expect("empty browse state should produce copy");
+    assert_eq!(browse.title, "No items in this collection");
+    assert!(browse.body.contains("Manage collection"));
+
+    let edit = collection_items_empty_state_copy(
+        &model,
+        Some(&loaded_empty),
+        true,
+        true,
+    )
+    .expect("empty edit state should produce copy");
+    assert!(edit.body.contains("Search for existing media"));
+
+    let loading = collection_items_empty_state_copy(&model, None, false, true)
+        .expect("missing item state should be treated as loading");
+    assert_eq!(loading.title, "Loading collection items…");
+
+    let mut unavailable = CollectionMember::new(
+        MediaID::Movie(MovieID(Uuid::from_u128(5))),
+        "Unavailable",
+        1,
+    );
+    unavailable.availability = CollectionMemberAvailability {
+        status: CollectionMemberAvailabilityStatus::Unavailable,
+        ..CollectionMemberAvailability::default()
+    };
+    let unavailable_state = CollectionItemsState {
+        items: vec![unavailable],
+        page: Some(CollectionPageInfo {
+            next_cursor: None,
+            limit: 50,
+            total: 1,
+        }),
+        materialization: None,
+        load_state: CollectionItemsLoadState::Loaded,
+    };
+    let hidden_model = collection_items_view_model(Some(&unavailable_state), 1);
+    let hidden = collection_items_empty_state_copy(
+        &hidden_model,
+        Some(&unavailable_state),
+        false,
+        true,
+    )
+    .expect("hidden-only state should produce copy");
+    assert_eq!(hidden.title, "No available items to show");
+    assert!(hidden.body.contains("Unavailable"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -562,6 +694,7 @@ async fn manual_collection_editing_view_renders_recovery_states() {
         tab.create_form.is_open = true;
         tab.create_form.error = Some("Server is offline".to_string());
         tab.mark_detail_loaded(detail.clone());
+        tab.enter_detail_edit_mode(collection_id);
         tab.mark_items_loaded(
             collection_id,
             items.items.clone(),
