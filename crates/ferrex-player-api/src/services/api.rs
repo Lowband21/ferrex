@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use ferrex_core::{
     api::types::{
         collections::*,
+        intelligence::*,
         setup::{ConfirmClaimResponse, StartClaimResponse},
+        smart_shelves::*,
     },
     player_prelude::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice,
@@ -266,6 +268,45 @@ pub trait ApiService: Send + Sync + Debug {
         &self,
         query: MediaQuery,
     ) -> RepositoryResult<Vec<MediaWithStatus>>;
+
+    // === Intelligence and smart-shelf operations ===
+
+    /// Fetch configured intelligence provider/model readiness.
+    async fn fetch_intelligence_provider_status(
+        &self,
+    ) -> RepositoryResult<IntelligenceProviderStatus>;
+
+    /// Start a grounded smart-shelf intelligence run.
+    async fn start_smart_shelf(
+        &self,
+        request: SmartShelfStartRequest,
+    ) -> RepositoryResult<SmartShelfStartResponse>;
+
+    /// Poll the current status of an intelligence run.
+    async fn fetch_intelligence_run_status(
+        &self,
+        run_id: Uuid,
+    ) -> RepositoryResult<IntelligenceRunStatusResponse>;
+
+    /// Cancel an active intelligence run.
+    async fn cancel_intelligence_run(
+        &self,
+        run_id: Uuid,
+        request: IntelligenceRunCancelRequest,
+    ) -> RepositoryResult<IntelligenceRunCancelResponse>;
+
+    /// Read a smart-shelf draft as a typed, validated shelf payload.
+    async fn fetch_smart_shelf_draft(
+        &self,
+        artifact_id: Uuid,
+    ) -> RepositoryResult<SmartShelfDraftResponse>;
+
+    /// Save an accepted smart-shelf draft as a private manual collection.
+    async fn save_smart_shelf(
+        &self,
+        artifact_id: Uuid,
+        request: SmartShelfSaveRequest,
+    ) -> RepositoryResult<SmartShelfSaveResponse>;
 
     // === Collection operations ===
 

@@ -11,7 +11,9 @@ use crate::{
 };
 use ferrex_player_foundation::repository::{RepositoryError, RepositoryResult};
 
-use ferrex_core::api::types::collections::*;
+use ferrex_core::api::types::{
+    collections::*, intelligence::*, smart_shelves::*,
+};
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
     FilterIndicesRequest, ImageManifestRequest, ImageManifestResponse,
@@ -71,6 +73,50 @@ fn map_collection_update_error(error: anyhow::Error) -> RepositoryError {
     if message.contains("409") || message.to_lowercase().contains("conflict") {
         RepositoryError::UpdateFailed(format!(
             "Collection conflict: {}",
+            message
+        ))
+    } else {
+        RepositoryError::UpdateFailed(message)
+    }
+}
+
+fn map_intelligence_query_error(error: anyhow::Error) -> RepositoryError {
+    RepositoryError::QueryFailed(error.to_string())
+}
+
+fn map_smart_shelf_start_error(error: anyhow::Error) -> RepositoryError {
+    RepositoryError::CreateFailed(error.to_string())
+}
+
+fn map_intelligence_cancel_error(error: anyhow::Error) -> RepositoryError {
+    RepositoryError::UpdateFailed(error.to_string())
+}
+
+fn map_smart_shelf_save_error(error: anyhow::Error) -> RepositoryError {
+    let message = error.to_string();
+    let lower = message.to_lowercase();
+    if message.contains("422")
+        || lower.contains("unprocessable")
+        || lower.contains("validation")
+        || lower.contains("duplicate_media")
+        || lower.contains("unsupported_media")
+        || lower.contains("ungrounded_item")
+        || lower.contains("missing_reason")
+        || lower.contains("missing_source")
+        || lower.contains("draft_malformed")
+        || lower.contains("draft_empty")
+    {
+        RepositoryError::UpdateFailed(format!(
+            "Smart-shelf validation failed: {}",
+            message
+        ))
+    } else if message.contains("409")
+        || lower.contains("conflict")
+        || lower.contains("already_saved")
+        || lower.contains("draft_stale")
+    {
+        RepositoryError::UpdateFailed(format!(
+            "Smart-shelf conflict: {}",
             message
         ))
     } else {
@@ -632,6 +678,67 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
+    async fn fetch_intelligence_provider_status(
+        &self,
+    ) -> RepositoryResult<IntelligenceProviderStatus> {
+        self.client
+            .intelligence_provider_status()
+            .await
+            .map_err(map_intelligence_query_error)
+    }
+
+    async fn start_smart_shelf(
+        &self,
+        request: SmartShelfStartRequest,
+    ) -> RepositoryResult<SmartShelfStartResponse> {
+        self.client
+            .start_smart_shelf(&request)
+            .await
+            .map_err(map_smart_shelf_start_error)
+    }
+
+    async fn fetch_intelligence_run_status(
+        &self,
+        run_id: Uuid,
+    ) -> RepositoryResult<IntelligenceRunStatusResponse> {
+        self.client
+            .get_intelligence_run_status(run_id)
+            .await
+            .map_err(map_intelligence_query_error)
+    }
+
+    async fn cancel_intelligence_run(
+        &self,
+        run_id: Uuid,
+        request: IntelligenceRunCancelRequest,
+    ) -> RepositoryResult<IntelligenceRunCancelResponse> {
+        self.client
+            .cancel_intelligence_run(run_id, &request)
+            .await
+            .map_err(map_intelligence_cancel_error)
+    }
+
+    async fn fetch_smart_shelf_draft(
+        &self,
+        artifact_id: Uuid,
+    ) -> RepositoryResult<SmartShelfDraftResponse> {
+        self.client
+            .get_smart_shelf_draft(artifact_id)
+            .await
+            .map_err(map_intelligence_query_error)
+    }
+
+    async fn save_smart_shelf(
+        &self,
+        artifact_id: Uuid,
+        request: SmartShelfSaveRequest,
+    ) -> RepositoryResult<SmartShelfSaveResponse> {
+        self.client
+            .save_smart_shelf(artifact_id, &request)
+            .await
+            .map_err(map_smart_shelf_save_error)
+    }
+
     async fn list_collections(
         &self,
         request: ListCollectionsRequest,
@@ -1181,5 +1288,64 @@ impl ApiClientAdapter {
                 stored_at: Instant::now(),
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smart_shelf_error_mapping_classifies_validation_and_conflict() {
+        let validation = map_smart_shelf_save_error(anyhow::anyhow!(
+            "{}",
+            "Request failed with status 422 Unprocessable Entity: {\"error\":{\"code\":\"duplicate_media\"}}"
+        ));
+        assert!(matches!(
+            validation,
+            RepositoryError::UpdateFailed(message)
+                if message.contains("Smart-shelf validation failed")
+                    && message.contains("duplicate_media")
+        ));
+
+        let conflict = map_smart_shelf_save_error(anyhow::anyhow!(
+            "{}",
+            "Request failed with status 409 Conflict: {\"error\":{\"code\":\"already_saved\"}}"
+        ));
+        assert!(matches!(
+            conflict,
+            RepositoryError::UpdateFailed(message)
+                if message.contains("Smart-shelf conflict")
+                    && message.contains("already_saved")
+        ));
+    }
+
+    #[test]
+    fn intelligence_adapter_maps_reads_starts_and_cancels_like_existing_apis() {
+        let query = map_intelligence_query_error(anyhow::anyhow!(
+            "provider unavailable"
+        ));
+        assert!(matches!(
+            query,
+            RepositoryError::QueryFailed(message)
+                if message.contains("provider unavailable")
+        ));
+
+        let start =
+            map_smart_shelf_start_error(anyhow::anyhow!("invalid prompt"));
+        assert!(matches!(
+            start,
+            RepositoryError::CreateFailed(message)
+                if message.contains("invalid prompt")
+        ));
+
+        let cancel = map_intelligence_cancel_error(anyhow::anyhow!(
+            "run already terminal"
+        ));
+        assert!(matches!(
+            cancel,
+            RepositoryError::UpdateFailed(message)
+                if message.contains("run already terminal")
+        ));
     }
 }
