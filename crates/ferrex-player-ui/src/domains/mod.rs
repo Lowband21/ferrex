@@ -5,6 +5,7 @@
 //! testable domains.
 
 pub mod auth;
+pub mod intelligence;
 pub mod library;
 pub mod media;
 pub mod metadata;

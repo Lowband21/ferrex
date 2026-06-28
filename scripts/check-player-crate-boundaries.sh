@@ -7,6 +7,7 @@ non_ui_crates=(
   ferrex-player-foundation
   ferrex-player-api
   ferrex-player-auth
+  ferrex-player-intelligence
   ferrex-player-repository
   ferrex-player-library
   ferrex-player-media
