@@ -67,6 +67,7 @@ USAGE:
     ferrex-player screenshot list
     ferrex-player screenshot matrix list
     ferrex-player screenshot matrix --output-dir ./artifacts/detail-typography-qa [--only <CASE_OR_TAG>]
+    ferrex-player screenshot matrix smart-shelf --output-dir ./artifacts/smart-shelf-mvp-qa [--only <CASE_OR_TAG>]
 
 OPTIONS:
     -p, --preset <NAME>         Named app preset to render. Run `ferrex-player screenshot list`
@@ -81,10 +82,11 @@ OPTIONS:
     -o, --output <PATH>         PNG output path. Required.
         --ice <PATH>            Optional .ice script to replay before capture. If the script has
                                 preset/viewport/mode metadata, explicit CLI values must match it.
-        matrix                  List or capture the detail typography visual QA matrix. Matrix
-                                captures write PNGs plus a JSON manifest to --output-dir. Use
-                                --only with a case id (for example movie-detail-720-top) or coverage tag
-                                (for example surface:movie) to narrow the run.
+        matrix [NAME]           List or capture a visual QA matrix. Defaults to detail typography;
+                                pass smart-shelf for the smart-shelf MVP matrix. Matrix captures
+                                write PNGs plus a JSON manifest to --output-dir. Use --only with a
+                                case id (for example movie-detail-720-top) or coverage tag (for
+                                example surface:movie or state:collection-error) to narrow the run.
     -h, --help                  Print this help text.
 
 EXAMPLE:
@@ -102,11 +104,11 @@ pub enum CommandOutcome {
     HelpRequested,
     /// Scenario metadata was requested for agent discovery.
     ListedScenarios(Vec<presets::ScenarioInfo>),
-    /// Detail typography matrix metadata was requested for visual QA.
+    /// Visual QA matrix metadata was requested.
     ListedVisualQaMatrix(Vec<visual_qa::VisualQaCase>),
     /// A screenshot was captured.
     Captured(CaptureOutput),
-    /// A detail typography visual QA matrix was captured.
+    /// A visual QA matrix was captured.
     CapturedVisualQaMatrix(visual_qa::MatrixRunOutput),
 }
 
@@ -1385,6 +1387,10 @@ mod tests {
                 }));
                 assert!(scenarios.iter().any(|scenario| {
                     scenario.name == "PlayerLoadingOverlay"
+                }));
+                assert!(scenarios.iter().any(|scenario| {
+                    scenario.name == "SmartShelfDraftReady"
+                        && scenario.description.contains("grounded")
                 }));
             }
             other => panic!("unexpected outcome: {other:?}"),
