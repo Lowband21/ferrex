@@ -1,8 +1,9 @@
-//! Detail typography visual QA matrix for deterministic screenshot artifacts.
+//! Visual QA matrices for deterministic screenshot artifacts.
 //!
-//! The matrix is executable instead of living in a durable process document:
-//! `ferrex-player screenshot matrix --output-dir <DIR>` captures the detail
-//! typography review set and writes a JSON manifest next to the PNGs.
+//! The matrices are executable instead of living only in process documents:
+//! `ferrex-player screenshot matrix --output-dir <DIR>` captures the default
+//! detail typography review set, while `ferrex-player screenshot matrix
+//! smart-shelf --output-dir <DIR>` captures the smart-shelf MVP review set.
 
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
@@ -31,7 +32,18 @@ const DETAIL_TYPOGRAPHY_REVIEW_NOTES: &[&str] = &[
     "Runtime mode top bar: verify desktop and 10-foot home/detail captures show the top-right mode toggle, and 10-foot captures omit settings/admin/profile controls.",
 ];
 
-/// CLI command outcome for the detail typography matrix.
+const SMART_SHELF_MVP_MATRIX_NAME: &str = "smart-shelf-mvp-visual-qa";
+const SMART_SHELF_MVP_MANIFEST: &str = "smart-shelf-mvp-visual-qa-matrix.json";
+
+const SMART_SHELF_MVP_REVIEW_NOTES: &[&str] = &[
+    "MVP boundaries: verify the capture stays within desktop smart-shelf composer/review and saved Collections surfaces only.",
+    "Deterministic provider: verify copy and progress states read as fake/local-provider QA data rather than live model output.",
+    "Recovery: verify provider unavailable, empty collection, and collection error states expose retry/edit/recovery paths without app-data wipes.",
+    "Grounding/provenance: verify draft items, replacements, source chips, and saved collection provenance remain visible and understandable.",
+    "Excluded surfaces: verify no Android/TV, Home pinning, chatbot, dynamic rail, or playback queue behavior is introduced by the preset.",
+];
+
+/// CLI command outcome for a visual QA matrix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatrixCommandOutcome {
     /// List the matrix cases without capturing screenshots.
@@ -58,7 +70,80 @@ pub struct MatrixRunOutput {
     pub captures: Vec<MatrixCaseCapture>,
 }
 
-/// A deterministic screenshot case in the detail typography QA matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MatrixKind {
+    DetailTypography,
+    SmartShelfMvp,
+}
+
+impl MatrixKind {
+    fn resolve(args: &[String]) -> (Self, &[String]) {
+        if let Some(first) = args.first()
+            && let Some(kind) = Self::parse(first)
+        {
+            return (kind, &args[1..]);
+        }
+
+        (Self::DetailTypography, args)
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        let normalized = value
+            .trim()
+            .chars()
+            .filter(|ch| *ch != '-' && *ch != '_' && !ch.is_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase();
+
+        match normalized.as_str() {
+            "detail"
+            | "detailtypography"
+            | "detailtypographyvisualqa"
+            | "typography" => Some(Self::DetailTypography),
+            "smartshelf" | "smartshelfmvp" | "smartshelfmvpvisualqa" => {
+                Some(Self::SmartShelfMvp)
+            }
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::DetailTypography => DETAIL_TYPOGRAPHY_MATRIX_NAME,
+            Self::SmartShelfMvp => SMART_SHELF_MVP_MATRIX_NAME,
+        }
+    }
+
+    fn manifest_filename(self) -> &'static str {
+        match self {
+            Self::DetailTypography => DETAIL_TYPOGRAPHY_MANIFEST,
+            Self::SmartShelfMvp => SMART_SHELF_MVP_MANIFEST,
+        }
+    }
+
+    fn review_notes(self) -> &'static [&'static str] {
+        match self {
+            Self::DetailTypography => DETAIL_TYPOGRAPHY_REVIEW_NOTES,
+            Self::SmartShelfMvp => SMART_SHELF_MVP_REVIEW_NOTES,
+        }
+    }
+
+    fn required_tags(self) -> &'static [&'static str] {
+        match self {
+            Self::DetailTypography => DETAIL_TYPOGRAPHY_REQUIRED_COVERAGE_TAGS,
+            Self::SmartShelfMvp => SMART_SHELF_MVP_REQUIRED_COVERAGE_TAGS,
+        }
+    }
+
+    fn cases(self) -> Vec<VisualQaCase> {
+        match self {
+            Self::DetailTypography => detail_typography_matrix(),
+            Self::SmartShelfMvp => smart_shelf_mvp_matrix(),
+        }
+    }
+}
+
+/// A deterministic screenshot case in a visual QA matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VisualQaCase {
     /// Stable artifact and filtering identifier.
@@ -99,7 +184,7 @@ impl VisualQaCase {
     }
 }
 
-const REQUIRED_COVERAGE_TAGS: &[&str] = &[
+const DETAIL_TYPOGRAPHY_REQUIRED_COVERAGE_TAGS: &[&str] = &[
     "assertion:no-unintended-app-card-rectangles",
     "criteria:10ft-readability",
     "criteria:cast-captions",
@@ -134,6 +219,22 @@ const REQUIRED_COVERAGE_TAGS: &[&str] = &[
     "viewport:1280x720",
     "viewport:1920x1080",
     "viewport:ultrawide",
+];
+
+const SMART_SHELF_MVP_REQUIRED_COVERAGE_TAGS: &[&str] = &[
+    "assertion:no-excluded-surfaces",
+    "fixture:deterministic-fake-provider",
+    "provider:unavailable",
+    "state:alternates-replacement",
+    "state:collection-empty",
+    "state:collection-error",
+    "state:composer",
+    "state:draft-ready",
+    "state:running-progress",
+    "state:saved-collection-detail",
+    "surface:collections",
+    "surface:smart-shelf",
+    "viewport:1280x720",
 ];
 
 /// Return the full detail typography visual QA matrix.
@@ -540,6 +641,148 @@ pub fn detail_typography_matrix() -> Vec<VisualQaCase> {
     ]
 }
 
+/// Return the smart-shelf MVP visual QA matrix.
+pub fn smart_shelf_mvp_matrix() -> Vec<VisualQaCase> {
+    vec![
+        smart_shelf_case(
+            "smart-shelf-composer",
+            ScreenshotPreset::SmartShelfComposer,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            150,
+            &[
+                "assertion:no-excluded-surfaces",
+                "fixture:deterministic-fake-provider",
+                "state:composer",
+                "surface:smart-shelf",
+                "viewport:1280x720",
+            ],
+            "composer prompt, template, scope, item-count, provider/model, and fake-provider fixture controls before generation",
+        ),
+        smart_shelf_case(
+            "smart-shelf-running-progress",
+            ScreenshotPreset::SmartShelfRunningProgress,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            200,
+            &[
+                "assertion:no-excluded-surfaces",
+                "fixture:deterministic-fake-provider",
+                "state:running-progress",
+                "surface:smart-shelf",
+                "viewport:1280x720",
+            ],
+            "running/progress panel with deterministic provider, step count, skeleton rows, and cancel affordance",
+        ),
+        smart_shelf_case(
+            "smart-shelf-draft-ready",
+            ScreenshotPreset::SmartShelfDraftReady,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            200,
+            &[
+                "assertion:no-excluded-surfaces",
+                "fixture:deterministic-fake-provider",
+                "state:draft-ready",
+                "surface:smart-shelf",
+                "viewport:1280x720",
+            ],
+            "valid draft review with grounded item reasons, source chips, save action, regenerate, lock, and discard controls",
+        ),
+        smart_shelf_case(
+            "smart-shelf-alternates-replacement",
+            ScreenshotPreset::SmartShelfAlternatesReplacement,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            200,
+            &[
+                "assertion:no-excluded-surfaces",
+                "fixture:deterministic-fake-provider",
+                "state:alternates-replacement",
+                "surface:smart-shelf",
+                "viewport:1280x720",
+            ],
+            "draft review with one selected replacement, available alternate row, replacement badge, and stable source chips",
+        ),
+        smart_shelf_case(
+            "smart-shelf-provider-unavailable",
+            ScreenshotPreset::SmartShelfProviderUnavailable,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            150,
+            &[
+                "assertion:no-excluded-surfaces",
+                "provider:unavailable",
+                "state:provider-unavailable",
+                "surface:smart-shelf",
+                "viewport:1280x720",
+            ],
+            "provider fallback with local provider setup copy, edit prompt, and retry provider check recovery actions",
+        ),
+        smart_shelf_case(
+            "smart-shelf-saved-collection-detail",
+            ScreenshotPreset::SmartShelfSavedCollectionDetail,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            150,
+            &[
+                "assertion:no-excluded-surfaces",
+                "fixture:deterministic-fake-provider",
+                "state:saved-collection-detail",
+                "surface:collections",
+                "viewport:1280x720",
+            ],
+            "saved private collection detail with smart-shelf provenance, ready materialization, and visible items",
+        ),
+        smart_shelf_case(
+            "smart-shelf-collection-empty",
+            ScreenshotPreset::SmartShelfCollectionEmpty,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            150,
+            &[
+                "assertion:no-excluded-surfaces",
+                "fixture:deterministic-fake-provider",
+                "state:collection-empty",
+                "surface:collections",
+                "viewport:1280x720",
+            ],
+            "saved collection detail with zero materialized items and a browse/manage recovery copy instead of a blank panel",
+        ),
+        smart_shelf_case(
+            "smart-shelf-collection-error",
+            ScreenshotPreset::SmartShelfCollectionError,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            150,
+            &[
+                "assertion:no-excluded-surfaces",
+                "fixture:deterministic-fake-provider",
+                "state:collection-error",
+                "surface:collections",
+                "viewport:1280x720",
+            ],
+            "saved collection detail error/retry panel that preserves the collection title and retry affordance",
+        ),
+    ]
+}
+
 fn case(
     id: &'static str,
     preset: ScreenshotPreset,
@@ -547,6 +790,45 @@ fn case(
     settle_ms: u64,
     tags: &'static [&'static str],
     review_focus: &'static str,
+) -> VisualQaCase {
+    case_with_notes(
+        id,
+        preset,
+        viewport,
+        settle_ms,
+        tags,
+        review_focus,
+        DETAIL_TYPOGRAPHY_REVIEW_NOTES,
+    )
+}
+
+fn smart_shelf_case(
+    id: &'static str,
+    preset: ScreenshotPreset,
+    viewport: Viewport,
+    settle_ms: u64,
+    tags: &'static [&'static str],
+    review_focus: &'static str,
+) -> VisualQaCase {
+    case_with_notes(
+        id,
+        preset,
+        viewport,
+        settle_ms,
+        tags,
+        review_focus,
+        SMART_SHELF_MVP_REVIEW_NOTES,
+    )
+}
+
+fn case_with_notes(
+    id: &'static str,
+    preset: ScreenshotPreset,
+    viewport: Viewport,
+    settle_ms: u64,
+    tags: &'static [&'static str],
+    review_focus: &'static str,
+    review_notes: &'static [&'static str],
 ) -> VisualQaCase {
     VisualQaCase {
         id,
@@ -556,18 +838,28 @@ fn case(
         settle_ms,
         tags,
         review_focus,
-        review_notes: DETAIL_TYPOGRAPHY_REVIEW_NOTES,
+        review_notes,
     }
 }
 
-/// Return required coverage tags missing from a matrix.
+/// Return detail typography required coverage tags missing from a matrix.
 pub fn missing_required_coverage(cases: &[VisualQaCase]) -> Vec<&'static str> {
+    missing_required_coverage_for(
+        cases,
+        DETAIL_TYPOGRAPHY_REQUIRED_COVERAGE_TAGS,
+    )
+}
+
+fn missing_required_coverage_for(
+    cases: &[VisualQaCase],
+    required_tags: &'static [&'static str],
+) -> Vec<&'static str> {
     let present: BTreeSet<&str> = cases
         .iter()
         .flat_map(|case| case.tags.iter().copied())
         .collect();
 
-    REQUIRED_COVERAGE_TAGS
+    required_tags
         .iter()
         .copied()
         .filter(|tag| !present.contains(tag))
@@ -578,8 +870,10 @@ pub fn missing_required_coverage(cases: &[VisualQaCase]) -> Vec<&'static str> {
 pub fn run_matrix_command(
     args: &[String],
 ) -> Result<MatrixCommandOutcome, ScreenshotError> {
-    let spec = MatrixCliSpec::parse(args)?;
-    let cases = select_cases(&detail_typography_matrix(), spec.only)?;
+    let (matrix, matrix_args) = MatrixKind::resolve(args);
+    let spec = MatrixCliSpec::parse(matrix_args)?;
+    let all_cases = matrix.cases();
+    let cases = select_cases(matrix, &all_cases, spec.only)?;
 
     if spec.list || spec.dry_run {
         return Ok(MatrixCommandOutcome::Listed(cases));
@@ -593,11 +887,12 @@ pub fn run_matrix_command(
         });
     };
 
-    capture_matrix(&cases, output_dir, spec.settle_ms)
+    capture_matrix(matrix, &cases, output_dir, spec.settle_ms)
         .map(MatrixCommandOutcome::Captured)
 }
 
 fn select_cases(
+    matrix: MatrixKind,
     all_cases: &[VisualQaCase],
     only: Option<&str>,
 ) -> Result<Vec<VisualQaCase>, ScreenshotError> {
@@ -614,7 +909,9 @@ fn select_cases(
     if selected.is_empty() {
         return Err(ScreenshotError::MatrixArgument {
             message: format!(
-                "unknown detail typography QA matrix case or tag {only:?}; run `ferrex-player screenshot matrix list`"
+                "unknown {} QA matrix case or tag {only:?}; run `ferrex-player screenshot matrix {} list`",
+                matrix.name(),
+                matrix.name(),
             ),
         });
     }
@@ -623,6 +920,7 @@ fn select_cases(
 }
 
 fn capture_matrix(
+    matrix: MatrixKind,
     cases: &[VisualQaCase],
     output_dir: PathBuf,
     settle_ms_override: Option<u64>,
@@ -647,8 +945,14 @@ fn capture_matrix(
         });
     }
 
-    let manifest_path = output_dir.join(DETAIL_TYPOGRAPHY_MANIFEST);
-    write_manifest(&manifest_path, cases, &captures, settle_ms_override)?;
+    let manifest_path = output_dir.join(matrix.manifest_filename());
+    write_manifest(
+        matrix,
+        &manifest_path,
+        cases,
+        &captures,
+        settle_ms_override,
+    )?;
 
     Ok(MatrixRunOutput {
         manifest_path,
@@ -657,15 +961,19 @@ fn capture_matrix(
 }
 
 fn write_manifest(
+    matrix: MatrixKind,
     path: &PathBuf,
     cases: &[VisualQaCase],
     captures: &[MatrixCaseCapture],
     settle_ms_override: Option<u64>,
 ) -> Result<(), ScreenshotError> {
     let manifest = MatrixManifest {
-        matrix: DETAIL_TYPOGRAPHY_MATRIX_NAME,
-        missing_required_coverage: missing_required_coverage(cases),
-        required_review_notes: DETAIL_TYPOGRAPHY_REVIEW_NOTES.to_vec(),
+        matrix: matrix.name(),
+        missing_required_coverage: missing_required_coverage_for(
+            cases,
+            matrix.required_tags(),
+        ),
+        required_review_notes: matrix.review_notes().to_vec(),
         cases: cases
             .iter()
             .map(|case| {
@@ -850,6 +1158,20 @@ mod tests {
     }
 
     #[test]
+    fn smart_shelf_mvp_matrix_covers_required_tags() {
+        let cases = smart_shelf_mvp_matrix();
+        let missing = missing_required_coverage_for(
+            &cases,
+            SMART_SHELF_MVP_REQUIRED_COVERAGE_TAGS,
+        );
+
+        assert!(
+            missing.is_empty(),
+            "missing smart-shelf MVP QA coverage tags: {missing:?}"
+        );
+    }
+
+    #[test]
     fn matrix_cli_lists_by_default_and_filters_by_tag() {
         let outcome = run_matrix_command(&[]).expect("default list");
         let MatrixCommandOutcome::Listed(cases) = outcome else {
@@ -884,6 +1206,20 @@ mod tests {
                 .any(|case| case.id == "season-detail-1080-scrolled-rail")
         );
         assert!(cases.iter().all(|case| case.has_tag("state:scrolled-rail")));
+
+        let outcome = run_matrix_command(&[
+            "smart-shelf".to_string(),
+            "--dry-run".to_string(),
+            "--only".to_string(),
+            "state:collection-error".to_string(),
+        ])
+        .expect("filter smart-shelf matrix by tag");
+        let MatrixCommandOutcome::Listed(cases) = outcome else {
+            panic!("expected list outcome");
+        };
+        assert_eq!(cases.len(), 1);
+        assert_eq!(cases[0].id, "smart-shelf-collection-error");
+        assert!(cases[0].has_tag("surface:collections"));
     }
 
     #[test]
@@ -897,19 +1233,22 @@ mod tests {
 
     #[test]
     fn matrix_cases_include_review_notes_for_each_row() {
-        let cases = detail_typography_matrix();
-
-        for case in cases {
-            assert_eq!(
-                case.review_notes, DETAIL_TYPOGRAPHY_REVIEW_NOTES,
-                "{} should carry the full human-review note set",
-                case.id
-            );
-            assert!(
-                !case.review_focus.trim().is_empty(),
-                "{} should have a reviewer focus",
-                case.id
-            );
+        for (cases, expected_notes) in [
+            (detail_typography_matrix(), DETAIL_TYPOGRAPHY_REVIEW_NOTES),
+            (smart_shelf_mvp_matrix(), SMART_SHELF_MVP_REVIEW_NOTES),
+        ] {
+            for case in cases {
+                assert_eq!(
+                    case.review_notes, expected_notes,
+                    "{} should carry the full human-review note set",
+                    case.id
+                );
+                assert!(
+                    !case.review_focus.trim().is_empty(),
+                    "{} should have a reviewer focus",
+                    case.id
+                );
+            }
         }
     }
 }

@@ -2325,6 +2325,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrex-player-intelligence"
+version = "0.1.2-alpha"
+dependencies = [
+ "chrono",
+ "ferrex-player-api",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "ferrex-player-library"
 version = "0.1.2-alpha"
 dependencies = [
@@ -2472,6 +2483,7 @@ dependencies = [
  "ferrex-player-api",
  "ferrex-player-auth",
  "ferrex-player-foundation",
+ "ferrex-player-intelligence",
  "ferrex-player-library",
  "ferrex-player-media",
  "ferrex-player-metadata",

@@ -1,10 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use ferrex_core::api::types::collections::*;
+use ferrex_core::api::types::{
+    collections::*, intelligence::*, smart_shelves::*,
+};
 use ferrex_core::domain::users::auth::{
     device::AuthDeviceStatus, domain::value_objects::SessionScope,
 };
@@ -46,6 +48,15 @@ struct InnerApiState {
     collection_order: Vec<CollectionId>,
     shelf_placements: Vec<ShelfPlacement>,
     tmdb_collections: Vec<TmdbCollectionSummary>,
+    intelligence_provider_status: IntelligenceProviderStatus,
+    smart_shelf_start_queue: VecDeque<SmartShelfStartResponse>,
+    intelligence_run_statuses:
+        HashMap<Uuid, Vec<IntelligenceRunStatusResponse>>,
+    intelligence_run_poll_positions: HashMap<Uuid, usize>,
+    smart_shelf_drafts: HashMap<Uuid, SmartShelfDraftResponse>,
+    smart_shelf_saves: HashMap<Uuid, SmartShelfSaveResponse>,
+    next_smart_shelf_save_collection_id: Option<CollectionId>,
+    next_smart_shelf_save_error: Option<SmartShelfStubError>,
     next_collection_query_error: Option<String>,
     next_collection_write_error: Option<String>,
     watch_state: UserWatchState,
@@ -57,6 +68,27 @@ struct InnerApiState {
     current_user: Option<User>,
     current_permissions: Option<UserPermissions>,
     playback_ticket_result: Option<Result<String, String>>,
+}
+
+#[derive(Debug, Clone)]
+enum SmartShelfStubError {
+    Validation(String),
+    Conflict(String),
+    Storage(String),
+}
+
+impl SmartShelfStubError {
+    fn into_repository_error(self) -> RepositoryError {
+        match self {
+            Self::Validation(message) => RepositoryError::UpdateFailed(
+                format!("Smart-shelf validation failed: {message}"),
+            ),
+            Self::Conflict(message) => RepositoryError::UpdateFailed(format!(
+                "Smart-shelf conflict: {message}"
+            )),
+            Self::Storage(message) => RepositoryError::StorageError(message),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +124,14 @@ impl TestApiService {
                 collection_order,
                 shelf_placements: Vec::new(),
                 tmdb_collections: sample_tmdb_collections(),
+                intelligence_provider_status: sample_provider_status(),
+                smart_shelf_start_queue: VecDeque::new(),
+                intelligence_run_statuses: HashMap::new(),
+                intelligence_run_poll_positions: HashMap::new(),
+                smart_shelf_drafts: HashMap::new(),
+                smart_shelf_saves: HashMap::new(),
+                next_smart_shelf_save_collection_id: None,
+                next_smart_shelf_save_error: None,
                 next_collection_query_error: None,
                 next_collection_write_error: None,
                 watch_state: UserWatchState::new(),
@@ -201,6 +241,115 @@ impl TestApiService {
         if let Ok(mut guard) = self.inner.write() {
             guard.next_collection_write_error = Some(message.into());
         }
+    }
+
+    /// Replace the deterministic intelligence provider status fixture.
+    pub fn set_intelligence_provider_status(
+        &self,
+        status: IntelligenceProviderStatus,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.intelligence_provider_status = status;
+        }
+    }
+
+    /// Queue a deterministic smart-shelf start response for the next start call.
+    pub fn queue_smart_shelf_start(&self, response: SmartShelfStartResponse) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.smart_shelf_start_queue.push_back(response);
+        }
+    }
+
+    /// Replace the poll sequence returned for an intelligence run.
+    ///
+    /// Each poll advances by one frame and then stays on the terminal/last
+    /// frame, making reducer tests deterministic without timers.
+    pub fn set_intelligence_run_progress(
+        &self,
+        run_id: Uuid,
+        statuses: Vec<IntelligenceRunStatusResponse>,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.intelligence_run_statuses.insert(run_id, statuses);
+            guard.intelligence_run_poll_positions.insert(run_id, 0);
+        }
+    }
+
+    /// Append one deterministic progress frame for an intelligence run.
+    pub fn push_intelligence_run_status(
+        &self,
+        status: IntelligenceRunStatusResponse,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard
+                .intelligence_run_statuses
+                .entry(status.run_id)
+                .or_default()
+                .push(status);
+        }
+    }
+
+    /// Seed or replace a typed smart-shelf draft fixture.
+    pub fn upsert_smart_shelf_draft(&self, draft: SmartShelfDraftResponse) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.smart_shelf_drafts.insert(draft.artifact_id, draft);
+        }
+    }
+
+    /// Force the next successful smart-shelf save to use a deterministic id.
+    pub fn set_next_smart_shelf_save_collection_id(
+        &self,
+        collection_id: CollectionId,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.next_smart_shelf_save_collection_id = Some(collection_id);
+        }
+    }
+
+    /// Cause the next smart-shelf save to fail with a validation error.
+    pub fn fail_next_smart_shelf_save_validation(
+        &self,
+        message: impl Into<String>,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.next_smart_shelf_save_error =
+                Some(SmartShelfStubError::Validation(message.into()));
+        }
+    }
+
+    /// Cause the next smart-shelf save to fail with a conflict error.
+    pub fn fail_next_smart_shelf_save_conflict(
+        &self,
+        message: impl Into<String>,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.next_smart_shelf_save_error =
+                Some(SmartShelfStubError::Conflict(message.into()));
+        }
+    }
+
+    /// Cause the next smart-shelf save to fail with a storage error.
+    pub fn fail_next_smart_shelf_save_storage(
+        &self,
+        message: impl Into<String>,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.next_smart_shelf_save_error =
+                Some(SmartShelfStubError::Storage(message.into()));
+        }
+    }
+
+    /// Return a previously saved smart-shelf response, if any.
+    pub fn smart_shelf_save(
+        &self,
+        artifact_id: Uuid,
+    ) -> Option<SmartShelfSaveResponse> {
+        self.inner
+            .read()
+            .expect("lock poisoned")
+            .smart_shelf_saves
+            .get(&artifact_id)
+            .cloned()
     }
 }
 
@@ -438,6 +587,215 @@ fn collection_detail_from_create(
         items_preview: Vec::new(),
         shelf_placements: Vec::new(),
     }
+}
+
+fn sample_smart_shelf_start_response(run_id: Uuid) -> SmartShelfStartResponse {
+    SmartShelfStartResponse {
+        run_id,
+        status: IntelligenceRunStatus::Queued,
+        provider: Some("test-provider".into()),
+        model: Some("test-model".into()),
+        queued_at_epoch_seconds: Some(Utc::now().timestamp()),
+        draft_schema_version: SMART_SHELF_DRAFT_SCHEMA_VERSION,
+    }
+}
+
+fn run_status_from_smart_shelf_start(
+    response: &SmartShelfStartResponse,
+) -> IntelligenceRunStatusResponse {
+    IntelligenceRunStatusResponse {
+        run_id: response.run_id,
+        purpose: IntelligenceRunPurpose::Recommendation,
+        status: response.status,
+        terminal: matches!(
+            response.status,
+            IntelligenceRunStatus::Succeeded
+                | IntelligenceRunStatus::Failed
+                | IntelligenceRunStatus::Cancelled
+        ),
+        current_phase: Some("queued".into()),
+        provider: response.provider.clone(),
+        model: response.model.clone(),
+        queued_at_epoch_seconds: response.queued_at_epoch_seconds,
+        started_at_epoch_seconds: None,
+        completed_at_epoch_seconds: None,
+        current_step: Some(0),
+        max_steps: Some(1),
+        draft_artifact_ids: Vec::new(),
+        output_summary: None,
+        error: None,
+    }
+}
+
+fn smart_shelf_validation_error(
+    validation: &SmartShelfDraftValidation,
+) -> RepositoryError {
+    let message = validation
+        .issues
+        .iter()
+        .map(|issue| issue.message.as_str())
+        .collect::<Vec<_>>()
+        .join("; ");
+    RepositoryError::UpdateFailed(format!(
+        "Smart-shelf validation failed: {}",
+        if message.is_empty() {
+            "draft is invalid"
+        } else {
+            &message
+        }
+    ))
+}
+
+fn selected_smart_shelf_items(
+    content: &SmartShelfDraftContent,
+    request: &SmartShelfSaveRequest,
+) -> RepositoryResult<Vec<SmartShelfDraftItem>> {
+    if request.items.is_empty() {
+        return Ok(content.items.clone());
+    }
+
+    let mut available = HashMap::new();
+    for item in &content.items {
+        available.insert(item.media_id, item.clone());
+    }
+    for alternate in &content.alternates {
+        let ordinal = alternate.target_ordinal.unwrap_or_else(|| {
+            u32::try_from(content.items.len() + available.len() + 1)
+                .unwrap_or(u32::MAX)
+        });
+        available
+            .entry(alternate.media_id)
+            .or_insert_with(|| alternate.clone().into_item(ordinal));
+    }
+
+    let mut seen = HashSet::new();
+    let mut selected = Vec::with_capacity(request.items.len());
+    for (index, save_item) in request.items.iter().enumerate() {
+        if !seen.insert(save_item.media_id) {
+            return Err(RepositoryError::UpdateFailed(format!(
+                "Smart-shelf validation failed: duplicate accepted media {}",
+                save_item.media_id
+            )));
+        }
+        let Some(mut item) = available.get(&save_item.media_id).cloned() else {
+            return Err(RepositoryError::UpdateFailed(format!(
+                "Smart-shelf validation failed: accepted media {} is not present in the draft",
+                save_item.media_id
+            )));
+        };
+        item.ordinal = u32::try_from(index + 1).unwrap_or(u32::MAX);
+        item.locked = save_item.locked;
+        item.replacement_of = save_item.replacement_of;
+        if save_item.reason.is_some() {
+            item.reason = save_item.reason.clone();
+        }
+        if !save_item.sources.is_empty() {
+            item.sources = save_item.sources.clone();
+        }
+        selected.push(item);
+    }
+    Ok(selected)
+}
+
+fn smart_shelf_collection_record(
+    collection_id: CollectionId,
+    artifact_id: Uuid,
+    draft: &SmartShelfDraftResponse,
+    request: SmartShelfSaveRequest,
+    accepted_items: Vec<SmartShelfDraftItem>,
+) -> (SmartShelfSaveResponse, CollectionRecord) {
+    let now = Utc::now();
+    let title = request.title.unwrap_or_else(|| {
+        draft
+            .draft
+            .as_ref()
+            .map(|content| content.title.clone())
+            .unwrap_or_else(|| draft.title.clone())
+    });
+    let description = request.description.or_else(|| {
+        draft
+            .draft
+            .as_ref()
+            .and_then(|content| content.description.clone())
+    });
+    let members: Vec<_> = accepted_items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| CollectionMember {
+            added_at: Some(now),
+            ..CollectionMember::new(
+                item.media_id,
+                item.title
+                    .clone()
+                    .unwrap_or_else(|| item.media_id.to_string()),
+                u32::try_from(index + 1).unwrap_or(u32::MAX),
+            )
+        })
+        .collect();
+    let item_keys = accepted_items
+        .iter()
+        .map(|item| CollectionMemberKey::for_media(&item.media_id))
+        .collect::<Vec<_>>();
+    let item_count = u32::try_from(members.len()).unwrap_or(u32::MAX);
+    let summary = CollectionSummary {
+        identity: CollectionIdentity::for_id(collection_id),
+        title,
+        description,
+        kind: CollectionKind::Manual,
+        source: CollectionSource::Manual,
+        owner: CollectionOwner::default(),
+        scope: CollectionScope::User,
+        visibility: CollectionVisibility::Private,
+        presentation: CollectionPresentationMode::Shelf,
+        media_scope: CollectionMediaScope::ExplicitItems { item_keys },
+        duplicate_policy: CollectionDuplicatePolicy::DeduplicateMedia,
+        artwork: CollectionArtwork::default(),
+        theme: CollectionTheme::default(),
+        provenance: CollectionProvenance {
+            source: CollectionSource::Manual,
+            generated_by: Some("smart_shelf".into()),
+            external_id: Some(artifact_id.to_string()),
+            last_refreshed_at: Some(now),
+            ..CollectionProvenance::default()
+        },
+        version: CollectionVersion {
+            revision: 1,
+            etag: Some(format!("collection-{}-1", collection_id)),
+            ..CollectionVersion::default()
+        },
+        timestamps: CollectionTimestamps {
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        },
+        item_count,
+        materialization: CollectionMaterializationStatus {
+            state: CollectionMaterializationState::Ready,
+            item_count,
+            generated_at: Some(now),
+            ..CollectionMaterializationStatus::default()
+        },
+    };
+    let response = SmartShelfSaveResponse {
+        draft_artifact_id: artifact_id,
+        collection_id,
+        collection: summary.clone(),
+        item_count,
+        saved_at_epoch_seconds: Some(now.timestamp()),
+    };
+    let detail = CollectionDetail {
+        summary,
+        rule: None,
+        items_preview: members.iter().take(12).cloned().collect(),
+        shelf_placements: Vec::new(),
+    };
+    (
+        response,
+        CollectionRecord {
+            detail,
+            items: members,
+        },
+    )
 }
 
 #[async_trait]
@@ -881,6 +1239,221 @@ impl ApiService for TestApiService {
         _query: MediaQuery,
     ) -> RepositoryResult<Vec<MediaWithStatus>> {
         Ok(Vec::new())
+    }
+
+    async fn fetch_intelligence_provider_status(
+        &self,
+    ) -> RepositoryResult<IntelligenceProviderStatus> {
+        Ok(self
+            .inner
+            .read()
+            .expect("lock poisoned")
+            .intelligence_provider_status
+            .clone())
+    }
+
+    async fn start_smart_shelf(
+        &self,
+        request: SmartShelfStartRequest,
+    ) -> RepositoryResult<SmartShelfStartResponse> {
+        if request.prompt.trim().is_empty() {
+            return Err(RepositoryError::CreateFailed(
+                "smart-shelf prompt must not be empty".into(),
+            ));
+        }
+
+        let mut guard = self.inner.write().expect("lock poisoned");
+        let response = guard
+            .smart_shelf_start_queue
+            .pop_front()
+            .unwrap_or_else(|| {
+                sample_smart_shelf_start_response(Uuid::now_v7())
+            });
+        guard
+            .intelligence_run_statuses
+            .entry(response.run_id)
+            .or_insert_with(|| {
+                vec![run_status_from_smart_shelf_start(&response)]
+            });
+        guard
+            .intelligence_run_poll_positions
+            .entry(response.run_id)
+            .or_insert(0);
+        Ok(response)
+    }
+
+    async fn fetch_intelligence_run_status(
+        &self,
+        run_id: Uuid,
+    ) -> RepositoryResult<IntelligenceRunStatusResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        let (status, next_position) = {
+            let statuses = guard
+                .intelligence_run_statuses
+                .get(&run_id)
+                .ok_or_else(|| RepositoryError::NotFound {
+                    entity_type: "IntelligenceRun".into(),
+                    id: run_id.to_string(),
+                })?;
+            if statuses.is_empty() {
+                return Err(RepositoryError::QueryFailed(format!(
+                    "Intelligence run {} has no status frames",
+                    run_id
+                )));
+            }
+
+            let position = guard
+                .intelligence_run_poll_positions
+                .get(&run_id)
+                .copied()
+                .unwrap_or(0)
+                .min(statuses.len() - 1);
+            let status = statuses[position].clone();
+            let next_position =
+                (position + 1 < statuses.len()).then_some(position + 1);
+            (status, next_position)
+        };
+        if let Some(next_position) = next_position {
+            guard
+                .intelligence_run_poll_positions
+                .insert(run_id, next_position);
+        }
+        Ok(status)
+    }
+
+    async fn cancel_intelligence_run(
+        &self,
+        run_id: Uuid,
+        request: IntelligenceRunCancelRequest,
+    ) -> RepositoryResult<IntelligenceRunCancelResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        let statuses = guard
+            .intelligence_run_statuses
+            .get_mut(&run_id)
+            .ok_or_else(|| RepositoryError::NotFound {
+                entity_type: "IntelligenceRun".into(),
+                id: run_id.to_string(),
+            })?;
+        let Some(current) = statuses.last().cloned() else {
+            return Err(RepositoryError::QueryFailed(format!(
+                "Intelligence run {} has no status frames",
+                run_id
+            )));
+        };
+        let now = Utc::now().timestamp();
+        let cancelled = IntelligenceRunStatusResponse {
+            status: IntelligenceRunStatus::Cancelled,
+            terminal: true,
+            current_phase: Some("cancelled".into()),
+            completed_at_epoch_seconds: Some(now),
+            error: request.reason.as_ref().map(|reason| IntelligenceError {
+                code: IntelligenceErrorCode::RunCancelled,
+                message: reason.clone(),
+                retryable: false,
+                details: serde_json::Value::Null,
+            }),
+            ..current
+        };
+        let cancelled_position = {
+            statuses.push(cancelled);
+            statuses.len() - 1
+        };
+        guard
+            .intelligence_run_poll_positions
+            .insert(run_id, cancelled_position);
+
+        Ok(IntelligenceRunCancelResponse {
+            run_id,
+            status: IntelligenceRunStatus::Cancelled,
+            cancellation_requested: true,
+            cancelled_at_epoch_seconds: Some(now),
+            message: request.reason,
+            error: None,
+        })
+    }
+
+    async fn fetch_smart_shelf_draft(
+        &self,
+        artifact_id: Uuid,
+    ) -> RepositoryResult<SmartShelfDraftResponse> {
+        self.inner
+            .read()
+            .expect("lock poisoned")
+            .smart_shelf_drafts
+            .get(&artifact_id)
+            .cloned()
+            .ok_or_else(|| RepositoryError::NotFound {
+                entity_type: "SmartShelfDraft".into(),
+                id: artifact_id.to_string(),
+            })
+    }
+
+    async fn save_smart_shelf(
+        &self,
+        artifact_id: Uuid,
+        request: SmartShelfSaveRequest,
+    ) -> RepositoryResult<SmartShelfSaveResponse> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        if let Some(error) = guard.next_smart_shelf_save_error.take() {
+            return Err(error.into_repository_error());
+        }
+        if let Some(saved) = guard.smart_shelf_saves.get(&artifact_id) {
+            return Err(RepositoryError::UpdateFailed(format!(
+                "Smart-shelf conflict: draft {} has already been saved as {}",
+                artifact_id, saved.collection_id
+            )));
+        }
+
+        let draft = guard
+            .smart_shelf_drafts
+            .get(&artifact_id)
+            .cloned()
+            .ok_or_else(|| RepositoryError::NotFound {
+                entity_type: "SmartShelfDraft".into(),
+                id: artifact_id.to_string(),
+            })?;
+        if !draft.validation.valid {
+            return Err(smart_shelf_validation_error(&draft.validation));
+        }
+        let Some(content) = draft.draft.as_ref() else {
+            return Err(RepositoryError::UpdateFailed(
+                "Smart-shelf validation failed: draft content is missing"
+                    .into(),
+            ));
+        };
+        let accepted_items = selected_smart_shelf_items(content, &request)?;
+        let accepted_grounding = accepted_items
+            .iter()
+            .map(|item| item.media_id)
+            .collect::<HashSet<_>>();
+        let accepted_validation = validate_smart_shelf_draft_items(
+            &accepted_items,
+            &accepted_grounding,
+        );
+        if !accepted_validation.valid {
+            return Err(smart_shelf_validation_error(&accepted_validation));
+        }
+
+        let collection_id = guard
+            .next_smart_shelf_save_collection_id
+            .take()
+            .unwrap_or_default();
+        let (response, record) = smart_shelf_collection_record(
+            collection_id,
+            artifact_id,
+            &draft,
+            request,
+            accepted_items,
+        );
+        guard.collection_order.push(collection_id);
+        guard.collections.insert(collection_id, record);
+        if let Some(draft) = guard.smart_shelf_drafts.get_mut(&artifact_id) {
+            draft.saved_collection_id = Some(collection_id);
+        }
+        guard
+            .smart_shelf_saves
+            .insert(artifact_id, response.clone());
+        Ok(response)
     }
 
     async fn list_collections(
@@ -1943,6 +2516,26 @@ fn sample_collections() -> CollectionFixtures {
     )
 }
 
+fn sample_provider_status() -> IntelligenceProviderStatus {
+    IntelligenceProviderStatus {
+        enabled: true,
+        provider_name: "test-provider".into(),
+        base_url: "https://llm.test".into(),
+        api_key_configured: true,
+        default_model: Some("test-model".into()),
+        state: IntelligenceProviderState::Ready,
+        models: vec![IntelligenceModelStatus {
+            name: "test-model".into(),
+            selected: true,
+            available: true,
+            supports_tools: true,
+            context_window_tokens: Some(8192),
+        }],
+        checked_at_epoch_seconds: Some(Utc::now().timestamp()),
+        error: None,
+    }
+}
+
 fn sample_tmdb_collections() -> Vec<TmdbCollectionSummary> {
     vec![
         TmdbCollectionSummary {
@@ -2075,6 +2668,107 @@ mod tests {
             media_id: MediaID::Movie(MovieID(Uuid::now_v7())),
             title_override: Some(title.into()),
             position: Some(position),
+        }
+    }
+
+    fn fixed_uuid(value: u128) -> Uuid {
+        Uuid::from_u128(value)
+    }
+
+    fn smart_shelf_run_status(
+        run_id: Uuid,
+        status: IntelligenceRunStatus,
+        step: u32,
+        draft_artifact_ids: Vec<Uuid>,
+    ) -> IntelligenceRunStatusResponse {
+        IntelligenceRunStatusResponse {
+            run_id,
+            purpose: IntelligenceRunPurpose::Recommendation,
+            status,
+            terminal: matches!(
+                status,
+                IntelligenceRunStatus::Succeeded
+                    | IntelligenceRunStatus::Failed
+                    | IntelligenceRunStatus::Cancelled
+            ),
+            current_phase: Some(format!("step-{step}")),
+            provider: Some("test-provider".into()),
+            model: Some("test-model".into()),
+            queued_at_epoch_seconds: Some(1),
+            started_at_epoch_seconds: (step > 0).then_some(2),
+            completed_at_epoch_seconds: matches!(
+                status,
+                IntelligenceRunStatus::Succeeded
+                    | IntelligenceRunStatus::Failed
+                    | IntelligenceRunStatus::Cancelled
+            )
+            .then_some(3),
+            current_step: Some(step),
+            max_steps: Some(3),
+            draft_artifact_ids,
+            output_summary: None,
+            error: None,
+        }
+    }
+
+    fn smart_shelf_draft(
+        artifact_id: Uuid,
+        run_id: Uuid,
+        media_id: MediaID,
+        valid: bool,
+    ) -> SmartShelfDraftResponse {
+        let source = SmartShelfDraftSource {
+            label: Some("Library metadata".into()),
+            media_id: Some(media_id),
+            artifact_id: None,
+            field: Some("genres".into()),
+            evidence: Some(IntelligenceSummary::new("Grounded evidence")),
+        };
+        let item = SmartShelfDraftItem {
+            ordinal: 1,
+            media_id,
+            title: Some("Arrival".into()),
+            subtitle: None,
+            year: Some(2016),
+            reason: Some("Grounded in library metadata".into()),
+            sources: vec![source],
+            locked: false,
+            replacement_of: None,
+        };
+        let content = SmartShelfDraftContent {
+            schema_version: SMART_SHELF_DRAFT_SCHEMA_VERSION,
+            title: "Moody sci-fi".into(),
+            description: Some("Atmospheric science fiction".into()),
+            interpreted_intent: Some("Find moody picks".into()),
+            requested_constraints: serde_json::json!({"tone": "moody"}),
+            items: vec![item],
+            alternates: Vec::new(),
+        };
+        let validation = if valid {
+            validate_smart_shelf_draft_items(
+                &content.items,
+                &HashSet::from([media_id]),
+            )
+        } else {
+            SmartShelfDraftValidation::from_issues(vec![
+                SmartShelfDraftValidationIssue::for_item(
+                    SmartShelfDraftValidationIssueCode::MissingReason,
+                    1,
+                    media_id,
+                    "smart-shelf draft item is missing a grounded reason",
+                ),
+            ])
+        };
+
+        SmartShelfDraftResponse {
+            artifact_id,
+            run_id: Some(run_id),
+            owner_user_id: Some(fixed_uuid(42)),
+            title: "Moody sci-fi".into(),
+            summary: Some(IntelligenceSummary::new("A grounded smart shelf")),
+            draft: Some(content),
+            validation,
+            saved_collection_id: None,
         }
     }
 
@@ -2403,5 +3097,192 @@ mod tests {
                 .as_deref(),
             Some("550")
         );
+    }
+
+    #[tokio::test]
+    async fn smart_shelf_stub_progress_cancel_draft_and_save_are_deterministic()
+    {
+        let service = TestApiService::default();
+        let provider = service
+            .fetch_intelligence_provider_status()
+            .await
+            .expect("provider status");
+        assert_eq!(provider.state, IntelligenceProviderState::Ready);
+
+        let run_id = fixed_uuid(100);
+        let artifact_id = fixed_uuid(101);
+        let collection_id = CollectionId::from(fixed_uuid(102));
+        let media_id = MediaID::Movie(MovieID(fixed_uuid(103)));
+        service.queue_smart_shelf_start(SmartShelfStartResponse {
+            run_id,
+            status: IntelligenceRunStatus::Queued,
+            provider: Some("test-provider".into()),
+            model: Some("test-model".into()),
+            queued_at_epoch_seconds: Some(1),
+            draft_schema_version: SMART_SHELF_DRAFT_SCHEMA_VERSION,
+        });
+        service.set_intelligence_run_progress(
+            run_id,
+            vec![
+                smart_shelf_run_status(
+                    run_id,
+                    IntelligenceRunStatus::Queued,
+                    0,
+                    Vec::new(),
+                ),
+                smart_shelf_run_status(
+                    run_id,
+                    IntelligenceRunStatus::Running,
+                    1,
+                    Vec::new(),
+                ),
+            ],
+        );
+        service.upsert_smart_shelf_draft(smart_shelf_draft(
+            artifact_id,
+            run_id,
+            media_id,
+            true,
+        ));
+        service.set_next_smart_shelf_save_collection_id(collection_id);
+
+        let start = service
+            .start_smart_shelf(SmartShelfStartRequest {
+                prompt: "Moody science fiction".into(),
+                library_id: None,
+                media_kinds: vec![IntelligenceMediaKind::Movie],
+                item_count: 8,
+                template_id: None,
+                locked_media_ids: Vec::new(),
+                idempotency_key: Some("deterministic-run".into()),
+                model: None,
+                caps: IntelligenceCaps::default(),
+                constraints: serde_json::Value::Null,
+                metadata: serde_json::Value::Null,
+            })
+            .await
+            .expect("start smart shelf");
+        assert_eq!(start.run_id, run_id);
+
+        let first_poll = service
+            .fetch_intelligence_run_status(run_id)
+            .await
+            .expect("first poll");
+        assert_eq!(first_poll.status, IntelligenceRunStatus::Queued);
+        let second_poll = service
+            .fetch_intelligence_run_status(run_id)
+            .await
+            .expect("second poll");
+        assert_eq!(second_poll.status, IntelligenceRunStatus::Running);
+
+        let cancel = service
+            .cancel_intelligence_run(
+                run_id,
+                IntelligenceRunCancelRequest {
+                    reason: Some("user changed prompt".into()),
+                },
+            )
+            .await
+            .expect("cancel run");
+        assert!(cancel.cancellation_requested);
+        let cancelled_poll = service
+            .fetch_intelligence_run_status(run_id)
+            .await
+            .expect("cancelled poll");
+        assert_eq!(cancelled_poll.status, IntelligenceRunStatus::Cancelled);
+        assert!(cancelled_poll.terminal);
+
+        let draft = service
+            .fetch_smart_shelf_draft(artifact_id)
+            .await
+            .expect("smart shelf draft");
+        assert!(draft.validation.valid);
+        assert_eq!(draft.draft.as_ref().expect("draft content").items.len(), 1);
+
+        let saved = service
+            .save_smart_shelf(artifact_id, SmartShelfSaveRequest::default())
+            .await
+            .expect("save smart shelf");
+        assert_eq!(saved.collection_id, collection_id);
+        assert_eq!(saved.item_count, 1);
+        assert_eq!(service.smart_shelf_save(artifact_id), Some(saved.clone()));
+
+        let detail = service
+            .get_collection_detail(
+                collection_id,
+                GetCollectionDetailRequest {
+                    include_rule: true,
+                    include_items_preview: true,
+                    include_shelf_placements: false,
+                },
+            )
+            .await
+            .expect("saved collection detail");
+        assert_eq!(detail.collection.summary.title, "Moody sci-fi");
+        assert_eq!(detail.collection.items_preview.len(), 1);
+
+        let duplicate = service
+            .save_smart_shelf(artifact_id, SmartShelfSaveRequest::default())
+            .await
+            .expect_err("saving the same draft twice conflicts");
+        assert!(duplicate.to_string().contains("Smart-shelf conflict"));
+    }
+
+    #[tokio::test]
+    async fn smart_shelf_stub_reports_validation_and_conflict_errors() {
+        let service = TestApiService::default();
+        let run_id = fixed_uuid(200);
+        let invalid_artifact_id = fixed_uuid(201);
+        let valid_artifact_id = fixed_uuid(202);
+        let media_id = MediaID::Movie(MovieID(fixed_uuid(203)));
+        service.upsert_smart_shelf_draft(smart_shelf_draft(
+            invalid_artifact_id,
+            run_id,
+            media_id,
+            false,
+        ));
+        service.upsert_smart_shelf_draft(smart_shelf_draft(
+            valid_artifact_id,
+            run_id,
+            media_id,
+            true,
+        ));
+
+        let invalid = service
+            .save_smart_shelf(
+                invalid_artifact_id,
+                SmartShelfSaveRequest::default(),
+            )
+            .await
+            .expect_err("invalid draft should not save");
+        assert!(
+            invalid
+                .to_string()
+                .contains("Smart-shelf validation failed")
+        );
+
+        service.fail_next_smart_shelf_save_validation("duplicate media");
+        let forced_validation = service
+            .save_smart_shelf(
+                valid_artifact_id,
+                SmartShelfSaveRequest::default(),
+            )
+            .await
+            .expect_err("forced validation error");
+        assert!(
+            forced_validation
+                .to_string()
+                .contains("Smart-shelf validation failed")
+        );
+
+        service.fail_next_smart_shelf_save_conflict("draft was already saved");
+        let forced_conflict = service
+            .save_smart_shelf(
+                valid_artifact_id,
+                SmartShelfSaveRequest::default(),
+            )
+            .await
+            .expect_err("forced conflict error");
+        assert!(forced_conflict.to_string().contains("Smart-shelf conflict"));
     }
 }

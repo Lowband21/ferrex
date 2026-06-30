@@ -28,6 +28,7 @@ use crate::{
         collections::{self, CollectionItemMoveDirection, CollectionsMessage},
         messages::UiMessage,
         shell_ui::UiShellMessage,
+        smart_shelf::SmartShelfUiMessage,
         tabs::{
             CollectionCreateFormState, CollectionDetailLoadState,
             CollectionEditFormState, CollectionItemActionState,
@@ -130,6 +131,12 @@ pub struct CollectionItemsViewModel {
     pub hidden_summary: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CollectionItemsEmptyStateCopy {
+    pub title: &'static str,
+    pub body: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectionStatusSummary {
     pub source_summary: String,
@@ -215,6 +222,52 @@ pub fn collection_items_view_model(
         status_summary,
         hidden_summary,
     }
+}
+
+pub fn collection_items_empty_state_copy(
+    model: &CollectionItemsViewModel,
+    item_state: Option<&CollectionItemsState>,
+    edit_mode: bool,
+    can_manage: bool,
+) -> Option<CollectionItemsEmptyStateCopy> {
+    if !model.rows.is_empty() {
+        return None;
+    }
+
+    let loading = item_state.is_none_or(|state| {
+        matches!(
+            state.load_state,
+            CollectionItemsLoadState::NotLoaded
+                | CollectionItemsLoadState::Loading
+        )
+    });
+
+    Some(if loading {
+        CollectionItemsEmptyStateCopy {
+            title: "Loading collection items…",
+            body: "Fetching the first page of materialized members.",
+        }
+    } else if model.hidden_count > 0 {
+        CollectionItemsEmptyStateCopy {
+            title: "No available items to show",
+            body: "Unavailable, missing, or archived members are hidden from the normal detail view.",
+        }
+    } else if edit_mode {
+        CollectionItemsEmptyStateCopy {
+            title: "No items in this collection",
+            body: "Search for existing media above to add the first manual item.",
+        }
+    } else if can_manage {
+        CollectionItemsEmptyStateCopy {
+            title: "No items in this collection",
+            body: "Use Manage collection to add the first manual item.",
+        }
+    } else {
+        CollectionItemsEmptyStateCopy {
+            title: "No items in this collection",
+            body: "The API did not return visible materialized members for this collection.",
+        }
+    })
 }
 
 pub fn collection_status_summary(
@@ -408,9 +461,12 @@ fn collections_header(state: &State) -> Element<'_, UiMessage> {
             ]
             .spacing(6),
             Space::new().width(Length::Fill),
+            button("Smart shelf")
+                .on_press(SmartShelfUiMessage::OpenComposer.into())
+                .style(theme::Button::Primary.style()),
             button("New manual collection")
                 .on_press(CollectionsMessage::ToggleCreateForm.into())
-                .style(theme::Button::Primary.style()),
+                .style(theme::Button::Secondary.style()),
             button(if loading { "Refreshing…" } else { "Refresh" })
                 .on_press(CollectionsMessage::Refresh.into())
                 .style(theme::Button::Secondary.style()),
@@ -680,6 +736,8 @@ fn collection_detail_content<'a>(
     let collection_id = summary.identity.id;
     let can_edit = collections::is_manual_collection(summary);
     let tab = collections::collections_tab(state);
+    let edit_mode =
+        can_edit && tab.is_some_and(|tab| tab.is_detail_editing(collection_id));
     let edit_form = tab.and_then(|tab| tab.edit_forms.get(&collection_id));
     let picker_state =
         tab.and_then(|tab| tab.picker_states.get(&collection_id));
@@ -687,7 +745,13 @@ fn collection_detail_content<'a>(
         tab.and_then(|tab| tab.item_action_states.get(&collection_id));
 
     let mut content = column![
-        collection_detail_header_card(row_model.clone(), can_edit, fonts),
+        collection_detail_header_card(
+            row_model.clone(),
+            can_edit,
+            edit_mode,
+            collection_id,
+            fonts,
+        ),
         collection_status_cards(
             status,
             detail,
@@ -698,7 +762,7 @@ fn collection_detail_content<'a>(
     ]
     .spacing(18);
 
-    content = if can_edit {
+    content = if can_edit && edit_mode {
         if let Some(edit_form) = edit_form {
             content.push(collection_manual_editing_section(
                 collection_id,
@@ -709,6 +773,8 @@ fn collection_detail_content<'a>(
         } else {
             content.push(collection_editor_state_notice(fonts))
         }
+    } else if can_edit {
+        content
     } else {
         content.push(collection_read_only_notice(summary, fonts))
     };
@@ -717,6 +783,7 @@ fn collection_detail_content<'a>(
         items_model,
         item_state,
         collection_id,
+        edit_mode,
         can_edit,
         item_action_state,
         fonts,
@@ -728,54 +795,76 @@ fn collection_detail_content<'a>(
 fn collection_detail_header_card<'a>(
     row_model: CollectionSummaryRow,
     editable: bool,
+    edit_mode: bool,
+    collection_id: ferrex_core::api::types::collections::CollectionId,
     fonts: &crate::infra::design_tokens::fonts::FontTokens,
 ) -> Element<'a, UiMessage> {
-    container(
-        row![
-            collection_art_block(
-                row_model.artwork.clone(),
-                row_model.theme.clone(),
-                fonts.caption,
-            ),
-            column![
-                text(row_model.description.clone())
-                    .size(fonts.body)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                row(vec![
-                    badge(row_model.kind.clone(), fonts.caption),
-                    badge(row_model.source.clone(), fonts.caption),
-                    badge(row_model.visibility.clone(), fonts.caption),
-                    badge(row_model.status.clone(), fonts.caption),
-                    badge(
-                        if editable {
-                            "Manual editing enabled"
-                        } else {
-                            "Read-only"
-                        },
-                        fonts.caption,
-                    ),
-                ])
-                .spacing(8),
-                text(row_model.media_scope.clone())
-                    .size(fonts.caption)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                text(row_model.materialization.clone())
-                    .size(fonts.caption)
-                    .color(if row_model.is_stale {
-                        theme::MediaServerTheme::WARNING
-                    } else {
-                        theme::MediaServerTheme::TEXT_SECONDARY
-                    }),
-            ]
-            .spacing(8)
-            .width(Length::Fill),
+    let mode_label = if edit_mode {
+        "Edit mode"
+    } else if editable {
+        "Browse mode"
+    } else {
+        "Read-only"
+    };
+
+    let mut header = row![
+        collection_art_block(
+            row_model.artwork.clone(),
+            row_model.theme.clone(),
+            fonts.caption,
+        ),
+        column![
+            text(row_model.description.clone())
+                .size(fonts.body)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            row(vec![
+                badge(row_model.kind.clone(), fonts.caption),
+                badge(row_model.source.clone(), fonts.caption),
+                badge(row_model.visibility.clone(), fonts.caption),
+                badge(row_model.status.clone(), fonts.caption),
+                badge(mode_label, fonts.caption),
+            ])
+            .spacing(8),
+            text(row_model.media_scope.clone())
+                .size(fonts.caption)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            text(row_model.materialization.clone())
+                .size(fonts.caption)
+                .color(if row_model.is_stale {
+                    theme::MediaServerTheme::WARNING
+                } else {
+                    theme::MediaServerTheme::TEXT_SECONDARY
+                },),
         ]
-        .spacing(16)
-        .align_y(iced::Alignment::Center),
-    )
-    .padding(18)
-    .style(theme::Container::Card.style())
-    .into()
+        .spacing(8)
+        .width(Length::Fill),
+    ]
+    .spacing(16)
+    .align_y(iced::Alignment::Center);
+
+    if editable {
+        let mut manage = button(if edit_mode {
+            "Done managing"
+        } else {
+            "Manage collection"
+        })
+        .style(theme::Button::Secondary.style());
+        manage = if edit_mode {
+            manage.on_press(
+                CollectionsMessage::ExitEditMode(collection_id).into(),
+            )
+        } else {
+            manage.on_press(
+                CollectionsMessage::EnterEditMode(collection_id).into(),
+            )
+        };
+        header = header.push(manage);
+    }
+
+    container(header)
+        .padding(18)
+        .style(theme::Container::Card.style())
+        .into()
 }
 
 fn collection_status_cards<'a>(
@@ -1228,16 +1317,17 @@ fn collection_items_section<'a>(
     model: CollectionItemsViewModel,
     item_state: Option<&'a CollectionItemsState>,
     collection_id: ferrex_core::api::types::collections::CollectionId,
-    editable: bool,
+    edit_mode: bool,
+    can_manage: bool,
     action_state: Option<&'a CollectionItemActionState>,
     fonts: &crate::infra::design_tokens::fonts::FontTokens,
 ) -> Element<'a, UiMessage> {
-    let order_help = if editable && model.can_load_more {
+    let order_help = if edit_mode && model.can_load_more {
         "Load all items before reordering so the saved order is stable"
-    } else if editable {
+    } else if edit_mode {
         "Move up/down controls save an explicit stable order"
     } else {
-        "Stable collection order"
+        "Open available items from the ordered collection cards"
     };
 
     let mut section = column![
@@ -1287,44 +1377,17 @@ fn collection_items_section<'a>(
     }
 
     if model.rows.is_empty() {
-        let loading = item_state.is_none_or(|state| {
-            matches!(
-                state.load_state,
-                CollectionItemsLoadState::NotLoaded
-                    | CollectionItemsLoadState::Loading
-            )
-        });
-        section = section.push(if loading {
-            center_panel(
-                "Loading collection items…",
-                "Fetching the first page of materialized members.",
-                None,
-                fonts,
-            )
-        } else if model.hidden_count > 0 {
-            center_panel(
-                "No available items to show",
-                "Unavailable, missing, or archived members are hidden from the normal detail view.",
-                None,
-                fonts,
-            )
-        } else {
-            center_panel(
-                "No items in this collection",
-                if editable {
-                    "Search for existing media above to add the first manual item."
-                } else {
-                    "The API did not return visible materialized members for this collection."
-                },
-                None,
-                fonts,
-            )
-        });
+        let copy = collection_items_empty_state_copy(
+            &model, item_state, edit_mode, can_manage,
+        )
+        .expect("empty item model should produce empty state copy");
+        section =
+            section.push(center_panel(copy.title, copy.body, None, fonts));
     } else {
         section = section.push(collection_item_grid(
             model.rows.clone(),
             collection_id,
-            editable,
+            edit_mode,
             action_state,
             fonts,
         ));

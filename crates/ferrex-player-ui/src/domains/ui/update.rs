@@ -7,7 +7,7 @@ use crate::{
         messages::UiMessage,
         motion_controller::messages::MotionMessage as KineticMotionMessage,
         playback_ui::update_playback_ui, settings_ui::update_settings_ui,
-        shell_ui::update_shell_ui,
+        shell_ui::update_shell_ui, smart_shelf::update_smart_shelf_ui,
         update_handlers::handle_virtual_carousel_message,
         update_handlers::home_focus, view_model_ui::update_view_model_ui,
         views::virtual_carousel::VirtualCarouselMessage as VCM,
@@ -37,6 +37,9 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
                 state,
                 collections_msg,
             )
+        }
+        UiMessage::SmartShelf(smart_shelf_msg) => {
+            update_smart_shelf_ui(state, smart_shelf_msg)
         }
         UiMessage::Window(window_msg) => update_window_ui(state, window_msg),
         UiMessage::Header(header_msg) => update_header_ui(state, header_msg),

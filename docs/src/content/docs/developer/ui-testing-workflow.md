@@ -155,6 +155,25 @@ for preset in DesktopMovieDetail DesktopSeriesDetail DesktopSeasonDetail Desktop
 done
 ```
 
+## Smart-shelf MVP QA matrix
+
+Smart-shelf desktop MVP states have deterministic presets and a named visual QA matrix:
+
+```bash
+cargo run -p ferrex-player --profile priority -- screenshot matrix smart-shelf list
+cargo run -p ferrex-player --profile priority -- screenshot matrix smart-shelf \
+  --output-dir target/ui-screenshots/smart-shelf-mvp
+```
+
+The matrix covers `SmartShelfComposer`, `SmartShelfRunningProgress`,
+`SmartShelfDraftReady`, `SmartShelfAlternatesReplacement`,
+`SmartShelfProviderUnavailable`, `SmartShelfSavedCollectionDetail`,
+`SmartShelfCollectionEmpty`, and `SmartShelfCollectionError`. Captures write
+PNGs plus `smart-shelf-mvp-visual-qa-matrix.json` under the output directory.
+See [Smart-shelf MVP QA](/developer/smart-shelf-mvp/) for boundaries, local provider
+setup, deterministic fake-provider testing, excluded surfaces, and artifact
+paths.
+
 ## Run UI tests and smoke tests
 
 Replay every committed `.ice` script:

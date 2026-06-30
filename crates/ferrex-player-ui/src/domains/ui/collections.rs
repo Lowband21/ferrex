@@ -92,6 +92,8 @@ pub enum CollectionsMessage {
     CreateScopeChanged(CollectionMediaScopeChoice),
     SubmitCreate,
     CreateCompleted(Result<CollectionDetail, String>),
+    EnterEditMode(CollectionId),
+    ExitEditMode(CollectionId),
     EditTitleChanged(CollectionId, String),
     EditDescriptionChanged(CollectionId, String),
     EditScopeChanged(CollectionId, CollectionMediaScopeChoice),
@@ -169,6 +171,8 @@ impl CollectionsMessage {
             Self::CreateScopeChanged(_) => "UI::CollectionCreateScopeChanged",
             Self::SubmitCreate => "UI::CollectionCreateSubmit",
             Self::CreateCompleted(_) => "UI::CollectionCreateCompleted",
+            Self::EnterEditMode(_) => "UI::CollectionEnterEditMode",
+            Self::ExitEditMode(_) => "UI::CollectionExitEditMode",
             Self::EditTitleChanged(_, _) => "UI::CollectionEditTitleChanged",
             Self::EditDescriptionChanged(_, _) => {
                 "UI::CollectionEditDescriptionChanged"
@@ -538,6 +542,14 @@ pub fn update_collections_ui(
         CollectionsMessage::SubmitCreate => submit_create(state),
         CollectionsMessage::CreateCompleted(result) => {
             handle_create_completed(state, result)
+        }
+        CollectionsMessage::EnterEditMode(collection_id) => {
+            collections_tab_mut(state).enter_detail_edit_mode(collection_id);
+            DomainUpdateResult::task(Task::none())
+        }
+        CollectionsMessage::ExitEditMode(collection_id) => {
+            collections_tab_mut(state).exit_detail_edit_mode(collection_id);
+            DomainUpdateResult::task(Task::none())
         }
         CollectionsMessage::EditTitleChanged(collection_id, value) => {
             let form =

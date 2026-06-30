@@ -12,7 +12,7 @@ use axum_test::TestServer;
 use ferrex_core::{
     api::{
         routes::{self, utils as route_utils},
-        types::intelligence::*,
+        types::{intelligence::*, smart_shelves::*},
     },
     application::intelligence_runtime::IntelligenceRunManagerConfig,
     database::repository_ports::intelligence::{
@@ -25,10 +25,10 @@ use ferrex_core::{
         IntelligenceProviderRequestOptions, IntelligenceProviderResult,
     },
 };
-use ferrex_model::{LibraryId, MediaID, MovieID};
+use ferrex_model::{EpisodeID, LibraryId, MediaID, MovieID};
 use ferrex_server::infra::{app_state::AppState, startup::NoopStartupHooks};
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -491,6 +491,114 @@ fn hex_hash(seed: u64) -> String {
 
 fn media_segment(movie_id: Uuid) -> String {
     format!("movie:{movie_id}")
+}
+
+fn smart_shelf_draft_path(artifact_id: Uuid) -> String {
+    route_utils::replace_param(
+        routes::v1::intelligence::SMART_SHELF_DRAFT_DETAIL,
+        "{artifact_id}",
+        artifact_id.to_string(),
+    )
+}
+
+fn smart_shelf_save_path(artifact_id: Uuid) -> String {
+    route_utils::replace_param(
+        routes::v1::intelligence::SMART_SHELF_SAVE,
+        "{artifact_id}",
+        artifact_id.to_string(),
+    )
+}
+
+fn smart_shelf_item(movie_id: Uuid, title: &str) -> SmartShelfDraftItem {
+    let media_id = MediaID::Movie(MovieID(movie_id));
+    SmartShelfDraftItem {
+        ordinal: 1,
+        media_id,
+        title: Some(title.to_string()),
+        subtitle: None,
+        year: Some(2026),
+        reason: Some(format!("{title} matches the grounded shelf request")),
+        sources: vec![SmartShelfDraftSource {
+            label: Some("Library metadata".to_string()),
+            media_id: Some(media_id),
+            artifact_id: None,
+            field: Some("title".to_string()),
+            evidence: None,
+        }],
+        locked: false,
+        replacement_of: None,
+    }
+}
+
+fn smart_shelf_content(items: Vec<SmartShelfDraftItem>) -> Value {
+    serde_json::to_value(SmartShelfDraftContent {
+        schema_version: SMART_SHELF_DRAFT_SCHEMA_VERSION,
+        title: "Rainy night shelf".to_string(),
+        description: Some("Grounded private shelf draft".to_string()),
+        interpreted_intent: Some("Find a compact grounded shelf".to_string()),
+        requested_constraints: json!({"mood": "rainy"}),
+        items,
+        alternates: Vec::new(),
+    })
+    .expect("smart shelf content serializes")
+}
+
+async fn seed_smart_shelf_draft(
+    pool: &PgPool,
+    artifact_id: Uuid,
+    owner_id: Uuid,
+    library_id: Uuid,
+    status: &str,
+    content: Value,
+    metadata: Value,
+    source_media_ids: &[MediaID],
+) {
+    sqlx::query(
+        r#"
+        INSERT INTO intelligence_artifacts (
+            id, artifact_kind, scope, status, library_id, user_id,
+            title, summary, content_hash, content, metadata, source_revision
+        ) VALUES (
+            $1, 'recommendation', 'user', $2, $3, $4,
+            'Rainy night shelf draft', 'A typed smart-shelf draft.',
+            $5, $6::jsonb, $7::jsonb, 1
+        )
+        "#,
+    )
+    .bind(artifact_id)
+    .bind(status)
+    .bind(library_id)
+    .bind(owner_id)
+    .bind(hex_hash(0x5eed))
+    .bind(&content)
+    .bind(&metadata)
+    .execute(pool)
+    .await
+    .expect("insert smart shelf draft");
+
+    for (ordinal, media_id) in source_media_ids.iter().enumerate() {
+        sqlx::query(
+            r#"
+            INSERT INTO intelligence_artifact_sources (
+                artifact_id, source_ordinal, source_kind, source_library_id,
+                source_media_id, source_media_type
+            ) VALUES ($1, $2, 'media', $3, $4, ($5::text)::media_type)
+            "#,
+        )
+        .bind(artifact_id)
+        .bind(i32::try_from(ordinal).expect("source ordinal fits i32"))
+        .bind(library_id)
+        .bind(*media_id.as_uuid())
+        .bind(match media_id {
+            MediaID::Movie(_) => "movie",
+            MediaID::Series(_) => "series",
+            MediaID::Season(_) => "season",
+            MediaID::Episode(_) => "episode",
+        })
+        .execute(pool)
+        .await
+        .expect("insert smart shelf draft source");
+    }
 }
 
 fn candidate_search_action(
@@ -1333,6 +1441,480 @@ async fn intelligence_runtime_routes_cover_auth_runs_sse_cancel_and_drafts(
             .map(|drafts| drafts.is_empty())
             .unwrap_or(true)
     );
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn smart_shelf_start_route_enforces_auth_and_provider_status(
+    pool: PgPool,
+) -> Result<()> {
+    let (disabled_server, _disabled_state, _disabled_tempdir) =
+        build_server(pool.clone()).await?;
+    let (_disabled_user_id, disabled_token) =
+        register_user(&disabled_server, "smart_start_disabled").await?;
+
+    let unauthenticated = disabled_server
+        .post(routes::v1::intelligence::SMART_SHELF_START)
+        .json(&json!({"prompt": "rainy night", "item_count": 4}))
+        .await;
+    unauthenticated.assert_status(StatusCode::UNAUTHORIZED);
+
+    let disabled = disabled_server
+        .post(routes::v1::intelligence::SMART_SHELF_START)
+        .add_header("Authorization", bearer(&disabled_token))
+        .json(&json!({"prompt": "rainy night", "item_count": 4}))
+        .await;
+    disabled.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+    let disabled_body: Value = disabled.json();
+    assert_eq!(disabled_body["error"]["code"], "feature_disabled");
+
+    let unavailable_provider = Arc::new(RouteFakeProvider::default());
+    unavailable_provider.push_models(Err(
+        IntelligenceProviderError::Unavailable {
+            message: "connection refused".to_string(),
+        },
+    ));
+    let (unavailable_server, _unavailable_state, _unavailable_tempdir) =
+        build_server_with_provider(pool.clone(), unavailable_provider).await?;
+    let (_unavailable_user_id, unavailable_token) =
+        register_user(&unavailable_server, "smart_start_unavailable").await?;
+    let unavailable = unavailable_server
+        .post(routes::v1::intelligence::SMART_SHELF_START)
+        .add_header("Authorization", bearer(&unavailable_token))
+        .json(&json!({"prompt": "rainy night", "item_count": 4}))
+        .await;
+    unavailable.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+    let unavailable_body: Value = unavailable.json();
+    assert_eq!(unavailable_body["error"]["code"], "provider_unavailable");
+
+    let provider = Arc::new(RouteFakeProvider::default());
+    let (server, _state, _tempdir) =
+        build_server_with_provider(pool.clone(), provider).await?;
+    let (_user_id, access_token) =
+        register_user(&server, "smart_start_owner").await?;
+    let start = server
+        .post(routes::v1::intelligence::SMART_SHELF_START)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({
+            "prompt": "rainy night",
+            "item_count": 4,
+            "media_kinds": ["movie"],
+            "constraints": {"max_runtime_minutes": 120}
+        }))
+        .await;
+    start.assert_status_ok();
+    let start_body: Value = start.json();
+    assert_eq!(start_body["data"]["status"], "queued");
+    assert_eq!(start_body["data"]["draft_schema_version"], 1);
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn smart_shelf_draft_read_and_save_are_typed_scoped_and_atomic(
+    pool: PgPool,
+) -> Result<()> {
+    let library_id = Uuid::from_u128(0x8100);
+    let movie_id = Uuid::from_u128(0x8101);
+    let replacement_id = Uuid::from_u128(0x8102);
+    let draft_id = Uuid::from_u128(0x8103);
+    seed_library(&pool, library_id).await;
+    seed_movie(
+        &pool,
+        library_id,
+        movie_id,
+        Uuid::from_u128(0x8111),
+        8101,
+        "Rain Arrival",
+        878,
+        "Science Fiction",
+    )
+    .await;
+    seed_movie(
+        &pool,
+        library_id,
+        replacement_id,
+        Uuid::from_u128(0x8112),
+        8102,
+        "Rain Neighbor",
+        878,
+        "Science Fiction",
+    )
+    .await;
+
+    let (server, _state, _tempdir) = build_server(pool.clone()).await?;
+    let (owner_id, owner_token) =
+        register_user(&server, "smart_save_owner").await?;
+    let (_other_id, other_token) =
+        register_user(&server, "smart_save_other").await?;
+
+    let mut first = smart_shelf_item(movie_id, "Rain Arrival");
+    first.locked = true;
+    let mut second = smart_shelf_item(replacement_id, "Rain Neighbor");
+    second.ordinal = 2;
+    seed_smart_shelf_draft(
+        &pool,
+        draft_id,
+        owner_id,
+        library_id,
+        "draft",
+        smart_shelf_content(vec![first.clone(), second.clone()]),
+        json!({}),
+        &[
+            MediaID::Movie(MovieID(movie_id)),
+            MediaID::Movie(MovieID(replacement_id)),
+        ],
+    )
+    .await;
+
+    let draft_path = smart_shelf_draft_path(draft_id);
+    let save_path = smart_shelf_save_path(draft_id);
+    let unauthenticated = server.get(&draft_path).await;
+    unauthenticated.assert_status(StatusCode::UNAUTHORIZED);
+
+    let hidden_read = server
+        .get(&draft_path)
+        .add_header("Authorization", bearer(&other_token))
+        .await;
+    hidden_read.assert_status(StatusCode::NOT_FOUND);
+
+    let unauthorized_save = server
+        .post(&save_path)
+        .add_header("Authorization", bearer(&other_token))
+        .json(&json!({}))
+        .await;
+    unauthorized_save.assert_status(StatusCode::FORBIDDEN);
+    let unauthorized_body: Value = unauthorized_save.json();
+    assert_eq!(unauthorized_body["error"]["code"], "unauthorized");
+
+    let typed = server
+        .get(&draft_path)
+        .add_header("Authorization", bearer(&owner_token))
+        .await;
+    typed.assert_status_ok();
+    let typed_body: Value = typed.json();
+    assert_eq!(typed_body["data"]["validation"]["valid"], true);
+    assert_eq!(
+        typed_body["data"]["draft"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let save = server
+        .post(&save_path)
+        .add_header("Authorization", bearer(&owner_token))
+        .json(&json!({
+            "title": "Saved Rainy Night",
+            "items": [
+                {"media_id": MediaID::Movie(MovieID(movie_id)), "locked": true},
+                {
+                    "media_id": MediaID::Movie(MovieID(replacement_id)),
+                    "replacement_of": MediaID::Movie(MovieID(movie_id))
+                }
+            ]
+        }))
+        .await;
+    save.assert_status_ok();
+    let save_body: Value = save.json();
+    let collection_id = Uuid::parse_str(
+        save_body["data"]["collection_id"]
+            .as_str()
+            .expect("collection id"),
+    )?;
+    assert_eq!(
+        save_body["data"]["collection"]["title"],
+        "Saved Rainy Night"
+    );
+    assert_eq!(save_body["data"]["collection"]["visibility"], "private");
+    assert_eq!(save_body["data"]["collection"]["kind"], "manual");
+    assert_eq!(save_body["data"]["item_count"], 2);
+
+    let rows = sqlx::query(
+        r#"
+        SELECT media_id, position_key::bigint AS position, metadata
+        FROM collection_manual_memberships
+        WHERE collection_id = $1
+        ORDER BY position_key
+        "#,
+    )
+    .bind(collection_id)
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].try_get::<Uuid, _>("media_id")?, movie_id);
+    assert_eq!(rows[0].try_get::<i64, _>("position")?, 1);
+    let first_metadata: Value = rows[0].try_get("metadata")?;
+    assert_eq!(first_metadata["smart_shelf"]["locked"], true);
+    let second_metadata: Value = rows[1].try_get("metadata")?;
+    assert_eq!(
+        second_metadata["smart_shelf"]["replacement_of"]["Movie"],
+        movie_id.to_string()
+    );
+
+    let definition = sqlx::query(
+        r#"
+        SELECT owner_user_id, visibility::text AS visibility, provenance
+        FROM collection_definitions
+        WHERE id = $1
+        "#,
+    )
+    .bind(collection_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(definition.try_get::<Uuid, _>("owner_user_id")?, owner_id);
+    assert_eq!(definition.try_get::<String, _>("visibility")?, "private");
+    let provenance: Value = definition.try_get("provenance")?;
+    assert_eq!(provenance["generated_by"], "ferrex-smart-shelf");
+    assert_eq!(provenance["external_id"], draft_id.to_string());
+
+    let draft_row = sqlx::query(
+        r#"
+        SELECT status::text AS status, metadata
+        FROM intelligence_artifacts
+        WHERE id = $1
+        "#,
+    )
+    .bind(draft_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(draft_row.try_get::<String, _>("status")?, "superseded");
+    let draft_metadata: Value = draft_row.try_get("metadata")?;
+    assert_eq!(
+        draft_metadata["smart_shelf_save"]["collection_id"],
+        collection_id.to_string()
+    );
+
+    let save_again = server
+        .post(&save_path)
+        .add_header("Authorization", bearer(&owner_token))
+        .json(&json!({}))
+        .await;
+    save_again.assert_status(StatusCode::CONFLICT);
+    let save_again_body: Value = save_again.json();
+    assert_eq!(save_again_body["error"]["code"], "already_saved");
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn smart_shelf_validation_and_collection_conflicts_are_stable(
+    pool: PgPool,
+) -> Result<()> {
+    let library_id = Uuid::from_u128(0x8200);
+    let movie_id = Uuid::from_u128(0x8201);
+    let second_movie_id = Uuid::from_u128(0x8202);
+    let ungrounded_movie_id = Uuid::from_u128(0x8203);
+    seed_library(&pool, library_id).await;
+    seed_movie(
+        &pool,
+        library_id,
+        movie_id,
+        Uuid::from_u128(0x8211),
+        8201,
+        "Conflict Arrival",
+        878,
+        "Science Fiction",
+    )
+    .await;
+    seed_movie(
+        &pool,
+        library_id,
+        second_movie_id,
+        Uuid::from_u128(0x8212),
+        8202,
+        "Conflict Neighbor",
+        878,
+        "Science Fiction",
+    )
+    .await;
+
+    let (server, _state, _tempdir) = build_server(pool.clone()).await?;
+    let (owner_id, owner_token) =
+        register_user(&server, "smart_validation_owner").await?;
+
+    let invalid_draft_id = Uuid::from_u128(0x8220);
+    let mut duplicate = smart_shelf_item(movie_id, "Duplicate Arrival");
+    duplicate.ordinal = 2;
+    duplicate.reason = None;
+    duplicate.sources = Vec::new();
+    let mut unsupported = SmartShelfDraftItem {
+        ordinal: 3,
+        media_id: MediaID::Episode(EpisodeID(Uuid::from_u128(0x8299))),
+        title: Some("Unsupported episode".to_string()),
+        subtitle: None,
+        year: None,
+        reason: Some("Episode should not be saveable".to_string()),
+        sources: vec![SmartShelfDraftSource {
+            label: Some("Episode source".to_string()),
+            media_id: Some(MediaID::Episode(EpisodeID(Uuid::from_u128(
+                0x8299,
+            )))),
+            artifact_id: None,
+            field: None,
+            evidence: None,
+        }],
+        locked: false,
+        replacement_of: None,
+    };
+    unsupported.replacement_of = Some(MediaID::Movie(MovieID(movie_id)));
+    let mut ungrounded = smart_shelf_item(ungrounded_movie_id, "Ungrounded");
+    ungrounded.ordinal = 4;
+    seed_smart_shelf_draft(
+        &pool,
+        invalid_draft_id,
+        owner_id,
+        library_id,
+        "draft",
+        smart_shelf_content(vec![
+            smart_shelf_item(movie_id, "Conflict Arrival"),
+            duplicate,
+            unsupported,
+            ungrounded,
+        ]),
+        json!({}),
+        &[MediaID::Movie(MovieID(movie_id))],
+    )
+    .await;
+
+    let invalid_path = smart_shelf_draft_path(invalid_draft_id);
+    let invalid = server
+        .get(&invalid_path)
+        .add_header("Authorization", bearer(&owner_token))
+        .await;
+    invalid.assert_status_ok();
+    let invalid_body: Value = invalid.json();
+    assert_eq!(invalid_body["data"]["validation"]["valid"], false);
+    let issue_codes = invalid_body["data"]["validation"]["issues"]
+        .as_array()
+        .expect("validation issues")
+        .iter()
+        .filter_map(|issue| issue["code"].as_str())
+        .collect::<Vec<_>>();
+    assert!(issue_codes.contains(&"duplicate_media"));
+    assert!(issue_codes.contains(&"missing_reason"));
+    assert!(issue_codes.contains(&"missing_source"));
+    assert!(issue_codes.contains(&"unsupported_media"));
+    assert!(issue_codes.contains(&"ungrounded_item"));
+
+    let invalid_save = server
+        .post(&smart_shelf_save_path(invalid_draft_id))
+        .add_header("Authorization", bearer(&owner_token))
+        .json(&json!({}))
+        .await;
+    invalid_save.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    let invalid_save_body: Value = invalid_save.json();
+    assert_eq!(invalid_save_body["error"]["code"], "duplicate_media");
+
+    let malformed_id = Uuid::from_u128(0x8221);
+    seed_smart_shelf_draft(
+        &pool,
+        malformed_id,
+        owner_id,
+        library_id,
+        "draft",
+        json!({"items": "not-an-array"}),
+        json!({}),
+        &[MediaID::Movie(MovieID(movie_id))],
+    )
+    .await;
+    let malformed = server
+        .get(&smart_shelf_draft_path(malformed_id))
+        .add_header("Authorization", bearer(&owner_token))
+        .await;
+    malformed.assert_status_ok();
+    let malformed_body: Value = malformed.json();
+    assert_eq!(
+        malformed_body["data"]["validation"]["issues"][0]["code"],
+        "malformed_content"
+    );
+    let malformed_save = server
+        .post(&smart_shelf_save_path(malformed_id))
+        .add_header("Authorization", bearer(&owner_token))
+        .json(&json!({}))
+        .await;
+    malformed_save.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    let malformed_save_body: Value = malformed_save.json();
+    assert_eq!(malformed_save_body["error"]["code"], "draft_malformed");
+
+    let empty_id = Uuid::from_u128(0x8222);
+    seed_smart_shelf_draft(
+        &pool,
+        empty_id,
+        owner_id,
+        library_id,
+        "draft",
+        smart_shelf_content(Vec::new()),
+        json!({}),
+        &[],
+    )
+    .await;
+    let empty = server
+        .get(&smart_shelf_draft_path(empty_id))
+        .add_header("Authorization", bearer(&owner_token))
+        .await;
+    empty.assert_status_ok();
+    let empty_body: Value = empty.json();
+    assert_eq!(
+        empty_body["data"]["validation"]["issues"][0]["code"],
+        "empty_draft"
+    );
+    let empty_save = server
+        .post(&smart_shelf_save_path(empty_id))
+        .add_header("Authorization", bearer(&owner_token))
+        .json(&json!({}))
+        .await;
+    empty_save.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    let empty_save_body: Value = empty_save.json();
+    assert_eq!(empty_save_body["error"]["code"], "draft_empty");
+
+    let first_conflict_id = Uuid::from_u128(0x8230);
+    let second_conflict_id = Uuid::from_u128(0x8231);
+    seed_smart_shelf_draft(
+        &pool,
+        first_conflict_id,
+        owner_id,
+        library_id,
+        "draft",
+        smart_shelf_content(vec![smart_shelf_item(
+            movie_id,
+            "Conflict Arrival",
+        )]),
+        json!({}),
+        &[MediaID::Movie(MovieID(movie_id))],
+    )
+    .await;
+    seed_smart_shelf_draft(
+        &pool,
+        second_conflict_id,
+        owner_id,
+        library_id,
+        "draft",
+        smart_shelf_content(vec![smart_shelf_item(
+            second_movie_id,
+            "Conflict Neighbor",
+        )]),
+        json!({}),
+        &[MediaID::Movie(MovieID(second_movie_id))],
+    )
+    .await;
+    let first_save = server
+        .post(&smart_shelf_save_path(first_conflict_id))
+        .add_header("Authorization", bearer(&owner_token))
+        .json(&json!({"idempotency_key": "same-key"}))
+        .await;
+    first_save.assert_status_ok();
+
+    let conflict_save = server
+        .post(&smart_shelf_save_path(second_conflict_id))
+        .add_header("Authorization", bearer(&owner_token))
+        .json(&json!({"idempotency_key": "same-key"}))
+        .await;
+    conflict_save.assert_status(StatusCode::CONFLICT);
+    let conflict_body: Value = conflict_save.json();
+    assert_eq!(conflict_body["error"]["code"], "collection_conflict");
 
     Ok(())
 }

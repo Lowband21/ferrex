@@ -17,6 +17,7 @@ pub mod scroll_manager;
 pub mod search_surface;
 pub mod settings_ui;
 pub mod shell_ui;
+pub mod smart_shelf;
 pub mod tabs;
 pub mod theme;
 pub mod types;
@@ -39,6 +40,7 @@ use crate::{
         messages::UiMessage as UIMessage,
         scroll_manager::ScrollPositionManager,
         shell_ui::Scope,
+        smart_shelf::SmartShelfUiState,
         types::ViewState,
         view_model_ui::ViewModelMessage,
         views::{
@@ -159,6 +161,9 @@ pub struct UIDomainState {
 
     // Toast notification manager
     pub toast_manager: feedback_ui::ToastManager,
+
+    // Smart-shelf composer/review overlay state
+    pub smart_shelf: SmartShelfUiState,
 
     // 10-foot Home and detail focus/window state
     pub tenfoot_home: TenFootHomeState,

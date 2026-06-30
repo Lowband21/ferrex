@@ -10,6 +10,10 @@ use crate::{
                 SetupClaimStatus, SetupStep, TransitionDirection,
             },
         },
+        intelligence::{
+            ProviderReadiness, SmartShelfDraftState, SmartShelfFailure,
+            SmartShelfPhase, SmartShelfRunState,
+        },
         settings::{
             sections::devices::state::{DeviceManagementState, UserDevice},
             state::PreferencesState,
@@ -42,6 +46,14 @@ use crate::{
         },
     },
     infra::{
+        api_types::{
+            IntelligenceMediaKind, IntelligenceRunPurpose,
+            IntelligenceRunStatus, IntelligenceRunStatusResponse,
+            IntelligenceSummary, SMART_SHELF_DRAFT_SCHEMA_VERSION,
+            SmartShelfDraftAlternate, SmartShelfDraftContent,
+            SmartShelfDraftItem, SmartShelfDraftResponse,
+            SmartShelfDraftSource, SmartShelfDraftValidation,
+        },
         repository::media_repo::MediaRepo,
         shader_widgets::poster::PosterInstanceKey,
     },
@@ -105,6 +117,22 @@ pub enum PlayerScenario {
     DesktopCollectionsCreateForm,
     /// Desktop Collections detail surface with manual editor controls open.
     DesktopCollectionsManualEditor,
+    /// Smart-shelf composer overlay with provider-ready deterministic fixtures.
+    SmartShelfComposer,
+    /// Smart-shelf running/progress overlay with deterministic runtime status.
+    SmartShelfRunningProgress,
+    /// Smart-shelf draft review overlay with a valid generated draft.
+    SmartShelfDraftReady,
+    /// Smart-shelf draft review overlay showing replacement and alternate choices.
+    SmartShelfAlternatesReplacement,
+    /// Smart-shelf provider fallback overlay when the local intelligence provider is unavailable.
+    SmartShelfProviderUnavailable,
+    /// Smart-shelf saved private collection detail surface.
+    SmartShelfSavedCollectionDetail,
+    /// Smart-shelf saved collection detail with no materialized items.
+    SmartShelfCollectionEmpty,
+    /// Smart-shelf collection detail error/retry state.
+    SmartShelfCollectionError,
     /// Desktop movie detail surface with seeded media and artwork.
     DesktopMovieDetail,
     /// Desktop movie detail surface restored to its lower cast/review section.
@@ -161,12 +189,20 @@ impl std::fmt::Display for PlayerScenario {
 
 impl PlayerScenario {
     /// Canonical scenarios exposed to agents.
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 36] = [
         Self::FirstRunAuth,
         Self::UserSelection,
         Self::DesktopLibraryHome,
         Self::DesktopCollectionsCreateForm,
         Self::DesktopCollectionsManualEditor,
+        Self::SmartShelfComposer,
+        Self::SmartShelfRunningProgress,
+        Self::SmartShelfDraftReady,
+        Self::SmartShelfAlternatesReplacement,
+        Self::SmartShelfProviderUnavailable,
+        Self::SmartShelfSavedCollectionDetail,
+        Self::SmartShelfCollectionEmpty,
+        Self::SmartShelfCollectionError,
         Self::DesktopMovieDetail,
         Self::DesktopMovieDetailScrolled,
         Self::DesktopSeriesDetail,
@@ -204,6 +240,20 @@ impl PlayerScenario {
             Self::DesktopCollectionsManualEditor => {
                 "DesktopCollectionsManualEditor"
             }
+            Self::SmartShelfComposer => "SmartShelfComposer",
+            Self::SmartShelfRunningProgress => "SmartShelfRunningProgress",
+            Self::SmartShelfDraftReady => "SmartShelfDraftReady",
+            Self::SmartShelfAlternatesReplacement => {
+                "SmartShelfAlternatesReplacement"
+            }
+            Self::SmartShelfProviderUnavailable => {
+                "SmartShelfProviderUnavailable"
+            }
+            Self::SmartShelfSavedCollectionDetail => {
+                "SmartShelfSavedCollectionDetail"
+            }
+            Self::SmartShelfCollectionEmpty => "SmartShelfCollectionEmpty",
+            Self::SmartShelfCollectionError => "SmartShelfCollectionError",
             Self::DesktopMovieDetail => "DesktopMovieDetail",
             Self::DesktopMovieDetailScrolled => "DesktopMovieDetailScrolled",
             Self::DesktopSeriesDetail => "DesktopSeriesDetail",
@@ -255,6 +305,30 @@ impl PlayerScenario {
             }
             Self::DesktopCollectionsManualEditor => {
                 "Desktop Collections detail surface with manual edit, add, remove, reorder, archive, and conflict recovery states"
+            }
+            Self::SmartShelfComposer => {
+                "Smart-shelf composer overlay with deterministic provider-ready prompt, template, scope, and model controls"
+            }
+            Self::SmartShelfRunningProgress => {
+                "Smart-shelf running/progress overlay with deterministic queued/running status, step count, provider, and cancel affordance"
+            }
+            Self::SmartShelfDraftReady => {
+                "Smart-shelf draft review overlay with grounded selected items ready to save as a private collection"
+            }
+            Self::SmartShelfAlternatesReplacement => {
+                "Smart-shelf draft review overlay showing a selected replacement and available alternate choices"
+            }
+            Self::SmartShelfProviderUnavailable => {
+                "Smart-shelf provider fallback overlay for local provider unavailable/retry expectations"
+            }
+            Self::SmartShelfSavedCollectionDetail => {
+                "Collections detail surface for a smart-shelf-saved private manual collection with materialized items"
+            }
+            Self::SmartShelfCollectionEmpty => {
+                "Collections detail surface for a smart-shelf-saved collection with no materialized items"
+            }
+            Self::SmartShelfCollectionError => {
+                "Collections detail error state for retrying a smart-shelf-saved collection load"
             }
             Self::DesktopMovieDetail => {
                 "Desktop movie detail page for a seeded deterministic movie"
@@ -360,6 +434,35 @@ impl PlayerScenario {
                 | "desktopcollectionsmanualeditor" => {
                     Some(Self::DesktopCollectionsManualEditor)
                 }
+                "smartshelf" | "smartshelfcomposer" => {
+                    Some(Self::SmartShelfComposer)
+                }
+                "smartshelfrunning"
+                | "smartshelfprogress"
+                | "smartshelfrunningprogress" => {
+                    Some(Self::SmartShelfRunningProgress)
+                }
+                "smartshelfdraft" | "smartshelfdraftready" => {
+                    Some(Self::SmartShelfDraftReady)
+                }
+                "smartshelfalternates"
+                | "smartshelfreplacement"
+                | "smartshelfalternatesreplacement" => {
+                    Some(Self::SmartShelfAlternatesReplacement)
+                }
+                "smartshelfproviderunavailable" | "smartshelffallback" => {
+                    Some(Self::SmartShelfProviderUnavailable)
+                }
+                "smartshelfsavedcollection"
+                | "smartshelfsavedcollectiondetail" => {
+                    Some(Self::SmartShelfSavedCollectionDetail)
+                }
+                "smartshelfcollectionempty" => {
+                    Some(Self::SmartShelfCollectionEmpty)
+                }
+                "smartshelfcollectionerror" => {
+                    Some(Self::SmartShelfCollectionError)
+                }
                 "desktopmoviedetail" | "moviedetail" => {
                     Some(Self::DesktopMovieDetail)
                 }
@@ -432,6 +535,26 @@ impl PlayerScenario {
             }
             Self::DesktopCollectionsManualEditor => {
                 desktop_collections_manual_editor_state(config)
+            }
+            Self::SmartShelfComposer => smart_shelf_composer_state(config),
+            Self::SmartShelfRunningProgress => {
+                smart_shelf_running_progress_state(config)
+            }
+            Self::SmartShelfDraftReady => smart_shelf_draft_ready_state(config),
+            Self::SmartShelfAlternatesReplacement => {
+                smart_shelf_alternates_replacement_state(config)
+            }
+            Self::SmartShelfProviderUnavailable => {
+                smart_shelf_provider_unavailable_state(config)
+            }
+            Self::SmartShelfSavedCollectionDetail => {
+                smart_shelf_saved_collection_detail_state(config)
+            }
+            Self::SmartShelfCollectionEmpty => {
+                smart_shelf_collection_empty_state(config)
+            }
+            Self::SmartShelfCollectionError => {
+                smart_shelf_collection_error_state(config)
             }
             Self::DesktopMovieDetail => desktop_movie_detail_state(config),
             Self::DesktopMovieDetailScrolled => {
@@ -763,6 +886,470 @@ fn desktop_collections_manual_editor_state(config: &AppConfig) -> State {
     }
     state.loading = false;
     state
+}
+
+fn smart_shelf_composer_state(config: &AppConfig) -> State {
+    let mut state = settings_devices_state(config);
+    configure_smart_shelf_composer(&mut state);
+    state
+}
+
+fn smart_shelf_running_progress_state(config: &AppConfig) -> State {
+    let mut state = smart_shelf_composer_state(config);
+    let run_status = smart_shelf_run_status(IntelligenceRunStatus::Running, 2);
+    let surface = &mut state.domains.ui.state.smart_shelf;
+    surface.reducer.phase = SmartShelfPhase::Running;
+    surface.reducer.run = Some(SmartShelfRunState::from_status(&run_status));
+    surface.reducer.last_draft_artifact_id = Some(smart_shelf_artifact_id());
+    state
+}
+
+fn smart_shelf_draft_ready_state(config: &AppConfig) -> State {
+    let mut state = smart_shelf_composer_state(config);
+    apply_smart_shelf_draft(&mut state, false);
+    state
+}
+
+fn smart_shelf_alternates_replacement_state(config: &AppConfig) -> State {
+    let mut state = smart_shelf_composer_state(config);
+    apply_smart_shelf_draft(&mut state, true);
+    state
+}
+
+fn smart_shelf_provider_unavailable_state(config: &AppConfig) -> State {
+    let mut state = smart_shelf_composer_state(config);
+    let message = "Local intelligence provider is unavailable at http://127.0.0.1:8081/v1";
+    let surface = &mut state.domains.ui.state.smart_shelf;
+    surface.reducer.phase = SmartShelfPhase::ProviderUnavailable;
+    surface.reducer.provider = ProviderReadiness::Unavailable {
+        message: message.to_string(),
+        retryable: true,
+    };
+    surface.reducer.last_error =
+        Some(SmartShelfFailure::provider_unavailable(message, true));
+    surface.provider_fallback = Some(
+        crate::domains::ui::smart_shelf::SmartShelfProviderFallbackState {
+            message: message.to_string(),
+            retryable: true,
+        },
+    );
+    state
+}
+
+fn smart_shelf_saved_collection_detail_state(config: &AppConfig) -> State {
+    smart_shelf_collection_detail_state(
+        config,
+        SmartShelfCollectionPreset::Loaded,
+    )
+}
+
+fn smart_shelf_collection_empty_state(config: &AppConfig) -> State {
+    smart_shelf_collection_detail_state(
+        config,
+        SmartShelfCollectionPreset::Empty,
+    )
+}
+
+fn smart_shelf_collection_error_state(config: &AppConfig) -> State {
+    smart_shelf_collection_detail_state(
+        config,
+        SmartShelfCollectionPreset::Error,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SmartShelfCollectionPreset {
+    Loaded,
+    Empty,
+    Error,
+}
+
+fn configure_smart_shelf_composer(state: &mut State) {
+    let surface = &mut state.domains.ui.state.smart_shelf;
+    surface.open = true;
+    surface.confirm_discard = false;
+    surface.provider_fallback = None;
+    surface.notice = None;
+    surface.reducer.provider = ProviderReadiness::Ready {
+        provider: "local llama.cpp".to_string(),
+        model: Some("gemma-4-12b-it".to_string()),
+    };
+    surface.reducer.phase = SmartShelfPhase::Idle;
+    surface.reducer.composer.prompt =
+        "Grounded rainy-night science fiction with resilient heroes"
+            .to_string();
+    surface.reducer.composer.selected_template_id = None;
+    surface.reducer.composer.library_id = Some(seed_library_id(0));
+    surface.reducer.composer.media_kinds =
+        vec![IntelligenceMediaKind::Movie, IntelligenceMediaKind::Series];
+    surface.reducer.composer.item_count = 6;
+    surface.reducer.composer.model = Some("gemma-4-12b-it".to_string());
+    surface.reducer.composer.constraints = serde_json::json!({
+        "tone": "rainy-night",
+        "grounding": "library_metadata_only",
+    });
+    surface.reducer.composer.metadata = serde_json::json!({
+        "fixture": "smart-shelf-mvp-visual-qa",
+        "excluded_surfaces": ["android", "android_tv", "home_pinning", "chatbot", "playback_queue"],
+    });
+}
+
+fn apply_smart_shelf_draft(state: &mut State, replacement: bool) {
+    let draft = smart_shelf_draft_response(replacement);
+    let surface = &mut state.domains.ui.state.smart_shelf;
+    surface.reducer.phase = SmartShelfPhase::DraftReady;
+    surface.reducer.run = Some(SmartShelfRunState::from_status(
+        &smart_shelf_run_status(IntelligenceRunStatus::Succeeded, 4),
+    ));
+    surface.reducer.last_draft_artifact_id = Some(draft.artifact_id);
+    surface.reducer.draft = Some(SmartShelfDraftState::from_response(draft));
+}
+
+fn smart_shelf_run_status(
+    status: IntelligenceRunStatus,
+    step: u32,
+) -> IntelligenceRunStatusResponse {
+    IntelligenceRunStatusResponse {
+        run_id: smart_shelf_run_id(),
+        purpose: IntelligenceRunPurpose::Recommendation,
+        status,
+        terminal: matches!(
+            status,
+            IntelligenceRunStatus::Succeeded
+                | IntelligenceRunStatus::Failed
+                | IntelligenceRunStatus::Cancelled
+        ),
+        current_phase: Some(
+            match status {
+                IntelligenceRunStatus::Queued => "queued",
+                IntelligenceRunStatus::Running => "grounding candidates",
+                IntelligenceRunStatus::Succeeded => "draft ready",
+                IntelligenceRunStatus::Failed => "failed",
+                IntelligenceRunStatus::Cancelled => "cancelled",
+            }
+            .to_string(),
+        ),
+        provider: Some("local llama.cpp".to_string()),
+        model: Some("gemma-4-12b-it".to_string()),
+        queued_at_epoch_seconds: Some(1_782_048_000),
+        started_at_epoch_seconds: (step > 0).then_some(1_782_048_005),
+        completed_at_epoch_seconds: matches!(
+            status,
+            IntelligenceRunStatus::Succeeded
+        )
+        .then_some(1_782_048_030),
+        current_step: Some(step),
+        max_steps: Some(4),
+        draft_artifact_ids: matches!(status, IntelligenceRunStatus::Succeeded)
+            .then(|| vec![smart_shelf_artifact_id()])
+            .unwrap_or_default(),
+        output_summary: Some(IntelligenceSummary::new(
+            "Deterministic fake provider selected grounded smart-shelf items.",
+        )),
+        error: None,
+    }
+}
+
+fn smart_shelf_draft_response(replacement: bool) -> SmartShelfDraftResponse {
+    let artifact_id = smart_shelf_artifact_id();
+    let run_id = smart_shelf_run_id();
+    let first_media_id = MediaID::Movie(seed_movie_id(0));
+    let second_media_id = if replacement {
+        MediaID::Series(seed_series_id(0))
+    } else {
+        MediaID::Movie(seed_movie_id(1))
+    };
+    let replacement_of =
+        replacement.then_some(MediaID::Movie(seed_movie_id(1)));
+
+    let items = vec![
+        smart_shelf_draft_item(
+            1,
+            first_media_id,
+            "Aurora Transit",
+            "Movie · 2024 · grounded by genres",
+            "Matches the rainy-night prompt through resilient transit stakes and moody sci-fi metadata.",
+            false,
+            None,
+        ),
+        smart_shelf_draft_item(
+            2,
+            second_media_id,
+            if replacement {
+                "Signal Grove"
+            } else {
+                "Copper Harbor"
+            },
+            if replacement {
+                "Series · 2023 · replacement"
+            } else {
+                "Movie · 2022 · grounded by mood"
+            },
+            if replacement {
+                "Replaces Copper Harbor with a grounded series pick while preserving the requested atmosphere."
+            } else {
+                "Grounded by warm mystery metadata and compatible rainy-night pacing."
+            },
+            replacement,
+            replacement_of,
+        ),
+    ];
+    let alternates = vec![smart_shelf_draft_alternate(
+        Some(2),
+        MediaID::Movie(seed_movie_id(1)),
+        "Copper Harbor",
+        "Original movie alternate",
+        "Return to the original deterministic movie pick if series entries are out of scope.",
+    )];
+
+    SmartShelfDraftResponse {
+        artifact_id,
+        run_id: Some(run_id),
+        owner_user_id: Some(seed_user_id(0)),
+        title: "Rainy-night grounded picks".to_string(),
+        summary: Some(IntelligenceSummary::new(
+            "A deterministic smart shelf grounded in seeded library metadata.",
+        )),
+        draft: Some(SmartShelfDraftContent {
+            schema_version: SMART_SHELF_DRAFT_SCHEMA_VERSION,
+            title: "Rainy-night grounded picks".to_string(),
+            description: Some(
+                "Private smart shelf generated from deterministic fake-provider fixtures."
+                    .to_string(),
+            ),
+            interpreted_intent: Some(
+                "Find grounded rainy-night science fiction and mystery picks"
+                    .to_string(),
+            ),
+            requested_constraints: serde_json::json!({
+                "tone": "rainy-night",
+                "max_items": 6,
+            }),
+            items,
+            alternates,
+        }),
+        validation: SmartShelfDraftValidation {
+            valid: true,
+            issues: Vec::new(),
+        },
+        saved_collection_id: None,
+    }
+}
+
+fn smart_shelf_draft_item(
+    ordinal: u32,
+    media_id: MediaID,
+    title: &str,
+    subtitle: &str,
+    reason: &str,
+    locked: bool,
+    replacement_of: Option<MediaID>,
+) -> SmartShelfDraftItem {
+    SmartShelfDraftItem {
+        ordinal,
+        media_id,
+        title: Some(title.to_string()),
+        subtitle: Some(subtitle.to_string()),
+        year: Some(if matches!(media_id, MediaID::Movie(_)) {
+            2024
+        } else {
+            2023
+        }),
+        reason: Some(reason.to_string()),
+        sources: vec![smart_shelf_source(media_id, "genres")],
+        locked,
+        replacement_of,
+    }
+}
+
+fn smart_shelf_draft_alternate(
+    target_ordinal: Option<u32>,
+    media_id: MediaID,
+    title: &str,
+    subtitle: &str,
+    reason: &str,
+) -> SmartShelfDraftAlternate {
+    SmartShelfDraftAlternate {
+        target_ordinal,
+        media_id,
+        title: Some(title.to_string()),
+        subtitle: Some(subtitle.to_string()),
+        year: Some(2022),
+        reason: Some(reason.to_string()),
+        sources: vec![smart_shelf_source(media_id, "overview")],
+    }
+}
+
+fn smart_shelf_source(media_id: MediaID, field: &str) -> SmartShelfDraftSource {
+    SmartShelfDraftSource {
+        label: Some("Deterministic library metadata".to_string()),
+        media_id: Some(media_id),
+        artifact_id: Some(smart_shelf_artifact_id()),
+        field: Some(field.to_string()),
+        evidence: Some(IntelligenceSummary::new(
+            "Grounded fake-provider evidence from seeded media metadata.",
+        )),
+    }
+}
+
+fn smart_shelf_collection_detail_state(
+    config: &AppConfig,
+    preset: SmartShelfCollectionPreset,
+) -> State {
+    let mut state = authenticated_base_state(config, false);
+    let seed = seed_library_state(&mut state);
+    let include_items = matches!(preset, SmartShelfCollectionPreset::Loaded);
+    let (detail, members) = smart_shelf_collection_detail(&seed, include_items);
+    let collection_id = detail.summary.identity.id;
+    let summary = detail.summary.clone();
+
+    state.domains.ui.state.scope = Scope::Collections;
+    state.domains.ui.state.view = ViewState::CollectionDetail { collection_id };
+    state.tab_manager.set_active_tab(TabId::Collections);
+
+    if let TabState::Collections(tab) =
+        state.tab_manager.get_or_create_tab(TabId::Collections)
+    {
+        tab.mark_loaded(
+            vec![summary.clone()],
+            CollectionPageInfo {
+                next_cursor: None,
+                limit: 50,
+                total: 1,
+            },
+        );
+        match preset {
+            SmartShelfCollectionPreset::Loaded
+            | SmartShelfCollectionPreset::Empty => {
+                tab.mark_detail_loaded(detail);
+                tab.mark_items_loaded(
+                    collection_id,
+                    members,
+                    CollectionPageInfo {
+                        next_cursor: None,
+                        limit: 50,
+                        total: summary.item_count as u64,
+                    },
+                    summary.materialization.clone(),
+                    false,
+                );
+            }
+            SmartShelfCollectionPreset::Error => {
+                tab.mark_detail_error(
+                    collection_id,
+                    "Saved smart-shelf collection detail could not load; retry keeps the draft save intact.",
+                );
+            }
+        }
+    }
+
+    state.loading = false;
+    state
+}
+
+fn smart_shelf_collection_detail(
+    seed: &SeededLibraryState,
+    include_items: bool,
+) -> (CollectionDetail, Vec<CollectionMember>) {
+    let now = fixed_time(0);
+    let collection_id = smart_shelf_collection_id();
+    let mut members = if include_items {
+        vec![
+            CollectionMember::new(
+                MediaID::Movie(seed.movies[0].id),
+                "Aurora Transit",
+                1,
+            ),
+            CollectionMember::new(
+                MediaID::Series(seed.series[0].id),
+                "Signal Grove",
+                2,
+            ),
+        ]
+    } else {
+        Vec::new()
+    };
+    if let Some(member) = members.get_mut(0) {
+        member.subtitle =
+            Some("Grounded movie pick from fake provider".to_string());
+    }
+    if let Some(member) = members.get_mut(1) {
+        member.subtitle = Some("Grounded series replacement".to_string());
+    }
+    let item_count = u32::try_from(members.len()).unwrap_or(u32::MAX);
+    let summary = CollectionSummary {
+        identity: CollectionIdentity::for_id(collection_id),
+        title: "Rainy-night grounded picks".to_string(),
+        description: Some(
+            "Private manual collection saved from the smart-shelf draft."
+                .to_string(),
+        ),
+        kind: CollectionKind::Manual,
+        source: CollectionSource::Manual,
+        owner: Default::default(),
+        scope: CollectionScope::User,
+        visibility: CollectionVisibility::Private,
+        presentation: CollectionPresentationMode::Shelf,
+        media_scope: CollectionMediaScope::Types {
+            media_types: vec![
+                CollectionMediaKind::Movie,
+                CollectionMediaKind::Series,
+            ],
+        },
+        duplicate_policy: CollectionDuplicatePolicy::DeduplicateMedia,
+        artwork: CollectionArtwork {
+            accent_color_hex: Some("#365B8C".to_string()),
+            ..CollectionArtwork::default()
+        },
+        theme: CollectionTheme {
+            primary_color_hex: Some("#365B8C".to_string()),
+            ..CollectionTheme::default()
+        },
+        provenance: CollectionProvenance {
+            source: CollectionSource::Manual,
+            generated_by: Some("smart_shelf".to_string()),
+            external_id: Some(smart_shelf_artifact_id().to_string()),
+            last_refreshed_at: Some(now),
+            ..CollectionProvenance::default()
+        },
+        version: CollectionVersion {
+            revision: 1,
+            etag: Some(format!("collection-{}-1", collection_id)),
+            ..CollectionVersion::default()
+        },
+        timestamps: CollectionTimestamps {
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        },
+        item_count,
+        materialization: CollectionMaterializationStatus {
+            state: CollectionMaterializationState::Ready,
+            item_count,
+            generated_at: Some(now),
+            ..CollectionMaterializationStatus::default()
+        },
+    };
+    let detail = CollectionDetail {
+        summary,
+        rule: None,
+        items_preview: members.clone(),
+        shelf_placements: Vec::new(),
+    };
+
+    (detail, members)
+}
+
+fn smart_shelf_run_id() -> Uuid {
+    Uuid::from_u128(0x65700000000000000000000000000001)
+}
+
+fn smart_shelf_artifact_id() -> Uuid {
+    Uuid::from_u128(0x65700000000000000000000000000002)
+}
+
+fn smart_shelf_collection_id() -> CollectionId {
+    CollectionId(Uuid::from_u128(0x65700000000000000000000000000003))
 }
 
 fn desktop_movie_detail_state(config: &AppConfig) -> State {
@@ -2701,7 +3288,12 @@ fn sample_user(username: &str) -> ferrex_core::player_prelude::User {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::InterfaceMode;
+    use crate::{
+        domains::ui::tabs::{
+            CollectionDetailLoadState, CollectionItemsLoadState,
+        },
+        state::InterfaceMode,
+    };
     use ferrex_core::player_prelude::TheaterPlateGradeClass;
 
     fn test_config() -> AppConfig {
@@ -2730,6 +3322,21 @@ mod tests {
                 .any(|scenario| scenario.name
                     == "DesktopCollectionsManualEditor")
         );
+        for expected in [
+            "SmartShelfComposer",
+            "SmartShelfRunningProgress",
+            "SmartShelfDraftReady",
+            "SmartShelfAlternatesReplacement",
+            "SmartShelfProviderUnavailable",
+            "SmartShelfSavedCollectionDetail",
+            "SmartShelfCollectionEmpty",
+            "SmartShelfCollectionError",
+        ] {
+            assert!(
+                scenarios.iter().any(|scenario| scenario.name == expected),
+                "{expected} should be exposed as a screenshot preset",
+            );
+        }
         assert!(
             scenarios
                 .iter()
@@ -3113,6 +3720,128 @@ mod tests {
                 .get(&collection_id)
                 .is_some_and(|action| action.conflict)
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn smart_shelf_mvp_scenarios_seed_visual_qa_states() {
+        let composer = PlayerScenario::SmartShelfComposer.build(&test_config());
+        let composer_surface = &composer.domains.ui.state.smart_shelf;
+        assert!(composer_surface.open);
+        assert_eq!(composer_surface.reducer.phase, SmartShelfPhase::Idle);
+        assert!(composer_surface.reducer.provider.allows_start());
+        assert!(!composer_surface.reducer.composer.prompt.is_empty());
+
+        let running =
+            PlayerScenario::SmartShelfRunningProgress.build(&test_config());
+        let running_smart = &running.domains.ui.state.smart_shelf.reducer;
+        assert_eq!(running_smart.phase, SmartShelfPhase::Running);
+        assert!(
+            running_smart
+                .run
+                .as_ref()
+                .is_some_and(|run| run.can_cancel())
+        );
+
+        let draft_ready =
+            PlayerScenario::SmartShelfDraftReady.build(&test_config());
+        let draft = draft_ready
+            .domains
+            .ui
+            .state
+            .smart_shelf
+            .reducer
+            .draft
+            .as_ref()
+            .expect("draft ready preset should load a draft");
+        assert!(draft.can_save());
+        assert_eq!(draft.items.len(), 2);
+
+        let replacement = PlayerScenario::SmartShelfAlternatesReplacement
+            .build(&test_config());
+        let replacement_draft = replacement
+            .domains
+            .ui
+            .state
+            .smart_shelf
+            .reducer
+            .draft
+            .as_ref()
+            .expect("replacement preset should load a draft");
+        assert_eq!(replacement_draft.replacements_count(), 1);
+        assert_eq!(replacement_draft.alternates.len(), 1);
+
+        let provider =
+            PlayerScenario::SmartShelfProviderUnavailable.build(&test_config());
+        let provider_surface = &provider.domains.ui.state.smart_shelf;
+        assert_eq!(
+            provider_surface.reducer.phase,
+            SmartShelfPhase::ProviderUnavailable
+        );
+        assert!(provider_surface.provider_fallback.is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn smart_shelf_collection_scenarios_seed_detail_empty_and_error() {
+        let saved = PlayerScenario::SmartShelfSavedCollectionDetail
+            .build(&test_config());
+        assert_eq!(saved.domains.ui.state.scope, Scope::Collections);
+        let collection_id = match &saved.domains.ui.state.view {
+            ViewState::CollectionDetail { collection_id } => *collection_id,
+            _ => panic!("saved smart-shelf scenario should open detail"),
+        };
+        let Some(TabState::Collections(tab)) =
+            saved.tab_manager.get_tab(TabId::Collections)
+        else {
+            panic!("collections tab should exist");
+        };
+        match tab.detail_state(collection_id) {
+            CollectionDetailLoadState::Loaded(detail) => {
+                assert_eq!(
+                    detail.summary.provenance.generated_by.as_deref(),
+                    Some("smart_shelf")
+                );
+                assert_eq!(detail.summary.item_count, 2);
+            }
+            other => panic!("expected loaded detail, got {other:?}"),
+        }
+        assert!(matches!(
+            tab.item_state(collection_id).load_state,
+            CollectionItemsLoadState::Loaded
+        ));
+        assert_eq!(tab.item_state(collection_id).items.len(), 2);
+
+        let empty =
+            PlayerScenario::SmartShelfCollectionEmpty.build(&test_config());
+        let empty_id = match &empty.domains.ui.state.view {
+            ViewState::CollectionDetail { collection_id } => *collection_id,
+            _ => panic!("empty smart-shelf scenario should open detail"),
+        };
+        let Some(TabState::Collections(empty_tab)) =
+            empty.tab_manager.get_tab(TabId::Collections)
+        else {
+            panic!("collections tab should exist");
+        };
+        assert!(matches!(
+            empty_tab.item_state(empty_id).load_state,
+            CollectionItemsLoadState::Loaded
+        ));
+        assert!(empty_tab.item_state(empty_id).items.is_empty());
+
+        let error =
+            PlayerScenario::SmartShelfCollectionError.build(&test_config());
+        let error_id = match &error.domains.ui.state.view {
+            ViewState::CollectionDetail { collection_id } => *collection_id,
+            _ => panic!("error smart-shelf scenario should open detail"),
+        };
+        let Some(TabState::Collections(error_tab)) =
+            error.tab_manager.get_tab(TabId::Collections)
+        else {
+            panic!("collections tab should exist");
+        };
+        assert!(matches!(
+            error_tab.detail_state(error_id),
+            CollectionDetailLoadState::Error(_)
+        ));
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -24,6 +24,7 @@ ferrex-player (binary/facade)
       -> ferrex-player-media
       -> ferrex-player-metadata
       -> ferrex-player-playback (Iced/subwave playback runtime)
+      -> ferrex-player-intelligence
       -> ferrex-player-search
       -> ferrex-player-settings
       -> ferrex-player-user-admin
@@ -58,6 +59,7 @@ shell translates into concrete runtime tasks.
 | `ferrex-player-media` | API/foundation/library crates and watch-state selectors | Iced tasks/subscriptions/widgets, subwave, app/UI modules |
 | `ferrex-player-metadata` | Metadata-domain contracts that are independent of UI image handles | Iced image handles/tasks/subscriptions, subwave, app/UI modules |
 | `ferrex-player-playback` | API/foundation crates plus Iced/subwave playback runtime and overlay helpers | App bootstrap, root state composition, or UI shell modules |
+| `ferrex-player-intelligence` | API DTOs and smart-shelf reducer/domain state | Iced event/key types, tasks/subscriptions/widgets, subwave, app/UI modules |
 | `ferrex-player-search` | API/foundation/library crates and search data-domain logic | Iced event/key types, tasks/subscriptions/widgets, subwave, app/UI modules |
 | `ferrex-player-settings` | Foundation/domain state, settings validation, section reducers, color utilities, `iced_core` color/point DTOs | Iced widgets/tasks/subscriptions, subwave, app/UI modules |
 | `ferrex-player-user-admin` | User-admin state, sanitized messages, reducer helpers | Iced widgets/tasks/subscriptions, subwave, app/UI modules |
@@ -92,7 +94,8 @@ loading subscriptions live under `ferrex-player-ui`; playback/video runtime code
 lives under `ferrex-player-playback`. Do not add `#[path = ...]` includes from
 lower crates or move Iced widget/image-handle code back into
 `ferrex-player-auth`, `ferrex-player-repository`, `ferrex-player-library`,
-`ferrex-player-media`, `ferrex-player-metadata`, `ferrex-player-search`,
+`ferrex-player-media`, `ferrex-player-metadata`,
+`ferrex-player-intelligence`, `ferrex-player-search`,
 `ferrex-player-settings`, or `ferrex-player-user-admin`.
 
 When new player crates are created, import from the owning supporting crate

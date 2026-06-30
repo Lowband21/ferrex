@@ -22,7 +22,7 @@ fn main() -> ferrex_player::Result {
                 cases,
             ),
         ) => {
-            println!("detail typography visual QA matrix:");
+            println!("visual QA matrix:");
             for case in cases {
                 println!(
                     "  {:<28} {:<32} {:<10} {}",
@@ -45,7 +45,7 @@ fn main() -> ferrex_player::Result {
             ),
         ) => {
             println!(
-                "captured detail typography matrix: {} screenshots (manifest: {})",
+                "captured visual QA matrix: {} screenshots (manifest: {})",
                 output.captures.len(),
                 output.manifest_path.display()
             );

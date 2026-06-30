@@ -784,6 +784,9 @@ pub struct CollectionsTabState {
     /// Per-collection metadata editing forms, seeded from loaded details.
     pub edit_forms: HashMap<CollectionId, CollectionEditFormState>,
 
+    /// Collections whose detail view is currently showing explicit manage/edit controls.
+    pub edit_mode_collection_ids: HashSet<CollectionId>,
+
     /// Per-collection media picker/search state for manual additions.
     pub picker_states: HashMap<CollectionId, CollectionMediaPickerState>,
 
@@ -803,6 +806,7 @@ impl CollectionsTabState {
             refresh_states: HashMap::new(),
             create_form: CollectionCreateFormState::default(),
             edit_forms: HashMap::new(),
+            edit_mode_collection_ids: HashSet::new(),
             picker_states: HashMap::new(),
             item_action_states: HashMap::new(),
         }
@@ -929,6 +933,19 @@ impl CollectionsTabState {
             .expect("edit form inserted")
     }
 
+    pub fn is_detail_editing(&self, collection_id: CollectionId) -> bool {
+        self.edit_mode_collection_ids.contains(&collection_id)
+    }
+
+    pub fn enter_detail_edit_mode(&mut self, collection_id: CollectionId) {
+        self.ensure_edit_form(collection_id);
+        self.edit_mode_collection_ids.insert(collection_id);
+    }
+
+    pub fn exit_detail_edit_mode(&mut self, collection_id: CollectionId) {
+        self.edit_mode_collection_ids.remove(&collection_id);
+    }
+
     pub fn picker_state(
         &self,
         collection_id: CollectionId,
@@ -990,6 +1007,7 @@ impl CollectionsTabState {
         self.item_states.remove(&collection_id);
         self.refresh_states.remove(&collection_id);
         self.edit_forms.remove(&collection_id);
+        self.edit_mode_collection_ids.remove(&collection_id);
         self.picker_states.remove(&collection_id);
         self.item_action_states.remove(&collection_id);
         if self.summaries.is_empty() && self.load_state.is_ready() {

@@ -8,6 +8,7 @@ members = [
   "crates/ferrex-player-api",
   "crates/ferrex-player-auth",
   "crates/ferrex-player-foundation",
+  "crates/ferrex-player-intelligence",
   "crates/ferrex-player-repository",
   "crates/ferrex-player-library",
   "crates/ferrex-player-media",
@@ -80,6 +81,10 @@ version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-foundation]
 path = "crates/ferrex-player-foundation"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-intelligence]
+path = "crates/ferrex-player-intelligence"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-repository]

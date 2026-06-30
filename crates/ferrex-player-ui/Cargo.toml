@@ -41,6 +41,7 @@ ferrex-contracts = { path = "../ferrex-contracts", features = [
 ferrex-player-api = { workspace = true }
 ferrex-player-auth = { workspace = true }
 ferrex-player-foundation = { workspace = true }
+ferrex-player-intelligence = { workspace = true }
 ferrex-player-repository = { workspace = true }
 ferrex-player-library = { workspace = true }
 ferrex-player-media = { workspace = true }

@@ -7,7 +7,7 @@
 use ferrex_core::{
     api::{
         routes::{utils::replace_param, v1},
-        types::collections::*,
+        types::{collections::*, intelligence::*, smart_shelves::*},
     },
     player_prelude::{
         ApiResponse, AuthToken, AuthenticatedDevice, ConfirmClaimRequest,
@@ -904,6 +904,79 @@ impl ApiClient {
         replace_param(route, "{collection_id}", collection_id.to_string())
     }
 
+    fn intelligence_run_path(route: &str, run_id: uuid::Uuid) -> String {
+        replace_param(route, "{run_id}", run_id.to_string())
+    }
+
+    fn intelligence_artifact_path(
+        route: &str,
+        artifact_id: uuid::Uuid,
+    ) -> String {
+        replace_param(route, "{artifact_id}", artifact_id.to_string())
+    }
+
+    /// Fetch configured intelligence provider/model readiness.
+    pub async fn intelligence_provider_status(
+        &self,
+    ) -> Result<IntelligenceProviderStatus> {
+        self.get(v1::intelligence::PROVIDER_STATUS).await
+    }
+
+    /// Start a grounded smart-shelf intelligence run.
+    pub async fn start_smart_shelf(
+        &self,
+        request: &SmartShelfStartRequest,
+    ) -> Result<SmartShelfStartResponse> {
+        self.post(v1::intelligence::SMART_SHELF_START, request)
+            .await
+    }
+
+    /// Poll the current status of an intelligence run.
+    pub async fn get_intelligence_run_status(
+        &self,
+        run_id: uuid::Uuid,
+    ) -> Result<IntelligenceRunStatusResponse> {
+        let path =
+            Self::intelligence_run_path(v1::intelligence::RUN_STATUS, run_id);
+        self.get(&path).await
+    }
+
+    /// Cancel a running intelligence run.
+    pub async fn cancel_intelligence_run(
+        &self,
+        run_id: uuid::Uuid,
+        request: &IntelligenceRunCancelRequest,
+    ) -> Result<IntelligenceRunCancelResponse> {
+        let path =
+            Self::intelligence_run_path(v1::intelligence::RUN_CANCEL, run_id);
+        self.post(&path, request).await
+    }
+
+    /// Read a smart-shelf draft as a typed, validated shelf payload.
+    pub async fn get_smart_shelf_draft(
+        &self,
+        artifact_id: uuid::Uuid,
+    ) -> Result<SmartShelfDraftResponse> {
+        let path = Self::intelligence_artifact_path(
+            v1::intelligence::SMART_SHELF_DRAFT_DETAIL,
+            artifact_id,
+        );
+        self.get(&path).await
+    }
+
+    /// Save an accepted smart-shelf draft as a private manual collection.
+    pub async fn save_smart_shelf(
+        &self,
+        artifact_id: uuid::Uuid,
+        request: &SmartShelfSaveRequest,
+    ) -> Result<SmartShelfSaveResponse> {
+        let path = Self::intelligence_artifact_path(
+            v1::intelligence::SMART_SHELF_SAVE,
+            artifact_id,
+        );
+        self.post(&path, request).await
+    }
+
     /// List player collections with filtering and pagination.
     pub async fn list_collections(
         &self,
@@ -1236,6 +1309,31 @@ mod tests {
             client.build_url(v1::collections::tmdb::LIST),
             "https://ferrex.example/api/v1/collections/tmdb/lists"
         );
+
+        let run_id = uuid("018f0c8a-2eab-7f03-a989-1fd8f8f03a14");
+        assert_eq!(
+            ApiClient::intelligence_run_path(
+                v1::intelligence::RUN_CANCEL,
+                run_id
+            ),
+            "/api/v1/intelligence/runs/018f0c8a-2eab-7f03-a989-1fd8f8f03a14:cancel"
+        );
+        let artifact_id = uuid("018f0c8a-2eab-7f03-a989-1fd8f8f03a15");
+        assert_eq!(
+            ApiClient::intelligence_artifact_path(
+                v1::intelligence::SMART_SHELF_SAVE,
+                artifact_id
+            ),
+            "/api/v1/intelligence/smart-shelves/drafts/018f0c8a-2eab-7f03-a989-1fd8f8f03a15/save"
+        );
+        assert_eq!(
+            client.build_url(v1::intelligence::PROVIDER_STATUS),
+            "https://ferrex.example/api/v1/intelligence/provider/status"
+        );
+        assert_eq!(
+            client.build_url(v1::intelligence::SMART_SHELF_START),
+            "https://ferrex.example/api/v1/intelligence/smart-shelves/runs"
+        );
     }
 
     #[test]
@@ -1297,5 +1395,85 @@ mod tests {
         )
         .expect("deserialize shelf request");
         assert_eq!(decoded, shelf);
+    }
+
+    #[test]
+    fn smart_shelf_contract_dtos_round_trip_through_json() {
+        let media_id = MediaID::Movie(MovieID(uuid(
+            "018f0c8a-2eab-7f03-a989-1fd8f8f03a16",
+        )));
+        let source = SmartShelfDraftSource {
+            label: Some("Library metadata".into()),
+            media_id: Some(media_id),
+            artifact_id: None,
+            field: Some("genres".into()),
+            evidence: Some(IntelligenceSummary::new("Grounded evidence")),
+        };
+
+        let start = SmartShelfStartRequest {
+            prompt: "Moody science fiction".into(),
+            library_id: None,
+            media_kinds: vec![IntelligenceMediaKind::Movie],
+            item_count: 8,
+            template_id: Some("mood-board".into()),
+            locked_media_ids: vec![media_id],
+            idempotency_key: Some("smart-shelf-test".into()),
+            model: Some("test-model".into()),
+            caps: IntelligenceCaps::default(),
+            constraints: serde_json::json!({"tone": "moody"}),
+            metadata: serde_json::json!({"source": "unit-test"}),
+        };
+        let decoded_start: SmartShelfStartRequest = serde_json::from_str(
+            &serde_json::to_string(&start)
+                .expect("serialize smart shelf start"),
+        )
+        .expect("deserialize smart shelf start");
+        assert_eq!(decoded_start, start);
+
+        let draft = SmartShelfDraftContent {
+            schema_version: SMART_SHELF_DRAFT_SCHEMA_VERSION,
+            title: "Moody sci-fi".into(),
+            description: Some("A deterministic smart-shelf draft".into()),
+            interpreted_intent: Some("Find atmospheric movies".into()),
+            requested_constraints: serde_json::json!({"tone": "moody"}),
+            items: vec![SmartShelfDraftItem {
+                ordinal: 1,
+                media_id,
+                title: Some("Arrival".into()),
+                subtitle: None,
+                year: Some(2016),
+                reason: Some(
+                    "Grounded in metadata and transcript context".into(),
+                ),
+                sources: vec![source.clone()],
+                locked: false,
+                replacement_of: None,
+            }],
+            alternates: Vec::new(),
+        };
+        let decoded_draft: SmartShelfDraftContent = serde_json::from_str(
+            &serde_json::to_string(&draft)
+                .expect("serialize smart shelf draft"),
+        )
+        .expect("deserialize smart shelf draft");
+        assert_eq!(decoded_draft, draft);
+
+        let save = SmartShelfSaveRequest {
+            title: Some("Moody sci-fi".into()),
+            description: Some("Accepted by the player".into()),
+            items: vec![SmartShelfSaveItem {
+                media_id,
+                locked: true,
+                replacement_of: None,
+                reason: Some("Keep the grounded top pick".into()),
+                sources: vec![source],
+            }],
+            idempotency_key: Some("save-test".into()),
+        };
+        let decoded_save: SmartShelfSaveRequest = serde_json::from_str(
+            &serde_json::to_string(&save).expect("serialize smart shelf save"),
+        )
+        .expect("deserialize smart shelf save");
+        assert_eq!(decoded_save, save);
     }
 }
