@@ -8,6 +8,7 @@ on:
     paths:
       - 'flatpak/**'
       - 'crates/ferrex-player/**'
+      - 'crates/ferrex-player-*/**'
       - 'crates/ferrex-core/**'
       - 'crates/ferrex-model/**'
       - 'crates/ferrex-contracts/**'
@@ -18,6 +19,7 @@ on:
     paths:
       - 'flatpak/**'
       - 'crates/ferrex-player/**'
+      - 'crates/ferrex-player-*/**'
       - 'crates/ferrex-core/**'
       - 'crates/ferrex-model/**'
       - 'crates/ferrex-contracts/**'
@@ -47,6 +49,25 @@ jobs:
           manifest-path: flatpak/io.github.lowband21.FerrexPlayer.yml
           bundle: ferrex-player.flatpak
           cache-key: flatpak-builder-${{ github.sha }}
+
+      - name: Smoke test bundled libmpv closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak install --user --noninteractive ./ferrex-player.flatpak
+          trap 'flatpak uninstall --user --noninteractive io.github.lowband21.FerrexPlayer >/dev/null' EXIT
+          flatpak run --user --command=sh io.github.lowband21.FerrexPlayer -c '
+            set -eu
+            test -x /app/bin/ferrex-player
+            test -e /app/lib/libmpv.so.2
+            test -e /app/lib/libavcodec.so.62
+            test -e /app/lib/libplacebo.so.360
+            ldd /app/bin/ferrex-player | grep -q "libmpv.so.2 => /app/lib/libmpv.so.2"
+            grep -qx "gpl=false" /app/share/licenses/io.github.lowband21.FerrexPlayer/mpv/BUILD_PROFILE
+            grep -qx "x11=disabled" /app/share/licenses/io.github.lowband21.FerrexPlayer/mpv/BUILD_PROFILE
+            grep -qx "gpl=no" /app/share/licenses/io.github.lowband21.FerrexPlayer/ffmpeg/BUILD_PROFILE
+            grep -qx "vulkan=enabled" /app/share/licenses/io.github.lowband21.FerrexPlayer/libplacebo/BUILD_PROFILE
+          '
 
       - name: Upload Flatpak artifact
         uses: actions/upload-artifact@v4

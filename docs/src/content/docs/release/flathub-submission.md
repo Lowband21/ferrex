@@ -16,6 +16,35 @@ This guide documents how to submit Ferrex Player to Flathub for distribution. Th
 - Desktop entry: `flatpak/io.github.lowband21.FerrexPlayer.desktop`
 - Icons: 128x128, 192x192, 512x512 in `flatpak/icons/`
 
+## Native playback packaging profile
+
+The manifest builds Ferrex with the `mpv` feature and bundles pinned mpv
+0.41.0, FFmpeg 8.1.2, libplacebo, libass, and LuaJIT. Its configure checks fail
+the build if mpv resolves `gpl=true`, if FFmpeg enables GPL/nonfree/version-3
+code, or if the required Wayland/Vulkan/dmabuf feature set is missing. The final
+binary must have a direct `libmpv.so.2` dependency, and the exact license files
+and effective build profiles are installed below
+`/app/share/licenses/io.github.lowband21.FerrexPlayer/`.
+
+mpv 0.41 gates its X11 VO on GPL sources. The reviewed Flatpak profile does not
+ship those sources: Wayland can use the explicit native-window mpv backend,
+while X11 retains the integrated GStreamer backend or the separate external
+player action. Do not enable mpv's GPL option merely to make the X11 feature
+check pass.
+
+Validate the finished artifact locally with:
+
+```bash
+flatpak-builder --user --force-clean --repo=target/flatpak-repo \
+  target/flatpak-build flatpak/io.github.lowband21.FerrexPlayer.yml
+flatpak build-bundle target/flatpak-repo target/ferrex-player.flatpak \
+  io.github.lowband21.FerrexPlayer
+```
+
+Install the bundle and verify that `ldd /app/bin/ferrex-player` resolves
+`libmpv.so.2`, FFmpeg, libplacebo, libass, and LuaJIT from `/app/lib` before
+publishing it.
+
 ## Submission Steps
 
 ### 1. Fork the Flathub Repository
