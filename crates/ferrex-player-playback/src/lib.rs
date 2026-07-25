@@ -15,6 +15,12 @@ pub mod controls;
 mod diagnostics;
 /// External MPV process integration for HDR passthrough.
 pub mod external_mpv;
+/// macOS AppKit native-root presenter capability and fallback gate.
+///
+/// Normal builds compile this only on macOS. Unit tests compile its pure
+/// evidence model on every host so conservative fallback remains display-free.
+#[cfg(any(target_os = "macos", test))]
+pub mod macos_presenter;
 /// Playback message and subscription DTOs.
 pub mod messages;
 #[cfg(feature = "mpv")]

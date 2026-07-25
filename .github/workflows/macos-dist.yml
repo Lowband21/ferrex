@@ -1,0 +1,251 @@
+name: macOS App Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      presenter_mode:
+        description: Native AppKit presenter build mode
+        required: true
+        type: choice
+        default: spike
+        options:
+          - spike
+          - disabled
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-app:
+    name: Ferrex Player (${{ matrix.architecture }}, ${{ github.event_name == 'workflow_dispatch' && inputs.presenter_mode || 'disabled' }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            architecture: arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+      TARGET: ${{ matrix.target }}
+      MACOS_SIGNING_CERTIFICATE_P12: ${{ secrets.MACOS_SIGNING_CERTIFICATE_P12 }}
+      MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      PRESENTER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.presenter_mode || 'disabled' }}
+      FERREX_MPV_MACOS_PRESENTER: ${{ github.event_name == 'workflow_dispatch' && inputs.presenter_mode || 'disabled' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install native build dependencies
+        run: |
+          brew update
+          brew install \
+            pkg-config meson ninja nasm \
+            freetype fribidi harfbuzz \
+            molten-vk shaderc vulkan-headers vulkan-loader \
+            ca-certificates glib glib-networking gstreamer libsoup openssl@3
+
+      - name: Build pinned LGPL libmpv
+        shell: bash
+        run: |
+          prefix="${RUNNER_TEMP}/ferrex-libmpv"
+          export PKG_CONFIG_PATH="$(brew --prefix vulkan-loader)/lib/pkgconfig:$(brew --prefix shaderc)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          bash scripts/release/macos-build-libmpv.sh "$prefix"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          echo "LIBRARY_PATH=$prefix/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$prefix/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: moonrepo/setup-rust@v1
+        with:
+          profile: minimal
+          targets: ${{ matrix.target }}
+
+      - name: Check backend-disabled rollback build
+        run: cargo check -p ferrex-player --no-default-features --target "$TARGET"
+
+      - name: Test display-free bundle policy
+        run: |
+          python3 -m unittest \
+            scripts/release/test_macos_bundle.py \
+            scripts/release/test_macos_build_profile.py
+
+      - name: Build player with in-process mpv
+        run: cargo build -p ferrex-player --features mpv --release --target "$TARGET"
+
+      - name: Import optional release signing identity
+        if: env.MACOS_SIGNING_CERTIFICATE_P12 != ''
+        shell: bash
+        run: |
+          keychain="${RUNNER_TEMP}/ferrex-signing.keychain-db"
+          certificate="${RUNNER_TEMP}/ferrex-signing.p12"
+          printf '%s' "$MACOS_SIGNING_CERTIFICATE_P12" | base64 -D > "$certificate"
+          security create-keychain -p temporary "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p temporary "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_SIGNING_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k temporary "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+
+      - name: Stage, rewrite, sign, and audit app bundle
+        shell: bash
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(package["version"] for package in data["packages"] if package["name"] == "ferrex-player"))')"
+          identity="${MACOS_SIGNING_IDENTITY:--}"
+          app="${RUNNER_TEMP}/Ferrex Player.app"
+          prefix="${RUNNER_TEMP}/ferrex-libmpv"
+          search_roots=(--search-root "$prefix/lib")
+          while IFS= read -r formula; do
+            formula_lib="$(brew --prefix "$formula")/lib"
+            if [[ -d "$formula_lib" ]]; then
+              search_roots+=(--search-root "$formula_lib")
+            fi
+          done <"$prefix/share/ferrex/native-mpv/homebrew-formulae.txt"
+          gstreamer_prefix="$(brew --prefix gstreamer)"
+          molten_vk_prefix="$(brew --prefix molten-vk)"
+          libsoup_prefix="$(brew --prefix libsoup)"
+          gio_module=""
+          for candidate in "$(brew --prefix glib-networking)/lib/gio/modules"/libgiognutls.{so,dylib}; do
+            if [[ -f "$candidate" ]]; then
+              gio_module="$candidate"
+              break
+            fi
+          done
+          if [[ -z "$gio_module" ]]; then
+            echo "glib-networking TLS module was not installed" >&2
+            exit 1
+          fi
+          ca_bundle="$(brew --prefix ca-certificates)/share/ca-certificates/cacert.pem"
+          if [[ ! -f "$ca_bundle" ]]; then
+            echo "immutable Homebrew Mozilla CA bundle is missing" >&2
+            exit 1
+          fi
+          expected_ca_hash="$(sed -n 's/^ca_certificates_bundle_sha256=//p' "$prefix/share/ferrex/native-mpv/build-profile.txt")"
+          actual_ca_hash="$(shasum -a 256 "$ca_bundle" | awk '{ print $1 }')"
+          if [[ -z "$expected_ca_hash" || "$actual_ca_hash" != "$expected_ca_hash" ]]; then
+            echo "immutable Homebrew Mozilla CA bundle does not match the build profile" >&2
+            exit 1
+          fi
+          gstreamer_plugin_args=()
+          while IFS= read -r plugin; do
+            if [[ -n "$plugin" && "$plugin" != \#* ]]; then
+              gstreamer_plugin_args+=(--gstreamer-plugin "$gstreamer_prefix/lib/gstreamer-1.0/$plugin")
+            fi
+          done <scripts/release/macos-gstreamer-plugins.txt
+          python3 scripts/release/macos_bundle.py stage \
+            --binary "target/${TARGET}/release/ferrex-player" \
+            --app "$app" \
+            --architecture "${{ matrix.architecture }}" \
+            --version "$version" \
+            --minimum-macos "$MACOSX_DEPLOYMENT_TARGET" \
+            --presenter-mode "$PRESENTER_MODE" \
+            --sign-identity "$identity" \
+            "${search_roots[@]}" \
+            --resource "$prefix/share/ferrex/native-mpv" \
+            --extra-library "$molten_vk_prefix/lib/libMoltenVK.dylib" \
+            --extra-library "$libsoup_prefix/lib/libsoup-3.0.0.dylib" \
+            --require-library libMoltenVK.dylib \
+            --require-library libsoup-3.0.0.dylib \
+            --gio-module "$gio_module" \
+            --ca-bundle "$ca_bundle" \
+            --vulkan-icd "$molten_vk_prefix/etc/vulkan/icd.d/MoltenVK_icd.json" \
+            "${gstreamer_plugin_args[@]}" \
+            --gstreamer-scanner "$gstreamer_prefix/libexec/gstreamer-1.0/gst-plugin-scanner"
+          archive="ferrex-player_${version}_macos_${{ matrix.architecture }}_${PRESENTER_MODE}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+          shasum -a 256 "$archive" > "$archive.sha256"
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - name: Smoke bundled GStreamer fallback factories
+        shell: bash
+        run: |
+          app="${RUNNER_TEMP}/Ferrex Player.app"
+          plugins="$app/Contents/PlugIns/gstreamer-1.0"
+          export GST_PLUGIN_SYSTEM_PATH_1_0="$plugins"
+          export GST_PLUGIN_PATH_1_0="$plugins"
+          export GST_PLUGIN_SCANNER_1_0="$app/Contents/Helpers/gst-plugin-scanner"
+          export GST_PLUGIN_SCANNER="$GST_PLUGIN_SCANNER_1_0"
+          export GST_REGISTRY_1_0="${RUNNER_TEMP}/ferrex-gstreamer-registry.bin"
+          export GIO_EXTRA_MODULES="$app/Contents/PlugIns/gio/modules"
+          unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
+          fixture_dir="${RUNNER_TEMP}/ferrex-gstreamer-hls"
+          mkdir -p "$fixture_dir"
+          "$(brew --prefix ffmpeg)/bin/ffmpeg" \
+            -hide_banner -loglevel error -y \
+            -f lavfi -i testsrc2=size=320x180:rate=24:duration=2 \
+            -f lavfi -i sine=frequency=440:sample_rate=48000:duration=2 \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac \
+            -f hls -hls_time 1 -hls_list_size 0 "$fixture_dir/stream.m3u8"
+          cc scripts/release/macos_gstreamer_bundle_smoke.c \
+            $(pkg-config --cflags gstreamer-1.0 gio-2.0) \
+            -L"$app/Contents/Frameworks" \
+            -Wl,-rpath,"$app/Contents/Frameworks" \
+            $(pkg-config --libs-only-l gstreamer-1.0 gio-2.0) \
+            -o "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke"
+          if otool -L "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke" | \
+            grep -E '/opt/homebrew/|/usr/local/|/nix/store/' >/dev/null; then
+            echo "clean-bundle smoke helper links a developer/package-manager path" >&2
+            exit 1
+          fi
+          python3 -m http.server 18765 --bind 127.0.0.1 --directory "$fixture_dir" &
+          http_server_pid=$!
+          openssl="$(brew --prefix openssl@3)/bin/openssl"
+          "$openssl" req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj /CN=FerrexTestCA \
+            -addext basicConstraints=critical,CA:TRUE \
+            -addext keyUsage=critical,keyCertSign,cRLSign \
+            -keyout "${RUNNER_TEMP}/ferrex-ca.key" \
+            -out "${RUNNER_TEMP}/ferrex-ca.crt" >/dev/null 2>&1
+          "$openssl" req -newkey rsa:2048 -nodes \
+            -subj /CN=127.0.0.1 \
+            -addext subjectAltName=IP:127.0.0.1 \
+            -keyout "${RUNNER_TEMP}/ferrex-test.key" \
+            -out "${RUNNER_TEMP}/ferrex-test.csr" >/dev/null 2>&1
+          "$openssl" x509 -req -days 1 \
+            -in "${RUNNER_TEMP}/ferrex-test.csr" \
+            -CA "${RUNNER_TEMP}/ferrex-ca.crt" \
+            -CAkey "${RUNNER_TEMP}/ferrex-ca.key" \
+            -CAcreateserial -copy_extensions copy \
+            -out "${RUNNER_TEMP}/ferrex-test.crt" >/dev/null 2>&1
+          python3 scripts/release/https_test_server.py \
+            --directory "$fixture_dir" \
+            --certificate "${RUNNER_TEMP}/ferrex-test.crt" \
+            --key "${RUNNER_TEMP}/ferrex-test.key" \
+            --port 18766 &
+          https_server_pid=$!
+          trap 'kill "$http_server_pid" "$https_server_pid" 2>/dev/null || true' EXIT
+          curl --fail --retry 20 --retry-connrefused --retry-delay 1 \
+            http://127.0.0.1:18765/stream.m3u8 >/dev/null
+          curl --insecure --fail --retry 20 --retry-connrefused --retry-delay 1 \
+            https://127.0.0.1:18766/stream.m3u8 >/dev/null
+          "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke" \
+            http://127.0.0.1:18765/stream.m3u8 \
+            "$app/Contents/Frameworks/libsoup-3.0.0.dylib" \
+            "$app/Contents/Resources/tls/cacert.pem"
+          if "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke" \
+            https://127.0.0.1:18766/stream.m3u8 \
+            "$app/Contents/Frameworks/libsoup-3.0.0.dylib" \
+            "$app/Contents/Resources/tls/cacert.pem"; then
+            echo "strict HTTPS smoke unexpectedly trusted the unbundled test CA" >&2
+            exit 1
+          fi
+          "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke" \
+            https://127.0.0.1:18766/stream.m3u8 \
+            "$app/Contents/Frameworks/libsoup-3.0.0.dylib" \
+            "${RUNNER_TEMP}/ferrex-ca.crt"
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrex-player-macos-${{ matrix.architecture }}-${{ env.PRESENTER_MODE }}
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256

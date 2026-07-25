@@ -1,4 +1,7 @@
 fn main() -> ferrex_player::Result {
+    #[cfg(target_os = "macos")]
+    ferrex_player::macos_bundle_runtime::configure();
+
     match ferrex_player::screenshot::run_command_from_args(std::env::args_os())
     {
         Ok(ferrex_player::screenshot::CommandOutcome::NotScreenshot) => {

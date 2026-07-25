@@ -1,0 +1,30 @@
+# Reviewed macOS GStreamer fallback surface. Homebrew's current monolithic
+# formula also ships GPL/codec plugins and a libav plugin that conflicts with
+# the pinned FFmpeg SONAME closure; release packaging stages only this set.
+libgstcoreelements.dylib
+libgstplayback.dylib
+libgstapp.dylib
+libgstvideoconvertscale.dylib
+libgstaudioconvert.dylib
+libgstaudioresample.dylib
+libgstvolume.dylib
+libgsttypefindfunctions.dylib
+libgstautodetect.dylib
+libgstosxaudio.dylib
+libgstapplemedia.dylib
+libgstisomp4.dylib
+libgstmatroska.dylib
+libgstmpegtsdemux.dylib
+libgstadaptivedemux2.dylib
+libgstvideoparsersbad.dylib
+libgstaudioparsers.dylib
+libgstsoup.dylib
+libgstaudiofx.dylib
+libgstgio.dylib
+libgstrawparse.dylib
+libgstflac.dylib
+libgstmpg123.dylib
+libgstopus.dylib
+libgstvorbis.dylib
+libgstdav1d.dylib
+libgstvpx.dylib
