@@ -3,7 +3,7 @@
 
 use crate::diagnostics::{contains_access_token, redact_playback_url};
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,7 +17,8 @@ use std::os::unix::net::UnixStream;
 #[derive(Debug)]
 pub struct ExternalMpvHandle {
     process: Child,
-    socket_path: String,
+    #[cfg(unix)]
+    _socket_guard: UnixIpcPath,
     #[cfg(unix)]
     connection: Arc<Mutex<BufReader<UnixStream>>>,
     #[cfg(windows)]
@@ -39,7 +40,9 @@ impl ExternalMpvHandle {
         resume_position: Option<f32>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         #[cfg(unix)]
-        let socket_path = format!("/tmp/ferrex-mpv-{}", std::process::id());
+        let socket_guard = create_private_ipc_path()?;
+        #[cfg(unix)]
+        let socket_path = socket_guard.socket.clone();
         #[cfg(windows)]
         let socket_path =
             format!(r"\\.\pipe\ferrex-mpv-{}", std::process::id());
@@ -96,9 +99,11 @@ impl ExternalMpvHandle {
             .arg("--osd-duration=2000") // OSD display duration in ms
             .arg("--osc=yes"); // Enable on-screen controller
 
-        // Playback settings
-        cmd.arg("--keep-open=no") // Don't close at end
-            .arg("--idle=no") // Stay alive when done
+        // Playback settings. `idle=once` keeps mpv alive long enough for the
+        // private IPC load below, then preserves the historical behavior of
+        // exiting after the first playlist finishes.
+        cmd.arg("--keep-open=no")
+            .arg("--idle=once")
             .arg("--pause=no"); // Start playing immediately
 
         // Add resume position if provided
@@ -128,11 +133,11 @@ impl ExternalMpvHandle {
             }
         }
 
-        // Add the URL
-        cmd.arg(url);
-
+        // Do not put the media URL (and potentially its playback ticket) in
+        // the child process argument vector. It is submitted over the private
+        // IPC connection after startup instead.
         log::info!(
-            "Spawning external MPV with URL: {}",
+            "Spawning external MPV for URL: {}",
             redact_playback_url(url)
         );
         // Pipe stdout/stderr so we can capture diagnostics cross‑platform
@@ -148,36 +153,27 @@ impl ExternalMpvHandle {
             })?;
 
         // Stream MPV stdout/stderr into our logs and persistent file if configured
-        if let Some(mut out) = child.stdout.take() {
+        if let Some(out) = child.stdout.take() {
             let log_file = log_path.clone();
             std::thread::spawn(move || {
-                let mut buf = [0u8; 4096];
+                let mut out = BufReader::new(out);
+                let mut line = String::new();
                 loop {
-                    match out.read(&mut buf) {
+                    line.clear();
+                    match out.read_line(&mut line) {
                         Ok(0) => break,
-                        Ok(n) => {
-                            if let Ok(s) = std::str::from_utf8(&buf[..n]) {
-                                for line in s.lines() {
-                                    let redacted_line =
-                                        redact_playback_url(line);
-                                    log::debug!(
-                                        "mpv(stdout): {}",
-                                        redacted_line
-                                    );
-                                    if let Some(ref path) = log_file
-                                        && let Ok(mut f) =
-                                            std::fs::OpenOptions::new()
-                                                .create(true)
-                                                .append(true)
-                                                .open(path)
-                                    {
-                                        let _ = writeln!(
-                                            f,
-                                            "[stdout] {}",
-                                            redacted_line
-                                        );
-                                    }
-                                }
+                        Ok(_) => {
+                            let redacted_line =
+                                redact_playback_url(line.trim_end());
+                            log::debug!("mpv(stdout): {}", redacted_line);
+                            if let Some(ref path) = log_file
+                                && let Ok(mut f) = std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(path)
+                            {
+                                let _ =
+                                    writeln!(f, "[stdout] {}", redacted_line);
                             }
                         }
                         Err(_) => break,
@@ -185,36 +181,27 @@ impl ExternalMpvHandle {
                 }
             });
         }
-        if let Some(mut err) = child.stderr.take() {
+        if let Some(err) = child.stderr.take() {
             let log_file = log_path.clone();
             std::thread::spawn(move || {
-                let mut buf = [0u8; 4096];
+                let mut err = BufReader::new(err);
+                let mut line = String::new();
                 loop {
-                    match err.read(&mut buf) {
+                    line.clear();
+                    match err.read_line(&mut line) {
                         Ok(0) => break,
-                        Ok(n) => {
-                            if let Ok(s) = std::str::from_utf8(&buf[..n]) {
-                                for line in s.lines() {
-                                    let redacted_line =
-                                        redact_playback_url(line);
-                                    log::warn!(
-                                        "mpv(stderr): {}",
-                                        redacted_line
-                                    );
-                                    if let Some(ref path) = log_file
-                                        && let Ok(mut f) =
-                                            std::fs::OpenOptions::new()
-                                                .create(true)
-                                                .append(true)
-                                                .open(path)
-                                    {
-                                        let _ = writeln!(
-                                            f,
-                                            "[stderr] {}",
-                                            redacted_line
-                                        );
-                                    }
-                                }
+                        Ok(_) => {
+                            let redacted_line =
+                                redact_playback_url(line.trim_end());
+                            log::warn!("mpv(stderr): {}", redacted_line);
+                            if let Some(ref path) = log_file
+                                && let Ok(mut f) = std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(path)
+                            {
+                                let _ =
+                                    writeln!(f, "[stderr] {}", redacted_line);
                             }
                         }
                         Err(_) => break,
@@ -223,7 +210,7 @@ impl ExternalMpvHandle {
             });
         }
 
-        let process = child;
+        let mut process = child;
 
         // Wait a moment for MPV to create the socket
         std::thread::sleep(Duration::from_millis(300));
@@ -231,9 +218,18 @@ impl ExternalMpvHandle {
         // Connect to IPC socket
         #[cfg(unix)]
         let connection = {
-            let stream = UnixStream::connect(&socket_path)?;
+            let stream = match UnixStream::connect(&socket_path) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    let _ = process.kill();
+                    return Err(error.into());
+                }
+            };
             // Set non-blocking mode to prevent UI freezing
-            stream.set_nonblocking(true)?;
+            if let Err(error) = stream.set_nonblocking(true) {
+                let _ = process.kill();
+                return Err(error.into());
+            }
             Arc::new(Mutex::new(BufReader::new(stream)))
         };
         #[cfg(windows)]
@@ -263,6 +259,7 @@ impl ExternalMpvHandle {
                                 .as_ref()
                                 .map(|p| p.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "(no log file)".to_string());
+                            let _ = process.kill();
                             return Err(format!(
                                 "Failed to connect to MPV named pipe after retries: {}. \
 IPC may be blocked or mpv failed to start. If antivirus is running, add an exception. \
@@ -355,7 +352,8 @@ See mpv log for details: {}",
 
         let mut handle = Self {
             process,
-            socket_path: socket_path.clone(),
+            #[cfg(unix)]
+            _socket_guard: socket_guard,
             #[cfg(unix)]
             connection,
             #[cfg(windows)]
@@ -382,11 +380,14 @@ See mpv log for details: {}",
         handle.observe_property(3, "fullscreen")?;
         handle.observe_property(4, "duration")?;
 
+        // Keep authenticated media out of argv/process listings. The socket is
+        // local to this Ferrex process and is removed when the handle drops.
+        handle.send_command(&["loadfile", url, "replace"])?;
+
         Ok(handle)
     }
 
     /// Send a command to MPV via IPC
-    #[allow(unused)]
     fn send_command(
         &mut self,
         args: &[&str],
@@ -563,12 +564,56 @@ See mpv log for details: {}",
 impl Drop for ExternalMpvHandle {
     fn drop(&mut self) {
         self.kill();
-        // Clean up socket file
-        #[cfg(unix)]
-        {
-            let _ = std::fs::remove_file(&self.socket_path);
-        }
     }
+}
+
+#[cfg(unix)]
+#[derive(Debug)]
+struct UnixIpcPath {
+    socket: String,
+    directory: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+impl Drop for UnixIpcPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.socket);
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+
+#[cfg(unix)]
+fn create_private_ipc_path() -> Result<UnixIpcPath, Box<dyn std::error::Error>>
+{
+    use std::os::unix::fs::DirBuilderExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+    let directory = std::env::temp_dir().join(format!(
+        "ferrex-mpv-{}-{nonce}-{sequence}",
+        std::process::id()
+    ));
+    std::fs::DirBuilder::new().mode(0o700).create(&directory)?;
+    let socket = directory.join("ipc.sock");
+    let socket = match socket.into_os_string().into_string() {
+        Ok(socket) => socket,
+        Err(_) => {
+            let _ = std::fs::remove_dir(&directory);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "external mpv IPC path is not valid UTF-8",
+            )
+            .into());
+        }
+    };
+    Ok(UnixIpcPath { socket, directory })
 }
 
 /// Start external MPV playback with window settings, position, and resume position
@@ -715,4 +760,69 @@ fn search_in_path(exe: &str) -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn ipc_socket_parent_is_private_and_raii_cleaned() {
+        let guard = create_private_ipc_path().expect("create private IPC path");
+        let directory = guard.directory.clone();
+        let mode = std::fs::metadata(&directory)
+            .expect("IPC parent exists")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+
+        drop(guard);
+        assert!(!directory.exists());
+    }
+
+    #[test]
+    #[ignore = "requires FERREX_EXTERNAL_MPV_SMOKE_URL and a working desktop VO"]
+    fn media_is_loaded_over_ipc_without_argv_exposure() {
+        let url = std::env::var("FERREX_EXTERNAL_MPV_SMOKE_URL")
+            .expect("set FERREX_EXTERNAL_MPV_SMOKE_URL");
+        assert!(!url.is_empty(), "smoke URL must not be empty");
+        let mut handle =
+            ExternalMpvHandle::spawn(&url, false, Some((640, 360)), None, None)
+                .expect("external mpv starts and accepts the IPC load");
+
+        let argv =
+            std::fs::read(format!("/proc/{}/cmdline", handle.process.id()))
+                .expect("read child argv");
+        assert!(
+            !argv
+                .windows(url.len())
+                .any(|window| window == url.as_bytes()),
+            "media URL was exposed in the child argument vector"
+        );
+        if let Some((_, ticket)) = url.split_once("access_token=") {
+            let ticket = ticket.split('&').next().unwrap_or(ticket);
+            assert!(
+                !ticket.is_empty()
+                    && !argv
+                        .windows(ticket.len())
+                        .any(|window| window == ticket.as_bytes()),
+                "playback ticket was exposed in the child argument vector"
+            );
+        }
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut observed_media = false;
+        while std::time::Instant::now() < deadline && handle.is_alive() {
+            let (position, duration) = handle.poll_position();
+            if position > 0.0 || duration > 0.0 {
+                observed_media = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(observed_media, "mpv did not load media through IPC");
+        handle.kill();
+    }
 }
