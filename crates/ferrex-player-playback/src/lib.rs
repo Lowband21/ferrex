@@ -49,6 +49,13 @@ pub mod video;
 /// Playback overlay views.
 #[cfg(feature = "ui")]
 pub mod view;
+/// Windows native-root/transparent-overlay presenter spike.
+///
+/// The module is target-gated in normal builds. Unit tests compile its pure
+/// relationship and capability model on every host so fallback behavior does
+/// not require a Windows desktop.
+#[cfg(any(target_os = "windows", test))]
+pub mod windows_presenter;
 
 use ferrex_core::player_prelude::LibraryId;
 use ferrex_player_api::services::api::ApiService;

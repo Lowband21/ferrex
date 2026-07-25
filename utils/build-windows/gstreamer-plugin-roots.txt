@@ -1,0 +1,43 @@
+# Reviewed LGPL-compatible Windows rollback surface. The official Cerbero
+# installer contains additional restricted/GPL plugin components even when its
+# feature metadata marks them unselected, so the distribution stager resolves
+# only these exact plugin roots and their recursive PE imports. H.264 uses the
+# BSD OpenH264 plugin (with D3D11 available as a hardware path) and AAC uses
+# Windows Media Foundation; gst-libav is intentionally excluded so libmpv's
+# pinned FFmpeg remains the only FFmpeg ABI in the process.
+gstcoreelements
+gstplayback
+gstapp
+gstvideoconvertscale
+gstaudioconvert
+gstaudioresample
+gstvolume
+gsttypefindfunctions
+gstpbtypes
+gstgio
+gstrawparse
+gstautodetect
+gstaudiotestsrc
+gstvideotestsrc
+gstaudiofx
+gstisomp4
+gstmatroska
+gstmpegtsdemux
+gstmpegtsmux
+gstadaptivedemux2
+gstvideoparsersbad
+gstaudioparsers
+gstsoup
+gstsubparse
+gstassrender
+gstwasapi2
+gstwasapi
+gstdirectsound
+gstd3d11
+gstmediafoundation
+gstopenh264
+gstogg
+gstwavparse
+gstflac
+gstopus
+gstvorbis

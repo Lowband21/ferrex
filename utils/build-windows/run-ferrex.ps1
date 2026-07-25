@@ -2,8 +2,24 @@
 
 Write-Host "Starting Ferrex Player..." -ForegroundColor Green
 
-# Set GStreamer plugin path
-$env:GST_PLUGIN_PATH = "$PSScriptRoot\lib\gstreamer-1.0"
+# Use only the bundled GStreamer plugins and out-of-process scanner.
+$pluginPath = "$PSScriptRoot\lib\gstreamer-1.0"
+$scanner = "$PSScriptRoot\libexec\gstreamer-1.0\gst-plugin-scanner.exe"
+$env:GST_PLUGIN_PATH = $pluginPath
+$env:GST_PLUGIN_PATH_1_0 = $pluginPath
+$env:GST_PLUGIN_SYSTEM_PATH_1_0 = $pluginPath
+$env:GST_PLUGIN_SCANNER = $scanner
+$env:GST_PLUGIN_SCANNER_1_0 = $scanner
+$env:GIO_EXTRA_MODULES = "$PSScriptRoot\lib\gio\modules"
+$env:SSL_CERT_FILE = "$PSScriptRoot\etc\ssl\certs\ca-certificates.crt"
+$localData = if ($env:LOCALAPPDATA) {
+    $env:LOCALAPPDATA
+} else {
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+}
+$registryDirectory = Join-Path $localData 'Ferrex\gstreamer-1.0'
+New-Item -ItemType Directory -Force -Path $registryDirectory | Out-Null
+$env:GST_REGISTRY_1_0 = Join-Path $registryDirectory 'registry.bin'
 
 # Add bin directory to PATH
 $env:PATH = "$PSScriptRoot\bin;$env:PATH"

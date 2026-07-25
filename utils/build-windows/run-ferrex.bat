@@ -1,8 +1,17 @@
 @echo off
 echo Starting Ferrex Player...
 
-REM Set GStreamer plugin path
+REM Use only the bundled GStreamer plugins and scanner
 set GST_PLUGIN_PATH=%~dp0lib\gstreamer-1.0
+set GST_PLUGIN_PATH_1_0=%~dp0lib\gstreamer-1.0
+set GST_PLUGIN_SYSTEM_PATH_1_0=%~dp0lib\gstreamer-1.0
+set GST_PLUGIN_SCANNER=%~dp0libexec\gstreamer-1.0\gst-plugin-scanner.exe
+set GST_PLUGIN_SCANNER_1_0=%~dp0libexec\gstreamer-1.0\gst-plugin-scanner.exe
+set GIO_EXTRA_MODULES=%~dp0lib\gio\modules
+set SSL_CERT_FILE=%~dp0etc\ssl\certs\ca-certificates.crt
+if not defined LOCALAPPDATA set LOCALAPPDATA=%TEMP%
+if not exist "%LOCALAPPDATA%\Ferrex\gstreamer-1.0" mkdir "%LOCALAPPDATA%\Ferrex\gstreamer-1.0"
+set GST_REGISTRY_1_0=%LOCALAPPDATA%\Ferrex\gstreamer-1.0\registry.bin
 
 REM Add bin directory to PATH for DLLs
 set PATH=%~dp0bin;%PATH%
