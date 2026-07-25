@@ -12,6 +12,7 @@ members = [
   "crates/ferrex-player-library",
   "crates/ferrex-player-media",
   "crates/ferrex-player-metadata",
+  "crates/ferrex-player-mpv",
   "crates/ferrex-player-playback",
   "crates/ferrex-player-search",
   "crates/ferrex-player-settings",
@@ -96,6 +97,10 @@ version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-metadata]
 path = "crates/ferrex-player-metadata"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-mpv]
+path = "crates/ferrex-player-mpv"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-playback]
