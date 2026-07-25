@@ -201,6 +201,7 @@ num-bigint = "0.4.6"
 
 [features]
 default = []
+mpv = ["ferrex-player-playback/mpv"]
 legacy-settings = []
 iced_tester = ["iced/tester"]
 hot = ["iced/hot"]

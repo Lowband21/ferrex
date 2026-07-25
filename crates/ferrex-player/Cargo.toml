@@ -29,6 +29,7 @@ ferrex-player-app = { workspace = true }
 
 [features]
 default = []
+mpv = ["ferrex-player-app/mpv"]
 legacy-settings = ["ferrex-player-app/legacy-settings"]
 iced_tester = ["ferrex-player-app/iced_tester"]
 hot = ["ferrex-player-app/hot"]

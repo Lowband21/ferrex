@@ -28,6 +28,7 @@ missing_debug_implementations = "warn"
 [features]
 default = ["ui"]
 ui = ["dep:iced_wgpu", "dep:lucide-icons"]
+mpv = ["dep:ferrex-player-mpv", "ferrex-player-mpv/linked"]
 profile-with-puffin = ["dep:profiling", "profiling/profile-with-puffin"]
 profile-with-tracy = ["dep:profiling"]
 profile-with-tracing = ["dep:profiling"]
@@ -36,6 +37,7 @@ profile-with-tracing = ["dep:profiling"]
 ferrex-core = { path = "../ferrex-core", default-features = false, features = ["rkyv"] }
 ferrex-player-api = { workspace = true }
 ferrex-player-foundation = { workspace = true }
+ferrex-player-mpv = { workspace = true, optional = true }
 
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features = false, features = ["tokio", "image", "canvas", "advanced", "wgpu", "wayland", "batch", "lazy", "crisp"] }
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = ["image", "batch"], optional = true }
