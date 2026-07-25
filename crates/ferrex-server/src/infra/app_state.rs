@@ -12,6 +12,7 @@ use crate::infra::cache::{MovieBatchesCache, SeriesBundlesCache};
 use crate::infra::config::Config;
 use crate::infra::scan::scan_manager::ScanControlPlane;
 use crate::infra::thumbnail_service::ThumbnailService;
+use crate::infra::transcode::TranscodeManager;
 use crate::infra::websocket::ConnectionManager;
 use ferrex_core::application::{
     intelligence_runtime::IntelligenceRunManager, unit_of_work::AppUnitOfWork,
@@ -36,6 +37,7 @@ use crate::demo::DemoCoordinator;
 #[derive(Clone)]
 pub struct AppState {
     context: Arc<AppContext>,
+    transcode_manager: TranscodeManager,
     /// Track admin sessions per device for PIN authentication eligibility
     pub admin_sessions: Arc<Mutex<HashMap<Uuid, AdminSessionInfo>>>,
     pub series_bundles_cache: Arc<SeriesBundlesCache>,
@@ -81,8 +83,13 @@ impl AppState {
         series_bundles_cache: Arc<SeriesBundlesCache>,
         movie_batches_cache: Arc<MovieBatchesCache>,
     ) -> Self {
+        let transcode_manager = TranscodeManager::new(
+            context.config().ffmpeg.ffmpeg_path.clone(),
+            context.config().transcode_cache_dir().to_path_buf(),
+        );
         Self {
             context,
+            transcode_manager,
             admin_sessions,
             series_bundles_cache,
             movie_batches_cache,
@@ -123,6 +130,10 @@ impl AppState {
 
     pub fn thumbnail_service(&self) -> Arc<ThumbnailService> {
         self.context.thumbnail_service()
+    }
+
+    pub fn transcode_manager(&self) -> &TranscodeManager {
+        &self.transcode_manager
     }
 
     pub fn image_service(&self) -> Arc<ImageService> {

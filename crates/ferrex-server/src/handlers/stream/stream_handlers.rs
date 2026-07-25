@@ -52,15 +52,15 @@ impl PlaybackHttpError {
         }
     }
 
-    const fn missing_token() -> Self {
+    pub(super) const fn missing_token() -> Self {
         Self::plain(StatusCode::UNAUTHORIZED, "Missing token")
     }
 
-    const fn invalid_token() -> Self {
+    pub(super) const fn invalid_token() -> Self {
         Self::plain(StatusCode::UNAUTHORIZED, "Invalid token")
     }
 
-    const fn media_not_found() -> Self {
+    pub(super) const fn media_not_found() -> Self {
         Self::typed(
             StatusCode::NOT_FOUND,
             "media-not-found",
@@ -84,7 +84,7 @@ impl PlaybackHttpError {
         )
     }
 
-    const fn file_missing() -> Self {
+    pub(super) const fn file_missing() -> Self {
         Self::typed(
             StatusCode::NOT_FOUND,
             "file-missing",
@@ -100,7 +100,7 @@ impl PlaybackHttpError {
         )
     }
 
-    const fn internal() -> Self {
+    pub(super) const fn internal() -> Self {
         Self::typed(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal",
@@ -141,7 +141,7 @@ impl IntoResponse for PlaybackHttpError {
     }
 }
 
-async fn load_playback_source(
+pub(super) async fn load_playback_source(
     state: &AppState,
     media_id: Uuid,
 ) -> Result<PlaybackMediaSource, PlaybackHttpError> {
@@ -157,7 +157,7 @@ async fn load_playback_source(
         .ok_or_else(PlaybackHttpError::media_not_found)
 }
 
-fn ensure_playback_source_available(
+pub(super) fn ensure_playback_source_available(
     state: &AppState,
     source: &PlaybackMediaSource,
 ) -> Result<(), PlaybackHttpError> {
@@ -179,6 +179,31 @@ fn ensure_playback_source_available(
     }
 
     Ok(())
+}
+
+fn playback_content_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("mp4") => "video/mp4",
+        Some("mkv") => "video/x-matroska",
+        Some("avi") => "video/x-msvideo",
+        Some("mov") => "video/quicktime",
+        Some("webm") => "video/webm",
+        Some("flv") => "video/x-flv",
+        Some("wmv") => "video/x-ms-wmv",
+        Some("m4v") => "video/x-m4v",
+        Some("mpg") | Some("mpeg") => "video/mpeg",
+        Some("3gp") => "video/3gpp",
+        Some("ogv") => "video/ogg",
+        // HLS assets can be registered as ordinary protected media files by
+        // the transcoding/cache boundary. Correct types matter to native
+        // demuxers and keep manifests from being treated as downloads.
+        Some("m3u8") | Some("m3u") => "application/vnd.apple.mpegurl",
+        Some("ts") => "video/mp2t",
+        Some("mts") | Some("m2ts") => "video/mp2t",
+        Some("m4s") => "video/iso.segment",
+        Some("aac") => "audio/aac",
+        _ => "application/octet-stream",
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,23 +260,7 @@ pub async fn stream_with_progress_handler(
     ensure_playback_source_available(&state, &media_file)?;
 
     let file_size = media_file.size;
-    let extension = media_file.path.extension().and_then(|ext| ext.to_str());
-    let content_type = match extension {
-        Some("mp4") => "video/mp4",
-        Some("mkv") => "video/x-matroska",
-        Some("avi") => "video/x-msvideo",
-        Some("mov") => "video/quicktime",
-        Some("webm") => "video/webm",
-        Some("flv") => "video/x-flv",
-        Some("wmv") => "video/x-ms-wmv",
-        Some("m4v") => "video/x-m4v",
-        Some("mpg") | Some("mpeg") => "video/mpeg",
-        Some("3gp") => "video/3gpp",
-        Some("ogv") => "video/ogg",
-        Some("ts") => "video/mp2t",
-        Some("mts") | Some("m2ts") => "video/mp2t",
-        _ => "application/octet-stream",
-    };
+    let content_type = playback_content_type(&media_file.path);
     debug!("Content-Type: {}", content_type);
 
     let file = tokio::fs::File::open(&media_file.path).await.map_err(|e| {
@@ -430,5 +439,28 @@ fn parse_range_header(range_str: &str, file_size: u64) -> Option<ByteRange> {
         Some(ByteRange { start, end })
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::playback_content_type;
+    use std::path::Path;
+
+    #[test]
+    fn protected_hls_assets_use_demuxer_friendly_content_types() {
+        for (path, expected) in [
+            ("index.m3u8", "application/vnd.apple.mpegurl"),
+            ("legacy.m3u", "application/vnd.apple.mpegurl"),
+            ("segment.ts", "video/mp2t"),
+            ("fragment.m4s", "video/iso.segment"),
+            ("audio.aac", "audio/aac"),
+        ] {
+            assert_eq!(playback_content_type(Path::new(path)), expected);
+        }
+        assert_eq!(
+            playback_content_type(Path::new("unknown.bin")),
+            "application/octet-stream"
+        );
     }
 }
