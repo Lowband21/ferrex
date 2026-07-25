@@ -7,6 +7,8 @@
 
 /// Playback constants shared by controls, shortcuts, and update logic.
 pub mod constants;
+/// Backend-neutral playback commands, events, snapshots, and selection policy.
+pub mod contract;
 /// UI controls for playback overlays.
 #[cfg(feature = "ui")]
 pub mod controls;
@@ -15,8 +17,26 @@ mod diagnostics;
 pub mod external_mpv;
 /// Playback message and subscription DTOs.
 pub mod messages;
+#[cfg(feature = "mpv")]
+mod mpv_adapter;
+/// Event-loop-local orchestration between native slots and platform
+/// presenters. It is compiled only where an integrated presenter exists.
+#[cfg(all(
+    feature = "mpv",
+    feature = "ui",
+    any(target_os = "windows", target_os = "macos", test)
+))]
+mod native_presentation;
+/// Renderer-neutral Iced slot and raw host capture for native presentation.
+#[cfg(feature = "ui")]
+pub mod native_video_slot;
+/// Platform-neutral native presenter lifecycle and geometry model.
+pub mod presenter;
+/// Backend-neutral active playback session handle.
+pub mod session;
 /// Playback state container and notification DTOs.
 pub mod state;
+mod subwave_adapter;
 /// Playback UI theme helpers.
 #[cfg(feature = "ui")]
 pub mod theme;
@@ -37,6 +57,15 @@ use std::sync::Arc;
 
 /// Redact sensitive playback URLs for diagnostics.
 pub use diagnostics::redact_playback_url;
+/// Serializable playback diagnostics and native-output observations.
+pub use diagnostics::{
+    MpvClientApiDiagnostics, MpvConfigurationDiagnostics,
+    MpvConfigurationPolicy, MpvLogVerbosity,
+    PLAYBACK_DIAGNOSTIC_SCHEMA_VERSION, PlaybackBackendLifecycle,
+    PlaybackDiagnosticSnapshot, PlaybackDiagnosticSummary,
+    PlaybackFrameDiagnostics, PlaybackOutputDiagnostics,
+    PlaybackVersionDiagnostics,
+};
 /// Playback message type.
 pub use messages::PlayerMessage;
 /// Playback state and track-notification DTOs.

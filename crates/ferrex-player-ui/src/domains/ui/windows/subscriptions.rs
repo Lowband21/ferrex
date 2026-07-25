@@ -71,5 +71,34 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         ));
     }
 
+    if let Some(overlay_id) = state.windows.get(WindowKind::PlayerOverlay) {
+        subs.push(iced::window::events().with(overlay_id).map(
+            |(tracked_id, (id, event))| match event {
+                iced::window::Event::Resized(size) if id == tracked_id => {
+                    DomainMessage::Ui(
+                        UiShellMessage::PlayerOverlayResized(id, size).into(),
+                    )
+                }
+                iced::window::Event::Focused if id == tracked_id => {
+                    DomainMessage::Ui(
+                        UiShellMessage::PlayerOverlayFocused.into(),
+                    )
+                }
+                _ => DomainMessage::NoOp,
+            },
+        ));
+        // `exit_on_close_request` is disabled for this window so presenter
+        // detach and host-lease release run before native destruction.
+        subs.push(iced::window::close_requests().with(overlay_id).map(
+            |(tracked_id, id)| {
+                if id == tracked_id {
+                    DomainMessage::Ui(UiShellMessage::ClosePlayerOverlay.into())
+                } else {
+                    DomainMessage::NoOp
+                }
+            },
+        ));
+    }
+
     Subscription::batch(subs)
 }

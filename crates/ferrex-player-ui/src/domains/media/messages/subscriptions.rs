@@ -13,7 +13,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
 
     // Poll external MPV cross‑platform when active
-    if state.domains.player.state.external_mpv_active {
+    if state.domains.player.state.external_playback_active() {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
                 DomainMessage::Player(
@@ -62,7 +62,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 iced::time::every(std::time::Duration::from_secs(10)).map(
                     |_| {
                         DomainMessage::Player(
-                            crate::domains::player::messages::PlayerMessage::NewFrame,
+                            crate::domains::player::messages::PlayerMessage::PlaybackSnapshotTick,
                         )
                     },
                 ),

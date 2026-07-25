@@ -384,6 +384,28 @@ pub fn update_shell_ui(
             // No special handling currently; keep behavior simple
             DomainUpdateResult::task(Task::none())
         }
+        UiShellMessage::OpenPlayerOverlay => {
+            windows::controller::open_player_overlay(state)
+        }
+        UiShellMessage::PlayerOverlayOpened(id) => {
+            windows::controller::on_player_overlay_opened(state, id)
+        }
+        UiShellMessage::PlayerOverlayResized(id, size) => {
+            state.windows.set_player_overlay_size(id, size);
+            DomainUpdateResult::task(Task::none())
+        }
+        UiShellMessage::ActivatePlayerOverlay => {
+            windows::controller::activate_player_overlay(state)
+        }
+        UiShellMessage::PlayerOverlayHandoffReady => {
+            windows::controller::finish_player_overlay_activation(state)
+        }
+        UiShellMessage::PlayerOverlayFocused => {
+            windows::controller::on_player_overlay_focused(state)
+        }
+        UiShellMessage::ClosePlayerOverlay => {
+            windows::controller::close_player_overlay(state)
+        }
         UiShellMessage::RawWindowClosed(id) => {
             windows::controller::on_raw_window_closed(state, id)
         }

@@ -48,7 +48,6 @@ use crate::domains::user_management::update::update_user_management;
 use crate::state::State;
 use iced::Task;
 
-#[cfg(feature = "unimplemented")]
 use crate::domains::streaming::update::update_streaming;
 
 /// Domain-aware update function that routes messages to appropriate handlers
@@ -124,7 +123,6 @@ pub fn update(
         DomainMessage::Ui(ui_msg) => update_ui(state, ui_msg),
 
         // Route streaming messages to the streaming domain handler
-        #[cfg(feature = "unimplemented")]
         DomainMessage::Streaming(streaming_msg) => {
             update_streaming(state, streaming_msg)
         }

@@ -352,6 +352,27 @@ pub fn handle_event(
             })
         }
 
+        CrossDomainEvent::NativePresenterAttached => {
+            log::info!(
+                "[CrossDomain] Native presenter attached; activating player overlay"
+            );
+            ui::windows::controller::activate_player_overlay(state).task
+        }
+
+        CrossDomainEvent::NativePresenterUnavailable => {
+            log::warn!(
+                "[CrossDomain] Native presenter unavailable; dismissing player overlay"
+            );
+            ui::windows::controller::dismiss_player_overlay(state).task
+        }
+
+        CrossDomainEvent::PlaybackExited => {
+            log::info!(
+                "[CrossDomain] Playback exited; restoring the retained main window"
+            );
+            ui::windows::controller::dismiss_player_overlay(state).task
+        }
+
         // Media playback events
         CrossDomainEvent::MediaStartedPlaying(media_file) => {
             log::info!("[CrossDomain] Media started playing");

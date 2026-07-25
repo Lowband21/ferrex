@@ -50,9 +50,7 @@ use ferrex_player_api::{
     },
 };
 
-#[cfg(feature = "unimplemented")]
 use crate::domains::streaming::StreamingDomainState;
-#[cfg(feature = "unimplemented")]
 use ferrex_player_api::services::streaming::StreamingApiAdapter;
 
 use ferrex_core::player_prelude::{
@@ -296,7 +294,6 @@ impl State {
             settings_service,
         );
 
-        #[cfg(feature = "unimplemented")]
         let streaming_state = {
             // Create streaming service adapter
             let api_arc_stream = Arc::new(api_client.clone());
@@ -343,7 +340,6 @@ impl State {
                 settings_state,
             ),
 
-            #[cfg(feature = "unimplemented")]
             streaming: crate::domains::streaming::StreamingDomain::new(
                 streaming_state,
             ),

@@ -8,7 +8,6 @@ use crate::domains::media;
 use crate::domains::metadata;
 use crate::domains::player;
 use crate::domains::settings;
-#[cfg(feature = "unimplemented")]
 use crate::domains::streaming;
 use crate::domains::ui;
 
@@ -61,7 +60,6 @@ pub enum DomainMessage {
     Metadata(metadata::messages::MetadataMessage),
 
     /// Streaming/Transcoding domain
-    #[cfg(feature = "unimplemented")]
     Streaming(streaming::messages::StreamingMessage),
 
     /// Settings domain
@@ -120,7 +118,6 @@ impl From<metadata::messages::MetadataMessage> for DomainMessage {
     }
 }
 
-#[cfg(feature = "unimplemented")]
 impl From<streaming::messages::StreamingMessage> for DomainMessage {
     fn from(msg: streaming::messages::StreamingMessage) -> Self {
         DomainMessage::Streaming(msg)
@@ -160,7 +157,6 @@ impl DomainMessage {
             Self::Player(_) => "Player", // PlayerMessage doesn't have name() method yet
             Self::Ui(msg) => msg.name(),
             Self::Metadata(msg) => msg.name(),
-            #[cfg(feature = "unimplemented")]
             Self::Streaming(msg) => msg.name(),
             Self::Settings(msg) => msg.name(),
             Self::UserManagement(msg) => msg.name(),
@@ -187,7 +183,6 @@ impl std::fmt::Debug for DomainMessage {
             Self::Metadata(msg) => {
                 write!(f, "DomainMessage::Metadata({:?})", msg)
             }
-            #[cfg(feature = "unimplemented")]
             Self::Streaming(msg) => {
                 write!(f, "DomainMessage::Streaming({:?})", msg)
             }
@@ -245,6 +240,11 @@ pub enum CrossDomainEvent {
     HideWindow, // Hide the application window (e.g., for external MPV)
     RestoreWindow(bool), // Restore window with fullscreen state
     SetWindowMode(iced::window::Mode), // Set specific window mode
+    NativePresenterAttached,
+    NativePresenterUnavailable,
+    /// Playback teardown completed; dismiss any dedicated native-player host
+    /// and restore the retained main window.
+    PlaybackExited,
 
     WindowResized(iced::Size),
     DatabaseCleared, // Database was cleared, refresh needed

@@ -62,6 +62,15 @@ pub enum UiShellMessage {
     MainWindowUnfocused,
     RawWindowClosed(window::Id),
 
+    // Dedicated native-player controls overlay lifecycle
+    OpenPlayerOverlay,
+    PlayerOverlayOpened(window::Id),
+    PlayerOverlayResized(window::Id, iced::Size),
+    ActivatePlayerOverlay,
+    PlayerOverlayHandoffReady,
+    PlayerOverlayFocused,
+    ClosePlayerOverlay,
+
     // Search surface and query management
     UpdateSearchQuery(String),
     ExecuteSearch,
@@ -106,6 +115,13 @@ impl UiShellMessage {
             Self::MainWindowFocused => "UI::MainWindowFocused",
             Self::MainWindowUnfocused => "UI::MainWindowUnfocused",
             Self::RawWindowClosed(_) => "UI::RawWindowClosed",
+            Self::OpenPlayerOverlay => "UI::OpenPlayerOverlay",
+            Self::PlayerOverlayOpened(_) => "UI::PlayerOverlayOpened",
+            Self::PlayerOverlayResized(_, _) => "UI::PlayerOverlayResized",
+            Self::ActivatePlayerOverlay => "UI::ActivatePlayerOverlay",
+            Self::PlayerOverlayHandoffReady => "UI::PlayerOverlayHandoffReady",
+            Self::PlayerOverlayFocused => "UI::PlayerOverlayFocused",
+            Self::ClosePlayerOverlay => "UI::ClosePlayerOverlay",
 
             // Search surface and query management
             Self::UpdateSearchQuery(_) => "UI::UpdateSearchQuery",
@@ -161,6 +177,27 @@ impl std::fmt::Debug for UiShellMessage {
             }
             UiShellMessage::RawWindowClosed(id) => {
                 write!(f, "UI::RawWindowClosed({:?})", id)
+            }
+            UiShellMessage::OpenPlayerOverlay => {
+                write!(f, "UI::OpenPlayerOverlay")
+            }
+            UiShellMessage::PlayerOverlayOpened(id) => {
+                write!(f, "UI::PlayerOverlayOpened({:?})", id)
+            }
+            UiShellMessage::PlayerOverlayResized(id, size) => {
+                write!(f, "UI::PlayerOverlayResized({id:?}, {size:?})")
+            }
+            UiShellMessage::ActivatePlayerOverlay => {
+                write!(f, "UI::ActivatePlayerOverlay")
+            }
+            UiShellMessage::PlayerOverlayHandoffReady => {
+                write!(f, "UI::PlayerOverlayHandoffReady")
+            }
+            UiShellMessage::PlayerOverlayFocused => {
+                write!(f, "UI::PlayerOverlayFocused")
+            }
+            UiShellMessage::ClosePlayerOverlay => {
+                write!(f, "UI::ClosePlayerOverlay")
             }
             UiShellMessage::UpdateSearchQuery(_) => {
                 write!(f, "UI::UpdateSearchQuery")

@@ -6,8 +6,17 @@ use crate::{
     state::State,
 };
 use ferrex_core::player_prelude::TranscodingStatus;
-use ferrex_player_playback::redact_playback_url;
+use ferrex_player_api::services::streaming::StreamingPlaybackSource;
+use ferrex_player_playback::contract::PlaybackSource;
 use iced::Task;
+
+fn playback_source_from_streaming(
+    source: &StreamingPlaybackSource,
+) -> PlaybackSource {
+    let (header_name, header_value) = source.authorization_header();
+    PlaybackSource::new(source.uri().clone())
+        .with_header(header_name, header_value)
+}
 
 /// Handle transcoding started event
 pub fn handle_transcoding_started(
@@ -80,6 +89,7 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
                 // Map service result into legacy tuple expected downstream
                 match service.check_transcoding_status(&job_id_clone).await {
                     Ok(status) => {
+                        let playback_source = status.playback_source;
                         let converted = match status.state.as_str() {
                             "pending" => TranscodingStatus::Pending,
                             "queued" => TranscodingStatus::Queued,
@@ -93,7 +103,7 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
                                 progress: status.progress.unwrap_or(0.0),
                             },
                         };
-                        Ok((converted, None, None))
+                        Ok((converted, None, playback_source))
                     }
                     Err(e) => Err(e.to_string()),
                 }
@@ -112,10 +122,17 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
 /// Handle transcoding status update
 pub fn handle_transcoding_status_update(
     state: &mut State,
-    result: Result<(TranscodingStatus, Option<f64>, Option<String>), String>,
+    result: Result<
+        (
+            TranscodingStatus,
+            Option<f64>,
+            Option<StreamingPlaybackSource>,
+        ),
+        String,
+    >,
 ) -> DomainUpdateResult {
     match result {
-        Ok((status, duration, playlist_path)) => {
+        Ok((status, duration, playback_source)) => {
             let should_continue_checking = match &status {
                 TranscodingStatus::Pending | TranscodingStatus::Queued => true,
                 TranscodingStatus::Processing { progress } => {
@@ -163,66 +180,88 @@ pub fn handle_transcoding_status_update(
                 }
             }
 
-            // Update playlist URL if provided (when transcoding is ready)
-            if let Some(playlist_path) = playlist_path {
-                let playlist_url = if playlist_path.starts_with("http") {
-                    playlist_path
-                } else {
-                    format!("{}{}", state.server_url, playlist_path)
-                };
+            // Prepare an authenticated source-replacement message when the
+            // server publishes the selected rendition. Player::SetStreamSource
+            // owns the ordered close/reload path and preserves backend choice.
+            let reload_source = playback_source.map(|streaming_source| {
                 log::info!(
-                    "Updating playlist URL from job: {}",
-                    redact_playback_url(&playlist_url)
+                    "Updating authenticated playlist source from job: {streaming_source:?}"
                 );
+                playback_source_from_streaming(&streaming_source)
+            });
 
-                // Update the URL to the actual playlist path
-                if let Ok(url) = url::Url::parse(&playlist_url) {
-                    state.domains.player.state.current_url = Some(url);
+            if reload_source.is_some() {
+                let resume_position = state
+                    .domains
+                    .player
+                    .state
+                    .playback_snapshot()
+                    .map(|snapshot| snapshot.position.as_secs_f64())
+                    .unwrap_or(state.domains.player.state.last_valid_position);
+                if resume_position.is_finite() && resume_position >= 0.0 {
+                    state.domains.player.state.pending_resume_position =
+                        Some(resume_position as f32);
                 }
+                state.domains.streaming.state.quality_switch_count = state
+                    .domains
+                    .streaming
+                    .state
+                    .quality_switch_count
+                    .saturating_add(1);
             }
 
             // Increment check count
             state.domains.streaming.state.transcoding_check_count += 1;
 
-            // If we've checked too many times (30 checks = ~1 minute), give up and load video
-            if state.domains.streaming.state.transcoding_check_count > 30 {
-                log::warn!(
-                    "Transcoding status checks exceeded limit - loading video anyway"
-                );
+            // Do not silently fall back to the previous source when the
+            // selected rendition never becomes ready.
+            if should_continue_checking
+                && state.domains.streaming.state.transcoding_check_count > 30
+            {
+                log::warn!("Transcoding status checks exceeded limit");
                 state.domains.streaming.state.transcoding_status =
-                    Some(TranscodingStatus::Completed);
+                    Some(TranscodingStatus::Failed {
+                        error: "Timed out waiting for the selected quality"
+                            .to_string(),
+                    });
                 state.domains.streaming.state.transcoding_job_id = None;
-
-                if state.domains.player.state.video_opt.is_none()
-                    && state.domains.streaming.state.using_hls
-                {
-                    return DomainUpdateResult::task(Task::done(
-                        DomainMessage::Player(PlayerMessage::VideoReadyToPlay),
-                    ));
-                } else {
-                    return DomainUpdateResult::task(Task::none());
-                }
+                state.domains.ui.state.error_message = Some(
+                    "Timed out waiting for the selected quality".to_string(),
+                );
+                state.domains.ui.state.view = ViewState::VideoError {
+                    message: "Timed out waiting for the selected quality"
+                        .to_string(),
+                };
+                return DomainUpdateResult::task(Task::none());
             }
 
             // For HLS streaming, try to start playback during processing if we have segments
-            let should_try_playback = match &status {
-                TranscodingStatus::Processing { progress } => {
-                    // Start playback when we have at least 1% transcoded (ensures initial segments exist)
-                    // With 4-second segments, 2 segments = 8 seconds, which is <1% of most videos
-                    *progress >= 0.01
-                        && state.domains.player.state.video_opt.is_none()
-                        && state.domains.streaming.state.using_hls
-                }
-                TranscodingStatus::Completed => {
-                    // Also try when completed if not already playing
-                    state.domains.player.state.video_opt.is_none()
-                        && state.domains.streaming.state.using_hls
-                }
-                _ => false,
-            };
+            let should_try_playback = reload_source.is_none()
+                && match &status {
+                    TranscodingStatus::Processing { progress } => {
+                        // Start playback when we have at least 1% transcoded (ensures initial segments exist)
+                        // With 4-second segments, 2 segments = 8 seconds, which is <1% of most videos
+                        *progress >= 0.01
+                            && state.domains.player.state.video_opt.is_none()
+                            && state.domains.streaming.state.using_hls
+                    }
+                    TranscodingStatus::Completed => {
+                        // Also try when completed if not already playing
+                        state.domains.player.state.video_opt.is_none()
+                            && state.domains.streaming.state.using_hls
+                    }
+                    _ => false,
+                };
 
             let mut tasks: Vec<Task<DomainMessage>> = Vec::new();
             let events: Vec<CrossDomainEvent> = Vec::new();
+
+            if let Some(source) = reload_source {
+                state.domains.streaming.state.transcoding_job_id = None;
+                tasks.push(Task::done(DomainMessage::Player(
+                    PlayerMessage::SetStreamSource(source),
+                )));
+            }
 
             if should_continue_checking {
                 // Continue checking every 2 seconds
@@ -316,6 +355,7 @@ pub fn handle_transcoding_status_update(
             // Handle transcoding failures
             match &status {
                 TranscodingStatus::Failed { error } => {
+                    state.domains.streaming.state.transcoding_job_id = None;
                     log::error!("Transcoding failed: {}", error);
                     state.domains.ui.state.error_message =
                         Some(format!("Transcoding failed: {}", error));
@@ -324,6 +364,7 @@ pub fn handle_transcoding_status_update(
                     };
                 }
                 TranscodingStatus::Cancelled => {
+                    state.domains.streaming.state.transcoding_job_id = None;
                     log::warn!("Transcoding was cancelled");
                     state.domains.ui.state.error_message =
                         Some("Transcoding was cancelled".to_string());
@@ -448,5 +489,40 @@ pub fn handle_transcoding_status_update(
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn transcoded_source_reload_keeps_ticket_in_redacted_header_transport()
+     {
+        let mut state = State::default();
+        let ticket = "streaming-ticket-secret";
+        let source = StreamingPlaybackSource::with_bearer_token(
+            "https://ferrex.example/api/v1/stream/manifest".to_string(),
+            ticket.to_string(),
+        )
+        .expect("valid source");
+        assert!(!format!("{source:?}").contains(ticket));
+
+        let projected = playback_source_from_streaming(&source);
+        drop(handle_transcoding_status_update(
+            &mut state,
+            Ok((TranscodingStatus::Completed, Some(4.0), Some(source))),
+        ));
+
+        assert!(projected.uri().query().is_none());
+        assert_eq!(projected.headers().len(), 1);
+        assert_eq!(projected.headers()[0].name, "Authorization");
+        assert_eq!(
+            projected.headers()[0].value.expose_secret(),
+            format!("Bearer {ticket}")
+        );
+        assert!(!format!("{projected:?}").contains(ticket));
+        assert_eq!(state.domains.streaming.state.quality_switch_count, 1);
+        assert!(state.domains.streaming.state.transcoding_job_id.is_none());
     }
 }

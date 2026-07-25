@@ -90,6 +90,25 @@ pub fn container_notification(_theme: &iced::Theme) -> container::Style {
     }
 }
 
+pub fn container_playback_status(_theme: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color::from_rgba(
+            0.02, 0.02, 0.02, 0.82,
+        ))),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.18),
+            width: 1.0,
+            radius: 10.0.into(),
+        },
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 14.0,
+        },
+        ..Default::default()
+    }
+}
+
 pub fn container_settings_panel(_theme: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(Color::from_rgba(

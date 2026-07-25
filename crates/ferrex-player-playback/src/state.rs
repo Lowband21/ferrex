@@ -4,15 +4,22 @@
 //! UI/control flags so reducers and app shells can reason about playback without
 //! coupling every caller to the concrete video backend.
 
-use crate::diagnostics::redact_playback_url;
+use crate::{
+    contract::{
+        AudioTrack, BackendKind, BackendRequest, EndReason,
+        PlaybackCapabilities, PlaybackCommand, PlaybackSnapshot,
+        PlaybackSource, PlaybackState, PlaybackTarget, SessionGeneration,
+        SubtitleTrack, TrackId,
+    },
+    diagnostics::{PlaybackDiagnosticSnapshot, redact_playback_url},
+    session::PlaybackSession,
+};
 use ferrex_core::player_prelude::{MediaFile, MediaID};
 use iced::ContentFit;
 use std::{
     fmt,
     time::{Duration, Instant},
 };
-use subwave_core::video::types::{AudioTrack, SubtitleTrack};
-use subwave_unified::video::SubwaveVideo;
 
 // Seek bar interaction constants
 /// Visible height of the seek bar in pixels.
@@ -25,12 +32,32 @@ pub struct PlayerDomainState {
     // Current media
     pub current_media: Option<MediaFile>,
     pub current_media_id: Option<MediaID>,
+    /// Compatibility URI used by legacy streaming/external-player code.
+    /// In-process backends consume `current_source` so credentials can travel
+    /// in headers instead of this URL.
     pub current_url: Option<url::Url>,
+    pub current_source: Option<PlaybackSource>,
     pub is_resolving_stream_url: bool,
     pub stream_url_resolution_failed: bool,
 
     // Video instance (unified)
-    pub video_opt: Option<SubwaveVideo>,
+    pub video_opt: Option<PlaybackSession>,
+    pub playback_generation: SessionGeneration,
+    /// Explicit backend request for the next/current load. Auto preserves the
+    /// migration default; native-window mpv is opt-in.
+    pub backend_request: BackendRequest,
+    /// Prevent repeated terminal handling while a polling subscription remains
+    /// alive for one final turn of the UI event loop.
+    pub terminal_generation_handled: Option<SessionGeneration>,
+    /// Playback generation for which the shell has already received the
+    /// native-presenter attached handoff. Presenter snapshots can be delivered
+    /// repeatedly without repeating the window side effect.
+    pub native_presenter_attached_generation: Option<SessionGeneration>,
+    /// Playback generation for which the shell has already received the
+    /// native-presenter unavailable handoff. This remains separate from the
+    /// attached marker because an attached presenter may still fail over later
+    /// in the same playback generation.
+    pub native_presenter_unavailable_generation: Option<SessionGeneration>,
 
     // Watch progress tracking
     pub last_progress_update: Option<Instant>,
@@ -69,10 +96,13 @@ pub struct PlayerDomainState {
 
     // Track selection (NEW)
     pub available_audio_tracks: Vec<AudioTrack>,
-    pub current_audio_track: i32,
+    /// Generation that established the mirrored track catalog. Selection
+    /// notices are emitted only for later changes in this same generation.
+    pub track_catalog_generation: Option<SessionGeneration>,
+    pub current_audio_track: Option<TrackId>,
     pub available_subtitle_tracks: Vec<SubtitleTrack>,
-    pub current_subtitle_track: Option<i32>,
-    pub last_subtitle_track: Option<i32>,
+    pub current_subtitle_track: Option<TrackId>,
+    pub last_subtitle_track: Option<TrackId>,
     pub subtitles_enabled: bool,
 
     pub track_notification: Option<TrackNotification>,
@@ -92,9 +122,15 @@ pub struct PlayerDomainState {
     pub is_loading_video: bool, // Flag to prevent duplicate video loading
     pub source_duration: Option<f64>, // Original source video duration (never changes)
 
+    /// Process owner for the explicit legacy external-mpv compatibility path.
+    /// Playback state exposed to domain/view policy lives in
+    /// `external_mpv_snapshot`, not in this native handle.
     pub external_mpv_handle:
         Option<Box<crate::external_mpv::ExternalMpvHandle>>,
-    pub external_mpv_active: bool,
+    /// Backend-neutral projection of the retained external process. Keeping a
+    /// snapshot beside the process owner lets views, progress persistence, and
+    /// episode policy use the same state model as in-process backends.
+    pub external_mpv_snapshot: Option<PlaybackSnapshot>,
 }
 
 impl fmt::Debug for PlayerDomainState {
@@ -103,18 +139,34 @@ impl fmt::Debug for PlayerDomainState {
             .current_url
             .as_ref()
             .map(|url| redact_playback_url(url.as_str()));
-        let video_opt = self.video_opt.as_ref().map(|_| "SubwaveVideo(..)");
+        let current_source = self.current_source.as_ref();
+        let video_opt = self.video_opt.as_ref().map(|_| "PlaybackSession(..)");
 
         f.debug_struct("PlayerDomainState")
             .field("current_media", &self.current_media)
             .field("current_media_id", &self.current_media_id)
             .field("current_url", &current_url)
+            .field("current_source", &current_source)
             .field("is_resolving_stream_url", &self.is_resolving_stream_url)
             .field(
                 "stream_url_resolution_failed",
                 &self.stream_url_resolution_failed,
             )
             .field("video_opt", &video_opt)
+            .field("playback_generation", &self.playback_generation)
+            .field("backend_request", &self.backend_request)
+            .field(
+                "terminal_generation_handled",
+                &self.terminal_generation_handled,
+            )
+            .field(
+                "native_presenter_attached_generation",
+                &self.native_presenter_attached_generation,
+            )
+            .field(
+                "native_presenter_unavailable_generation",
+                &self.native_presenter_unavailable_generation,
+            )
             .field("last_progress_update", &self.last_progress_update)
             .field("last_progress_sent", &self.last_progress_sent)
             .field("pending_resume_position", &self.pending_resume_position)
@@ -137,6 +189,7 @@ impl fmt::Debug for PlayerDomainState {
             .field("show_settings", &self.show_settings)
             .field("last_click_time", &self.last_click_time)
             .field("available_audio_tracks", &self.available_audio_tracks)
+            .field("track_catalog_generation", &self.track_catalog_generation)
             .field("current_audio_track", &self.current_audio_track)
             .field("available_subtitle_tracks", &self.available_subtitle_tracks)
             .field("current_subtitle_track", &self.current_subtitle_track)
@@ -154,7 +207,7 @@ impl fmt::Debug for PlayerDomainState {
             .field("is_loading_video", &self.is_loading_video)
             .field("source_duration", &self.source_duration)
             .field("external_mpv_handle", &self.external_mpv_handle)
-            .field("external_mpv_active", &self.external_mpv_active)
+            .field("external_mpv_snapshot", &self.external_mpv_snapshot)
             .finish()
     }
 }
@@ -174,9 +227,15 @@ impl Default for PlayerDomainState {
             current_media: None,
             current_media_id: None,
             current_url: None,
+            current_source: None,
             is_resolving_stream_url: false,
             stream_url_resolution_failed: false,
             video_opt: None,
+            playback_generation: SessionGeneration::new(0),
+            backend_request: BackendRequest::Auto,
+            terminal_generation_handled: None,
+            native_presenter_attached_generation: None,
+            native_presenter_unavailable_generation: None,
             last_progress_update: None,
             last_progress_sent: 0.0,
             pending_resume_position: None,
@@ -199,7 +258,8 @@ impl Default for PlayerDomainState {
             show_settings: false,
             last_click_time: None,
             available_audio_tracks: Vec::new(),
-            current_audio_track: 0,
+            track_catalog_generation: None,
+            current_audio_track: None,
             available_subtitle_tracks: Vec::new(),
             current_subtitle_track: None,
             last_subtitle_track: None,
@@ -216,28 +276,8 @@ impl Default for PlayerDomainState {
             is_loading_video: false,
             source_duration: None,
             external_mpv_handle: None,
-            external_mpv_active: false,
+            external_mpv_snapshot: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_redacts_current_stream_access_token() {
-        let mut state = PlayerDomainState::default();
-        state.current_url = Some(
-            "https://ferrex.example/api/v1/stream/file?access_token=raw-secret"
-                .parse()
-                .expect("valid url"),
-        );
-
-        let debug = format!("{state:?}");
-
-        assert!(debug.contains("access_token=<redacted>"));
-        assert!(!debug.contains("raw-secret"));
     }
 }
 
@@ -254,9 +294,14 @@ impl PlayerDomainState {
         self.current_media = None;
         self.current_media_id = None;
         self.current_url = None;
+        self.current_source = None;
         self.is_resolving_stream_url = false;
         self.stream_url_resolution_failed = false;
         self.video_opt = None;
+        self.backend_request = BackendRequest::Auto;
+        self.terminal_generation_handled = None;
+        self.native_presenter_attached_generation = None;
+        self.native_presenter_unavailable_generation = None;
         self.last_progress_update = None;
         self.last_progress_sent = 0.0;
         self.pending_resume_position = None;
@@ -269,7 +314,8 @@ impl PlayerDomainState {
         self.seeking = false;
         self.seek_started_time = None;
         self.available_audio_tracks.clear();
-        self.current_audio_track = 0;
+        self.track_catalog_generation = None;
+        self.current_audio_track = None;
         self.available_subtitle_tracks.clear();
         self.current_subtitle_track = None;
         self.last_subtitle_track = None;
@@ -279,13 +325,175 @@ impl PlayerDomainState {
         self.is_loading_video = false;
         self.source_duration = None;
         self.content_fit = ContentFit::Contain;
+        self.clear_external_playback();
+    }
+
+    /// Replace the current in-process source and keep the compatibility URI
+    /// synchronized for code that does not yet understand authenticated
+    /// headers.
+    pub fn set_playback_source(&mut self, source: PlaybackSource) {
+        self.current_url = Some(source.uri().clone());
+        self.current_source = Some(source);
+    }
+
+    /// Set a URI-only source for unauthenticated compatibility paths.
+    /// Credential-bearing HTTP streams must use [`Self::set_playback_source`]
+    /// so authentication cannot be lost or reconstructed in the URI.
+    pub fn set_playback_url(&mut self, url: url::Url) {
+        self.set_playback_source(PlaybackSource::new(url));
+    }
+
+    pub fn playback_snapshot(&self) -> Option<&PlaybackSnapshot> {
+        self.video_opt
+            .as_ref()
+            .map(PlaybackSession::snapshot)
+            .or(self.external_mpv_snapshot.as_ref())
+    }
+
+    /// Whether an in-process backend currently owns a presentation session.
+    pub fn has_internal_session(&self) -> bool {
+        self.video_opt.is_some()
+    }
+
+    /// Build the backend-owned presentation element without exposing its
+    /// session handle to player views. Playback state still comes exclusively
+    /// from `playback_snapshot`.
+    #[cfg(feature = "ui")]
+    pub fn playback_widget<'a>(
+        &'a self,
+        native_host_window: Option<iced::window::Id>,
+    ) -> Option<
+        iced::Element<
+            'a,
+            crate::PlayerMessage,
+            iced::Theme,
+            iced_wgpu::Renderer,
+        >,
+    > {
+        self.video_opt
+            .as_ref()
+            .map(|session| session.widget(self.content_fit, native_host_window))
+    }
+
+    /// Whether the selected snapshot belongs to the retained external process.
+    pub fn is_external_playback(&self) -> bool {
+        self.playback_snapshot().is_some_and(|snapshot| {
+            snapshot.target.backend == BackendKind::ExternalMpv
+        })
+    }
+
+    /// Whether external-mpv polling should remain active.
+    pub fn external_playback_active(&self) -> bool {
+        self.external_mpv_snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot.target.backend == BackendKind::ExternalMpv
+                && snapshot.state.is_active()
+        })
+    }
+
+    /// Whether any backend-neutral playback lifecycle is currently active.
+    pub fn has_active_playback(&self) -> bool {
+        self.playback_snapshot()
+            .is_some_and(PlaybackSnapshot::has_active_session)
+    }
+
+    /// Start the reduced external-player lifecycle after process creation.
+    pub fn begin_external_playback(
+        &mut self,
+        generation: SessionGeneration,
+        position: f64,
+        duration: f64,
+        fullscreen: bool,
+    ) {
+        let mut snapshot = PlaybackSnapshot::new(
+            generation,
+            PlaybackTarget::EXTERNAL_MPV,
+            PlaybackCapabilities {
+                seek: true,
+                fullscreen: true,
+                native_window_fallback: true,
+                ..PlaybackCapabilities::default()
+            },
+        );
+        snapshot.state = PlaybackState::Loading;
+        snapshot.position =
+            valid_external_duration(position).unwrap_or(Duration::ZERO);
+        snapshot.duration = valid_external_duration(duration)
+            .filter(|duration| *duration > Duration::ZERO);
+        snapshot.fullscreen = fullscreen;
+        self.external_mpv_snapshot = Some(snapshot);
+    }
+
+    /// Mark the spawned process ready without exposing its native handle.
+    pub fn mark_external_playback_started(&mut self) {
+        if let Some(snapshot) = self.external_mpv_snapshot.as_mut()
+            && snapshot.state == PlaybackState::Loading
+        {
+            snapshot.state = PlaybackState::Playing;
+            snapshot.end_reason = None;
+        }
+    }
+
+    /// Reduce one copied IPC observation into the external snapshot.
+    pub fn update_external_playback_snapshot(
+        &mut self,
+        position: f64,
+        duration: f64,
+    ) {
+        let Some(snapshot) = self.external_mpv_snapshot.as_mut() else {
+            return;
+        };
+        if let Some(position) = valid_external_duration(position) {
+            snapshot.position = position;
+        }
+        if let Some(duration) = valid_external_duration(duration)
+            && duration > Duration::ZERO
+        {
+            snapshot.duration = Some(duration);
+        }
+        if snapshot.state.is_active() {
+            snapshot.state = PlaybackState::Playing;
+        }
+    }
+
+    /// Capture the final copied IPC state before dropping the process owner.
+    pub fn finish_external_playback(
+        &mut self,
+        position: f64,
+        duration: f64,
+        fullscreen: bool,
+        reason: EndReason,
+    ) {
+        self.update_external_playback_snapshot(position, duration);
+        if let Some(snapshot) = self.external_mpv_snapshot.as_mut() {
+            snapshot.state = PlaybackState::Ended;
+            snapshot.end_reason = Some(reason);
+            snapshot.fullscreen = fullscreen;
+        }
+    }
+
+    /// Drop the external process owner and its reduced lifecycle together.
+    pub fn clear_external_playback(&mut self) {
+        self.external_mpv_handle = None;
+        self.external_mpv_snapshot = None;
+    }
+
+    pub fn playback_diagnostics(&self) -> Option<PlaybackDiagnosticSnapshot> {
+        self.video_opt
+            .as_ref()
+            .map(PlaybackSession::diagnostics)
+            .or_else(|| {
+                self.external_mpv_snapshot.as_ref().map(|snapshot| {
+                    PlaybackDiagnosticSnapshot::from_snapshot(
+                        snapshot,
+                        BackendRequest::Exact(PlaybackTarget::EXTERNAL_MPV),
+                    )
+                })
+            })
     }
 
     pub fn is_playing(&self) -> bool {
-        self.video_opt
-            .as_ref()
-            .map(|v| !v.paused())
-            .unwrap_or(false)
+        self.playback_snapshot()
+            .is_some_and(PlaybackSnapshot::is_playing)
     }
 
     pub fn update_controls(&mut self, in_use: bool) {
@@ -324,7 +532,7 @@ impl PlayerDomainState {
     /// Stop native/internal playback and release the video handle without resetting all state
     pub fn stop_native_playback(&mut self) {
         if let Some(mut video) = self.video_opt.take() {
-            video.set_paused(true);
+            let _ = video.apply_command(PlaybackCommand::Stop);
             drop(video);
         }
         self.seeking = false;
@@ -332,5 +540,143 @@ impl PlayerDomainState {
         self.last_seek_position = None;
         self.pending_seek_position = None;
         self.last_seek_time = None;
+    }
+}
+
+fn valid_external_duration(seconds: f64) -> Option<Duration> {
+    (seconds.is_finite() && seconds >= 0.0)
+        .then(|| Duration::try_from_secs_f64(seconds).ok())
+        .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_does_not_reuse_session_generation() {
+        let mut state = PlayerDomainState {
+            playback_generation: SessionGeneration::new(42),
+            native_presenter_attached_generation: Some(SessionGeneration::new(
+                41,
+            )),
+            native_presenter_unavailable_generation: Some(
+                SessionGeneration::new(41),
+            ),
+            current_source: Some(
+                PlaybackSource::new(
+                    "https://ferrex.example/api/v1/stream/media"
+                        .parse()
+                        .unwrap(),
+                )
+                .with_header("Authorization", "Bearer secret"),
+            ),
+            ..PlayerDomainState::default()
+        };
+
+        state.reset();
+
+        assert_eq!(state.playback_generation, SessionGeneration::new(42));
+        assert_eq!(state.backend_request, BackendRequest::Auto);
+        assert_eq!(state.terminal_generation_handled, None);
+        assert_eq!(state.native_presenter_attached_generation, None);
+        assert_eq!(state.native_presenter_unavailable_generation, None);
+        assert!(state.current_url.is_none());
+        assert!(state.current_source.is_none());
+    }
+
+    #[test]
+    fn external_process_lifecycle_reduces_into_the_neutral_snapshot() {
+        let mut state = PlayerDomainState::default();
+        let generation = SessionGeneration::new(9);
+
+        state.begin_external_playback(
+            generation,
+            f64::NAN,
+            f64::INFINITY,
+            true,
+        );
+        let snapshot = state.playback_snapshot().expect("external snapshot");
+        assert_eq!(snapshot.generation, generation);
+        assert_eq!(snapshot.target, PlaybackTarget::EXTERNAL_MPV);
+        assert_eq!(snapshot.state, PlaybackState::Loading);
+        assert_eq!(snapshot.position, Duration::ZERO);
+        assert_eq!(snapshot.duration, None);
+        assert!(snapshot.fullscreen);
+        assert!(state.external_playback_active());
+
+        state.mark_external_playback_started();
+        state.update_external_playback_snapshot(12.5, 100.0);
+        let snapshot = state.playback_snapshot().expect("updated snapshot");
+        assert_eq!(snapshot.state, PlaybackState::Playing);
+        assert_eq!(snapshot.position, Duration::from_millis(12_500));
+        assert_eq!(snapshot.duration, Some(Duration::from_secs(100)));
+        assert!(state.is_external_playback());
+        assert!(state.has_active_playback());
+
+        state.finish_external_playback(42.0, 100.0, false, EndReason::Eof);
+        let snapshot = state.playback_snapshot().expect("terminal snapshot");
+        assert_eq!(snapshot.state, PlaybackState::Ended);
+        assert_eq!(snapshot.end_reason, Some(EndReason::Eof));
+        assert!(!state.external_playback_active());
+        let diagnostics = state
+            .playback_diagnostics()
+            .expect("external playback remains diagnosable after exit");
+        assert_eq!(diagnostics.selected_target, PlaybackTarget::EXTERNAL_MPV);
+        assert_eq!(
+            diagnostics.requested_backend,
+            BackendRequest::Exact(PlaybackTarget::EXTERNAL_MPV)
+        );
+        assert_eq!(
+            diagnostics.summary().selected_backend,
+            "mpv (external process)"
+        );
+
+        state.clear_external_playback();
+        assert!(state.playback_snapshot().is_none());
+    }
+
+    #[test]
+    fn reset_clears_external_snapshot_ownership() {
+        let mut state = PlayerDomainState::default();
+        state.begin_external_playback(
+            SessionGeneration::new(4),
+            3.0,
+            20.0,
+            false,
+        );
+
+        state.reset();
+
+        assert!(state.external_mpv_snapshot.is_none());
+        assert!(state.external_mpv_handle.is_none());
+        assert!(!state.is_external_playback());
+    }
+
+    #[test]
+    fn debug_redacts_current_stream_access_token() {
+        let state = PlayerDomainState {
+            current_url: Some(
+                "https://ferrex.example/api/v1/stream/file?access_token=raw-secret"
+                    .parse()
+                    .expect("valid url"),
+            ),
+            current_source: Some(
+                PlaybackSource::new(
+                    "https://ferrex.example/api/v1/stream/file"
+                        .parse()
+                        .unwrap(),
+                )
+                .with_header("Authorization", "Bearer header-secret"),
+            ),
+            ..PlayerDomainState::default()
+        };
+
+        let debug = format!("{state:?}");
+
+        assert!(debug.contains("access_token=<redacted>"));
+        assert!(debug.contains("Authorization"));
+        assert!(!debug.contains("raw-secret"));
+        assert!(!debug.contains("header-secret"));
     }
 }

@@ -6,7 +6,9 @@
 /// Playback subscription DTOs.
 pub mod subscriptions;
 
+use crate::contract::{ChapterId, EditionId, PlaybackSource, TrackId};
 use ferrex_core::player_prelude::{MediaFile, MediaID};
+use ferrex_player_api::services::streaming::TranscodeQualityProfile;
 use iced::ContentFit;
 use std::fmt;
 use std::time::Duration;
@@ -50,13 +52,30 @@ pub enum PlayerMessage {
     VideoLoaded(bool), // Success flag
     VideoReadyToPlay, // Video is ready to be loaded and played (from streaming domain)
     EndOfStream,
-    NewFrame,
+    /// Synchronize a legacy adapter snapshot on the bounded controls timer,
+    /// independently of decoded-frame presentation.
+    PlaybackSnapshotTick,
+    /// Drain copied events from asynchronous native backends without tying
+    /// state updates to decoded-frame redraws.
+    PlaybackEventsReady,
+    /// Capture the renderer window's raw host on the Iced event-loop thread.
+    CaptureNativeVideoHost(iced::window::Id),
+    /// Completion of one raw-host capture. The native handle itself never
+    /// enters the message channel.
+    NativeVideoHostCaptured {
+        window_id: iced::window::Id,
+        result: Result<(), String>,
+    },
+    /// Drain UI-thread-local presenter effects into `PlaybackSnapshot`.
+    NativePresenterUpdated,
+    /// Refresh native-root geometry/visibility independently of mpv events.
+    NativePresenterRefresh,
     Reload,
 
     // External player control
     PlayExternal,
-    // Internal: set resolved stream URL and trigger playback
-    SetStreamUrl(String),
+    // Internal: set a resolved, redacted source and trigger playback.
+    SetStreamSource(PlaybackSource),
     // Internal: surface stream authorization failures before opening a renderer
     StreamUrlResolutionFailed(String),
 
@@ -72,10 +91,13 @@ pub enum PlayerMessage {
     // Settings
     SetPlaybackSpeed(f64),
     SetContentFit(ContentFit),
+    QualityProfileSelected(TranscodeQualityProfile),
 
     // Track selection
-    AudioTrackSelected(i32),
-    SubtitleTrackSelected(Option<i32>),
+    AudioTrackSelected(TrackId),
+    SubtitleTrackSelected(Option<TrackId>),
+    ChapterSelected(ChapterId),
+    EditionSelected(EditionId),
     ToggleSubtitles,
     ToggleSubtitleMenu,
     ToggleQualityMenu,
@@ -90,7 +112,10 @@ pub enum PlayerMessage {
 
     // External player status messages
     ExternalPlaybackStarted,
-    ExternalPlaybackUpdate { position: f64, duration: f64 },
+    ExternalPlaybackUpdate {
+        position: f64,
+        duration: f64,
+    },
     ExternalPlaybackEnded,
     PollExternalMpv,
     ProgressHeartbeat,
@@ -148,13 +173,34 @@ impl fmt::Debug for PlayerMessage {
             }
             PlayerMessage::VideoReadyToPlay => write!(f, "VideoReadyToPlay"),
             PlayerMessage::EndOfStream => write!(f, "EndOfStream"),
-            PlayerMessage::NewFrame => write!(f, "NewFrame"),
+            PlayerMessage::PlaybackSnapshotTick => {
+                write!(f, "PlaybackSnapshotTick")
+            }
+            PlayerMessage::PlaybackEventsReady => {
+                write!(f, "PlaybackEventsReady")
+            }
+            PlayerMessage::CaptureNativeVideoHost(_) => {
+                write!(f, "CaptureNativeVideoHost(<window>)")
+            }
+            PlayerMessage::NativeVideoHostCaptured { result, .. } => {
+                write!(
+                    f,
+                    "NativeVideoHostCaptured({})",
+                    if result.is_ok() { "ok" } else { "error" }
+                )
+            }
+            PlayerMessage::NativePresenterUpdated => {
+                write!(f, "NativePresenterUpdated")
+            }
+            PlayerMessage::NativePresenterRefresh => {
+                write!(f, "NativePresenterRefresh")
+            }
             PlayerMessage::Reload => write!(f, "Reload"),
 
             // External player control
             PlayerMessage::PlayExternal => write!(f, "PlayExternal"),
-            PlayerMessage::SetStreamUrl(_) => {
-                write!(f, "SetStreamUrl(<redacted>)")
+            PlayerMessage::SetStreamSource(_) => {
+                write!(f, "SetStreamSource(<redacted>)")
             }
             PlayerMessage::StreamUrlResolutionFailed(_) => {
                 write!(f, "StreamUrlResolutionFailed(<redacted>)")
@@ -180,6 +226,9 @@ impl fmt::Debug for PlayerMessage {
             PlayerMessage::SetContentFit(fit) => {
                 write!(f, "SetContentFit({:?})", fit)
             }
+            PlayerMessage::QualityProfileSelected(profile) => {
+                write!(f, "QualityProfileSelected({profile})")
+            }
 
             // Track selection
             PlayerMessage::AudioTrackSelected(track) => {
@@ -189,6 +238,12 @@ impl fmt::Debug for PlayerMessage {
                 Some(t) => write!(f, "SubtitleTrackSelected(Some({}))", t),
                 None => write!(f, "SubtitleTrackSelected(None)"),
             },
+            PlayerMessage::ChapterSelected(chapter) => {
+                write!(f, "ChapterSelected({})", chapter.as_str())
+            }
+            PlayerMessage::EditionSelected(edition) => {
+                write!(f, "EditionSelected({})", edition.as_str())
+            }
             PlayerMessage::ToggleSubtitles => write!(f, "ToggleSubtitles"),
             PlayerMessage::ToggleSubtitleMenu => {
                 write!(f, "ToggleSubtitleMenu")

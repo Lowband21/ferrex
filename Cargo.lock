@@ -2387,17 +2387,21 @@ dependencies = [
  "ferrex-core",
  "ferrex-player-api",
  "ferrex-player-foundation",
+ "futures",
  "iced",
  "iced_wgpu",
  "log",
  "lucide-icons",
  "profiling",
+ "serde",
  "serde_json",
  "subwave_core",
  "subwave_unified",
+ "thiserror 2.0.18",
  "tokio",
  "url",
  "urlencoding",
+ "zeroize",
 ]
 
 [[package]]
@@ -3106,7 +3110,7 @@ dependencies = [
 [[package]]
 name = "gio-sys"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#794ef152fa18d0dfd908471bd160c438aca8041c"
 dependencies = [
  "glib-sys",
  "gobject-sys",
@@ -3135,7 +3139,7 @@ checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
 [[package]]
 name = "glib"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#794ef152fa18d0dfd908471bd160c438aca8041c"
 dependencies = [
  "bitflags 2.11.0",
  "futures-channel",
@@ -3155,7 +3159,7 @@ dependencies = [
 [[package]]
 name = "glib-macros"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#794ef152fa18d0dfd908471bd160c438aca8041c"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3166,7 +3170,7 @@ dependencies = [
 [[package]]
 name = "glib-sys"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#794ef152fa18d0dfd908471bd160c438aca8041c"
 dependencies = [
  "libc",
  "system-deps",
@@ -3202,7 +3206,7 @@ dependencies = [
 [[package]]
 name = "gobject-sys"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#794ef152fa18d0dfd908471bd160c438aca8041c"
 dependencies = [
  "glib-sys",
  "libc",
@@ -3263,7 +3267,7 @@ dependencies = [
 [[package]]
 name = "gstreamer"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#186dbc5dff6e5cc4330ef0287a83b37065cc4567"
 dependencies = [
  "cfg-if",
  "futures-channel",
@@ -3271,7 +3275,7 @@ dependencies = [
  "futures-util",
  "glib",
  "gstreamer-sys",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "kstring",
  "libc",
  "muldiv",
@@ -3287,7 +3291,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-app"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#186dbc5dff6e5cc4330ef0287a83b37065cc4567"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -3301,7 +3305,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-app-sys"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#186dbc5dff6e5cc4330ef0287a83b37065cc4567"
 dependencies = [
  "glib-sys",
  "gstreamer-base-sys",
@@ -3313,7 +3317,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-base"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#186dbc5dff6e5cc4330ef0287a83b37065cc4567"
 dependencies = [
  "atomic_refcell",
  "cfg-if",
@@ -3326,7 +3330,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-base-sys"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#186dbc5dff6e5cc4330ef0287a83b37065cc4567"
 dependencies = [
  "glib-sys",
  "gobject-sys",
@@ -3338,7 +3342,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-sys"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#186dbc5dff6e5cc4330ef0287a83b37065cc4567"
 dependencies = [
  "cfg-if",
  "glib-sys",
@@ -3350,7 +3354,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-video"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#186dbc5dff6e5cc4330ef0287a83b37065cc4567"
 dependencies = [
  "cfg-if",
  "futures-channel",
@@ -3365,7 +3369,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-video-sys"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#186dbc5dff6e5cc4330ef0287a83b37065cc4567"
 dependencies = [
  "glib-sys",
  "gobject-sys",
@@ -4265,6 +4269,15 @@ name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
 dependencies = [
  "either",
 ]

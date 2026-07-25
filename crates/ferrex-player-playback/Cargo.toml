@@ -43,10 +43,14 @@ lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git"
 subwave_unified = { git = "https://github.com/Lowband21/subwave.git", branch = "main" }
 subwave_core = { git = "https://github.com/Lowband21/subwave.git", branch = "main" }
 
+futures.workspace = true
 log.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 url = "2"
+zeroize.workspace = true
 urlencoding = "2"
 dirs = "6"
 profiling = { version = "1.0", optional = true }

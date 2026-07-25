@@ -29,6 +29,10 @@ use crate::{
     },
     state::State,
 };
+use ferrex_player_playback::{
+    contract::{BackendKind, PlaybackSnapshot, PlaybackState},
+    view::{playback_status_overlay, playback_surface_status},
+};
 use iced::{
     Alignment, Background, Border, Color, Element, Length, Padding, Shadow,
     Subscription, Theme, Vector,
@@ -58,6 +62,13 @@ static OVERLAY_RUNTIME: Mutex<OverlayRuntime> = Mutex::new(OverlayRuntime {
     focused: None,
     controls_hidden: false,
 });
+
+fn player_viewport_size(state: &State) -> iced::Size {
+    state
+        .windows
+        .player_overlay_size()
+        .unwrap_or(state.window_size)
+}
 
 fn overlay_runtime() -> MutexGuard<'static, OverlayRuntime> {
     OVERLAY_RUNTIME
@@ -317,16 +328,17 @@ struct TenFootPlayerInputSnapshot {
 impl TenFootPlayerInputSnapshot {
     fn from_state(state: &State) -> Self {
         let player = &state.domains.player.state;
-        let external_active = player.external_mpv_active;
-        let has_internal_video = player.video_opt.is_some() && !external_active;
+        let external_active = player.external_playback_active();
+        let has_internal_video = player.has_internal_session();
         let overlay_visible = overlay_controls_visible(player);
+        let viewport = player_viewport_size(state);
 
         Self {
             has_internal_video,
             external_active,
             overlay_visible,
-            viewport_width_bits: state.window_size.width.to_bits(),
-            viewport_height_bits: state.window_size.height.to_bits(),
+            viewport_width_bits: viewport.width.to_bits(),
+            viewport_height_bits: viewport.height.to_bits(),
         }
     }
 
@@ -464,29 +476,36 @@ pub fn keyboard_subscription(state: &State) -> Subscription<DomainMessage> {
 }
 
 /// Build the 10-foot player view while preserving the existing video widget.
-pub fn view_player(state: &State) -> Element<'_, PlayerMessage, Theme> {
+pub fn view_player(
+    state: &State,
+    native_host_window: Option<iced::window::Id>,
+) -> Element<'_, PlayerMessage, Theme> {
     let player = &state.domains.player.state;
 
-    if player.external_mpv_active {
-        return external_player_view(player);
+    if let Some(snapshot) = player
+        .playback_snapshot()
+        .filter(|snapshot| snapshot.target.backend == BackendKind::ExternalMpv)
+    {
+        return external_player_view(snapshot);
     }
 
-    if let Some(video) = &player.video_opt {
+    if let Some(video) = player.playback_widget(native_host_window) {
         let video_surface: Element<
             '_,
             PlayerMessage,
             Theme,
             iced_wgpu::Renderer,
-        > = mouse_area(
-            video.widget(player.content_fit, Some(PlayerMessage::NewFrame)),
-        )
-        .on_press(PlayerMessage::VideoClicked)
-        .into();
+        > = mouse_area(video)
+            .on_press(PlayerMessage::VideoClicked)
+            .into();
 
         let mut layers: Vec<
             Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer>,
         > = vec![video_surface];
 
+        if let Some(status) = playback_surface_status(player) {
+            layers.push(playback_status_overlay(status));
+        }
         if overlay_controls_visible(player) {
             layers.push(overlay(state));
         }
@@ -533,11 +552,9 @@ fn overlay(
     state: &State,
 ) -> Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> {
     let player = &state.domains.player.state;
-    let focused_id = focused_id_for_viewport(
-        state.window_size.width,
-        state.window_size.height,
-        true,
-    );
+    let viewport = player_viewport_size(state);
+    let focused_id =
+        focused_id_for_viewport(viewport.width, viewport.height, true);
     let title = player
         .current_media
         .as_ref()
@@ -574,10 +591,8 @@ fn overlay(
     .padding(PlayerOverlayLayout::top_bar_padding())
     .style(top_gradient_style);
 
-    let progress_layout = PlayerOverlayLayout::progress_rect(
-        state.window_size.width,
-        state.window_size.height,
-    );
+    let progress_layout =
+        PlayerOverlayLayout::progress_rect(viewport.width, viewport.height);
     let seek = container(
         mouse_area(progress_bar(ratio)).on_press(PlayerMessage::SeekBarPressed),
     )
@@ -721,14 +736,22 @@ fn overlay(
 }
 
 fn player_status_label(player: &PlayerDomainState) -> &'static str {
-    if player.seeking {
-        "SEEKING"
-    } else if player.dragging {
-        "SCRUBBING"
-    } else if player.is_playing() {
-        "PLAYING"
-    } else {
-        "PAUSED"
+    if player.dragging {
+        return "SCRUBBING";
+    }
+
+    match player.playback_snapshot().map(|snapshot| snapshot.state) {
+        Some(PlaybackState::Loading) => "LOADING",
+        Some(PlaybackState::Buffering) => "BUFFERING",
+        Some(PlaybackState::Seeking) => "SEEKING",
+        Some(PlaybackState::Playing) => "PLAYING",
+        Some(PlaybackState::Paused) => "PAUSED",
+        Some(PlaybackState::Stopping) => "STOPPING",
+        Some(PlaybackState::Failed) => "ERROR",
+        Some(PlaybackState::Ended | PlaybackState::Terminated) => "ENDED",
+        Some(PlaybackState::Idle) => "READY",
+        None if player.seeking => "SEEKING",
+        None => "PAUSED",
     }
 }
 
@@ -862,12 +885,17 @@ fn notification_overlay<'a>(
 }
 
 fn external_player_view(
-    player: &PlayerDomainState,
+    snapshot: &PlaybackSnapshot,
 ) -> Element<'static, PlayerMessage, Theme> {
-    let position =
-        crate::domains::player::view::format_time(player.last_valid_position);
-    let duration =
-        crate::domains::player::view::format_time(player.last_valid_duration);
+    let position = crate::domains::player::view::format_time(
+        snapshot.position.as_secs_f64(),
+    );
+    let duration = crate::domains::player::view::format_time(
+        snapshot
+            .duration
+            .map(|duration| duration.as_secs_f64())
+            .unwrap_or_default(),
+    );
     centered_status_view(
         "Playing externally",
         format!("{position} / {duration} • MPV is handling playback"),
@@ -908,9 +936,7 @@ fn centered_status_view(
 }
 
 fn overlay_controls_visible(player: &PlayerDomainState) -> bool {
-    let has_internal_video =
-        player.video_opt.is_some() && !player.external_mpv_active;
-    if !has_internal_video {
+    if !player.has_internal_session() {
         return false;
     }
 

@@ -69,6 +69,12 @@ pub fn view(
             state,
         );
     }
+    if state.windows.is_player_overlay_window(window_id) {
+        // A dedicated native-root overlay renders no library shell, header, or
+        // background scene. Its surface consists solely of player controls,
+        // status plates, and the transparent native-video slot region.
+        return view_player(state, Some(window_id)).map(DomainMessage::Player);
+    }
     // debug timing disabled in tests to simplify renderer unification
     // Check for first-run setup
     // Check authentication state
@@ -124,7 +130,9 @@ pub fn view(
             ViewState::AdminUsers => {
                 view_admin_users(state).map(DomainMessage::from)
             }
-            ViewState::Player => view_player(state).map(DomainMessage::Player),
+            ViewState::Player => {
+                view_player(state, None).map(DomainMessage::Player)
+            }
             ViewState::LoadingVideo { url } => {
                 if state.interface_mode.is_tenfoot() {
                     view_tenfoot_loading_status(url).map(DomainMessage::Player)
@@ -848,11 +856,14 @@ mod tests {
     ),
     profiling::function
 )]
-fn view_player(state: &State) -> Element<'_, player::messages::PlayerMessage> {
+fn view_player(
+    state: &State,
+    native_host_window: Option<iced::window::Id>,
+) -> Element<'_, player::messages::PlayerMessage> {
     if state.interface_mode.is_tenfoot() {
-        view_tenfoot_player(state)
+        view_tenfoot_player(state, native_host_window)
     } else {
-        state.domains.player.state.view()
+        state.domains.player.state.view(native_host_window)
     }
 }
 

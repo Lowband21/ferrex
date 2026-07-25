@@ -4,13 +4,17 @@
 //! affordances using the state owned by this crate.
 
 use super::theme;
-use super::track_selection::format_subtitle_track;
+use super::track_selection::{
+    chapter_at_position, format_chapter, format_edition, format_subtitle_track,
+};
 use crate::{
     constants::seeking::*,
+    contract::{AudioTrack, ChapterId, EditionId, SubtitleTrack},
     messages::PlayerMessage,
     state::PlayerDomainState,
     ui_support::{icon_text, lucide_font},
 };
+use ferrex_player_api::services::streaming::TranscodeQualityProfile;
 use iced::ContentFit;
 use iced::Theme;
 use iced::{
@@ -21,8 +25,6 @@ use iced::{
     },
 };
 use lucide_icons::Icon;
-use subwave_core::video::types::{AudioTrack, SubtitleTrack};
-use subwave_unified::video::BackendPreference;
 
 /// Helper function to create a control button with icon
 fn icon_button(
@@ -220,13 +222,15 @@ impl PlayerDomainState {
             // Build a Wayland-only backend toggle element
             let backend_toggle: Element<PlayerMessage, Theme> =
                 if std::env::var("WAYLAND_DISPLAY").is_ok() {
-                    let label =
-                        match self.video_opt.as_ref().map(|v| v.backend()) {
-                            Some(BackendPreference::ForceAppsink) => {
-                                "Use Wayland"
-                            }
-                            _ => "Use AppSink",
-                        };
+                    let label = if self
+                        .video_opt
+                        .as_ref()
+                        .is_some_and(|video| video.is_appsink())
+                    {
+                        "Use Wayland"
+                    } else {
+                        "Use AppSink"
+                    };
                     button(text(label).size(14))
                         .on_press(PlayerMessage::ToggleAppsinkBackend)
                         .style(theme::button_transparent)
@@ -423,6 +427,13 @@ impl PlayerDomainState {
                 ]
                 .align_y(Alignment::Center),
                 Space::new().height(Length::Fixed(15.0)),
+                // Evidence-qualified active backend diagnostics
+                text("Playback Diagnostics")
+                    .size(15)
+                    .style(theme::text_muted),
+                Space::new().height(Length::Fixed(8.0)),
+                self.build_playback_diagnostic_summary(),
+                Space::new().height(Length::Fixed(15.0)),
                 // Audio & Subtitles section
                 text("Audio & Subtitles").size(15).style(theme::text_muted),
                 Space::new().height(Length::Fixed(8.0)),
@@ -431,6 +442,9 @@ impl PlayerDomainState {
                 Space::new().height(Length::Fixed(10.0)),
                 // Subtitle controls
                 self.build_subtitle_controls(),
+                Space::new().height(Length::Fixed(10.0)),
+                // Chapters and editions exposed by the active backend
+                self.build_media_structure_controls(),
                 Space::new().height(Length::Fixed(10.0)),
                 // HDR information
                 if self.is_hdr_content {
@@ -548,6 +562,76 @@ impl PlayerDomainState {
         .into()
     }
 
+    /// Build a concise, redacted session summary. Hardware decoding and HDR
+    /// are described only as configured policy or observed evidence.
+    fn build_playback_diagnostic_summary(
+        &self,
+    ) -> Element<'_, PlayerMessage, Theme, iced::Renderer> {
+        let Some(diagnostics) = self.playback_diagnostics() else {
+            return container(
+                text("No active playback session")
+                    .size(11)
+                    .style(theme::text_dim),
+            )
+            .padding(6)
+            .style(theme::container_subtle)
+            .into();
+        };
+        let summary = diagnostics.summary();
+        let mut details = column![
+            text(format!("Requested: {}", summary.requested_backend))
+                .size(11)
+                .style(theme::text_dim),
+            text(format!("Backend: {}", summary.selected_backend))
+                .size(11)
+                .style(theme::text_bright),
+            text(format!("Presentation: {}", summary.presentation_mode))
+                .size(11)
+                .style(theme::text_dim),
+            text(format!("Integrated: {}", summary.integrated_presentation))
+                .size(11)
+                .width(Length::Fill)
+                .style(theme::text_dim),
+            text(format!("HDR content: {}", summary.hdr_content_evidence))
+                .size(11)
+                .style(theme::text_dim),
+            text(format!(
+                "Native HDR evidence: {}",
+                summary.native_hdr_evidence
+            ))
+            .size(11)
+            .style(theme::text_dim),
+            text(format!(
+                "Hardware decode policy: {}",
+                summary.hardware_decode_expectation
+            ))
+            .size(11)
+            .style(theme::text_dim),
+            text(format!(
+                "Hardware decoder observed: {}",
+                summary.observed_hardware_decoder
+            ))
+            .size(11)
+            .style(theme::text_dim),
+        ]
+        .spacing(2);
+
+        if let Some(reason) = summary.fallback_reason {
+            details = details.push(
+                text(format!("Fallback: {reason}"))
+                    .size(11)
+                    .width(Length::Fill)
+                    .style(theme::text_bright),
+            );
+        }
+
+        container(details)
+            .width(Length::Fill)
+            .padding(6)
+            .style(theme::container_subtle)
+            .into()
+    }
+
     /// Build audio track selector
     fn build_audio_track_selector(
         &self,
@@ -563,10 +647,13 @@ impl PlayerDomainState {
                 Space::new().width(Length::Fill),
                 pick_list(
                     self.available_audio_tracks.clone(),
-                    self.available_audio_tracks
-                        .get(self.current_audio_track as usize)
-                        .cloned(),
-                    |track| PlayerMessage::AudioTrackSelected(track.index)
+                    self.current_audio_track.as_ref().and_then(|selected| {
+                        self.available_audio_tracks
+                            .iter()
+                            .find(|track| &track.id == selected)
+                            .cloned()
+                    }),
+                    |track| PlayerMessage::AudioTrackSelected(track.id)
                 )
                 .width(Length::Fixed(200.0))
                 .style(theme::pick_list_dark::<AudioTrack>)
@@ -597,10 +684,12 @@ impl PlayerDomainState {
             let current_selection = if !self.subtitles_enabled {
                 Some(SubtitleOption::Disabled)
             } else {
-                self.current_subtitle_track.and_then(|idx| {
+                self.current_subtitle_track.as_ref().and_then(|selected| {
                     self.available_subtitle_tracks
-                        .get(idx as usize)
-                        .map(|track| SubtitleOption::Track(track.clone()))
+                        .iter()
+                        .find(|track| &track.id == selected)
+                        .cloned()
+                        .map(SubtitleOption::Track)
                 })
             };
 
@@ -613,9 +702,7 @@ impl PlayerDomainState {
                             PlayerMessage::SubtitleTrackSelected(None)
                         }
                         SubtitleOption::Track(track) => {
-                            PlayerMessage::SubtitleTrackSelected(Some(
-                                track.index,
-                            ))
+                            PlayerMessage::SubtitleTrackSelected(Some(track.id))
                         }
                     }
                 })
@@ -628,11 +715,103 @@ impl PlayerDomainState {
         }
     }
 
+    /// Build chapter and edition selectors when the active backend advertises
+    /// the corresponding capability.
+    fn build_media_structure_controls(
+        &self,
+    ) -> Element<'_, PlayerMessage, Theme, iced::Renderer> {
+        let Some(snapshot) = self.playback_snapshot() else {
+            return Space::new().height(Length::Fixed(0.0)).into();
+        };
+        let show_chapters = snapshot.capabilities.chapter_selection
+            && !snapshot.chapters.is_empty();
+        let show_editions = snapshot.capabilities.edition_selection
+            && !snapshot.editions.is_empty();
+        if !show_chapters && !show_editions {
+            return Space::new().height(Length::Fixed(0.0)).into();
+        }
+
+        let mut controls = column![
+            text("Media Structure").size(15).style(theme::text_muted),
+            Space::new().height(Length::Fixed(8.0)),
+        ]
+        .spacing(5);
+
+        if show_chapters {
+            let options = snapshot
+                .chapters
+                .iter()
+                .enumerate()
+                .map(|(index, chapter)| ChapterOption {
+                    id: chapter.id.clone(),
+                    label: format_chapter(chapter, index),
+                })
+                .collect::<Vec<_>>();
+            let current_id = snapshot.current_chapter.as_ref().or_else(|| {
+                chapter_at_position(&snapshot.chapters, snapshot.position)
+                    .map(|chapter| &chapter.id)
+            });
+            let selected = current_id.and_then(|current| {
+                options.iter().find(|option| &option.id == current).cloned()
+            });
+            controls = controls.push(
+                row![
+                    text("Chapter:").size(14),
+                    Space::new().width(Length::Fill),
+                    pick_list(options, selected, |option| {
+                        PlayerMessage::ChapterSelected(option.id)
+                    })
+                    .width(Length::Fixed(200.0))
+                    .style(theme::pick_list_dark::<ChapterOption>)
+                    .text_size(14),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+
+        if show_editions {
+            let options = snapshot
+                .editions
+                .iter()
+                .enumerate()
+                .map(|(index, edition)| EditionOption {
+                    id: edition.id.clone(),
+                    label: format_edition(edition, index),
+                })
+                .collect::<Vec<_>>();
+            let current_id = snapshot.current_edition.as_ref().or_else(|| {
+                snapshot
+                    .editions
+                    .iter()
+                    .find(|edition| edition.is_default)
+                    .map(|edition| &edition.id)
+            });
+            let selected = current_id.and_then(|current| {
+                options.iter().find(|option| &option.id == current).cloned()
+            });
+            controls = controls.push(
+                row![
+                    text("Edition:").size(14),
+                    Space::new().width(Length::Fill),
+                    pick_list(options, selected, |option| {
+                        PlayerMessage::EditionSelected(option.id)
+                    })
+                    .width(Length::Fixed(200.0))
+                    .style(theme::pick_list_dark::<EditionOption>)
+                    .text_size(14),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+
+        controls.into()
+    }
+
     /// Build the quality/tone mapping menu popup
     pub fn build_quality_menu(
         &self,
     ) -> iced::Element<'_, PlayerMessage, Theme, iced::Renderer> {
-        let content = column![
+        let mut content = column![
             // Header
             row![
                 text("Video Settings").size(16).style(theme::text_bright),
@@ -646,6 +825,33 @@ impl PlayerDomainState {
             Space::new().height(Length::Fixed(15.0)),
         ]
         .spacing(5);
+
+        for profile in TranscodeQualityProfile::ALL {
+            let selected = self.current_quality_profile.as_deref()
+                == Some(profile.as_str());
+            let check: Element<'_, PlayerMessage> = if selected {
+                text(Icon::Check.unicode())
+                    .font(lucide_font())
+                    .size(14)
+                    .into()
+            } else {
+                Space::new().width(Length::Fixed(14.0)).into()
+            };
+            content = content.push(
+                button(
+                    row![
+                        check,
+                        Space::new().width(Length::Fixed(8.0)),
+                        text(profile.display_name()).size(14),
+                    ]
+                    .align_y(Alignment::Center),
+                )
+                .on_press(PlayerMessage::QualityProfileSelected(profile))
+                .width(Length::Fill)
+                .style(theme::button_menu_item)
+                .padding([6, 10]),
+            );
+        }
 
         container(content.padding(20))
             .style(theme::container_subtitle_menu)
@@ -702,8 +908,8 @@ impl PlayerDomainState {
                         .iter()
                         .map(|track| {
                             let is_selected = self.subtitles_enabled
-                                && self.current_subtitle_track
-                                    == Some(track.index);
+                                && self.current_subtitle_track.as_ref()
+                                    == Some(&track.id);
 
                             button({
                                 let check_icon: Element<PlayerMessage> =
@@ -726,7 +932,7 @@ impl PlayerDomainState {
                                 .align_y(Alignment::Center)
                             })
                             .on_press(PlayerMessage::SubtitleTrackSelected(
-                                Some(track.index),
+                                Some(track.id.clone()),
                             ))
                             .width(Length::Fill)
                             .style(theme::button_menu_item)
@@ -743,6 +949,30 @@ impl PlayerDomainState {
         .width(Length::Fixed(280.0))
         .style(theme::container_subtitle_menu)
         .into()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChapterOption {
+    id: ChapterId,
+    label: String,
+}
+
+impl std::fmt::Display for ChapterOption {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EditionOption {
+    id: EditionId,
+    label: String,
+}
+
+impl std::fmt::Display for EditionOption {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label)
     }
 }
 
