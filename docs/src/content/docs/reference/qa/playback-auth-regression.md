@@ -16,10 +16,10 @@ This packet records the playback-auth regression gate for the Ferrex server, des
 | Area | Disposition | Evidence / gap |
 | --- | --- | --- |
 | Rust format/check/core | Pass | `cargo fmt`, workspace `cargo check --all-targets`, and `ferrex-core` lib tests passed. Workspace check still emits existing `ferrexctl` missing-doc warnings. |
-| Server playback auth integration | Pass | `crates/ferrex-server/tests/playback_stream_failures.rs` passed against a local Nix Postgres with `pg_uuidv7`: ticket issue, range streaming, missing/invalid token rejection, account API scope rejection, and typed media recovery headers. |
+| Server playback auth integration | Pass | `crates/ferrex-server/tests/playback_stream_failures.rs` passed against a local Nix Postgres with `pg_uuidv7`: ticket issue, query and scoped-bearer range streaming, missing/invalid token rejection, account API scope rejection, and typed media recovery headers. |
 | Desktop GStreamer smoke | Pass | `scripts/qa/playback-auth-smoke.sh` served a local protected WAV fixture, verified bad tickets return 401, then completed `gst-launch-1.0 playbin` with fakesinks using the ticketed URL. |
 | Desktop MPV smoke | Pass | The same smoke completed `mpv --no-config --ao=null` against the ticketed URL, redacted the MPV log, and verified retained artifacts do not contain the raw ticket. |
-| Desktop ticket URL / redaction unit coverage | Pass | `ferrex-player-playback` tests passed for ticketed URL resolution, fail-closed ticket errors, and access-token redaction in playback/MPV log lines. |
+| Desktop ticket source / redaction unit coverage | Pass | `ferrex-player-playback` tests cover header-authenticated direct-stream source resolution, fail-closed ticket errors, legacy external-player URL conversion, and credential redaction in playback/mpv diagnostics. |
 | Android mobile / TV auth-expiry retry unit coverage | Pass | Focused Gradle unit command for `PlaybackFoundationTest.ticketAuthFailuresRetryThenInvalidateSession` returned `BUILD SUCCESSFUL` for mobile and TV tasks. |
 | Android mobile / TV manual playback | Blocked | `adb devices -l` returned no attached devices. The SDK emulator binary cannot start in this NixOS workspace because of the stub-ld dynamic-loader error. Physical phone/TV or a runnable emulator is still required for manual playback evidence. |
 | Android full assemble/unit/lint | Not rerun for LOW-415 | No Android source code changed in this packet. The most recent full Android evidence is recorded in [Android / Android TV final QA acceptance packet](/reference/qa/android-final-qa/); rerun the full Gradle gate if Android code changes. |
@@ -109,13 +109,46 @@ FERREX_QA_KEEP_ARTIFACTS=1 nix develop .#ferrex-player --command bash scripts/qa
 
 Do not attach `mpv.raw.log`; the script deletes it after producing `mpv.redacted.log`.
 
-### Desktop ticket URL and redaction units
+### Desktop ticket source and redaction units
+
+The 2026-07-12 native-playback migration moved direct in-process ticket
+transport from the query string to a redacted `PlaybackSource` Authorization
+header. The explicit legacy external-player handoff still converts that source
+to a temporary query-ticket URL at its compatibility boundary. A focused
+2026-07-12 server integration rerun also passed after adding the exact
+in-process transport case: a playback-scoped ticket in the bearer header
+returned the requested `206` byte range, independently of the existing full
+account-session bearer check.
 
 ```bash
-nix develop .#ferrex-player --command env cargo test -p ferrex-player-playback resolve_playback_stream_url
+nix develop .#ferrex-player --command env cargo test -p ferrex-player-playback resolve_playback_stream_source
 ```
 
-Result: pass; `2 passed; 0 failed; 4 filtered out`.
+Result: pass; both header-transport and fail-closed source-resolution tests
+passed.
+
+The formerly string-only streaming/HLS API source now uses a typed,
+credential-free URI plus a zeroizing bearer header. Its focused tests cover
+header transport, redacted diagnostics, query/userinfo rejection, header
+injection rejection, and fail-closed ticket errors:
+
+```bash
+cargo test -p ferrex-player-api services::streaming::tests
+cargo test -p ferrex-player-ui --features unimplemented \
+  domains::streaming::update_handlers::transcoding::tests::transcoded_source_reload_keeps_ticket_in_redacted_header_transport \
+  -- --exact
+```
+
+On 2026-07-13 the ignored display-backed server acceptance also passed with the
+generated transcoded-HLS fixture routed through protected real Ferrex stream
+URLs. One playback-scoped bearer ticket authorized the manifest and all four
+segments, unauthenticated segment reads returned `401`, manifest URLs remained
+credential-free, and native mpv completed playback controls, seek, shader,
+screenshot, diagnostics-redaction, and stop. This isolates router/HLS
+transport from the separately tested bounded FFmpeg job provider. Current
+start/status/assets route tests cover job ownership, cached publication, and a
+playback-scoped ticket on every generated rendition asset; the representative
+display-backed generated-HLS run remains a separate gate.
 
 ```bash
 nix develop .#ferrex-player --command env cargo test -p ferrex-player-playback redacts_access_token
@@ -166,8 +199,8 @@ Results:
 
 Record device model, OS/API level, display mode, server build, media fixture, and redacted logs/screenshots for each manual run.
 
-1. **Desktop UI, GStreamer path:** launch the player against a QA server, start playback from a detail page, verify the resolved stream URL is ticketed, pause/seek/exit, and confirm no raw ticket appears in Ferrex logs.
-2. **Desktop UI, MPV hand-off:** use the same media item, launch "Play in MPV", confirm MPV opens the ticketed stream, close MPV, and confirm Ferrex/MPV retained logs are redacted.
+1. **Desktop UI, GStreamer path:** launch the player against a QA server, start playback from a detail page, verify the in-process source URI has no `access_token` query value and the protected stream succeeds through its bearer header, pause/seek/exit, and confirm no raw ticket appears in Ferrex logs.
+2. **Desktop UI, MPV hand-off:** use the same media item and launch “Play in MPV.” In a build with the `mpv` feature, confirm the in-process libmpv native window opens the ticketed stream, pause/seek/stop work, and closing the native window returns control to Ferrex. In a backend-disabled build, confirm the action retains the external-process fallback. Also exercise the explicit external-player hand-off from the player controls. Confirm all retained Ferrex/mpv logs are redacted.
 3. **Short ticket expiry:** configure a short playback-ticket TTL or use an expired ticket fixture. Verify server returns 401/403, clients retry where supported, and recovery remains actionable after retry limits without clearing app data.
 4. **Android phone:** install `app-mobile-debug.apk`, sign in, play/resume/start-over, force ticket/session expiry, and verify retry then sign-in/change-server recovery without OS app-data wipe.
 5. **Android TV:** install `app-tv-debug.apk`, repeat the phone playback/expiry cases using D-pad/OK/Back, and verify focus remains reachable on playback recovery actions.
@@ -183,6 +216,8 @@ Record device model, OS/API level, display mode, server build, media fixture, an
 - `crates/ferrex-server/tests/playback_stream_failures.rs`
 - `crates/ferrex-player-playback/src/update.rs`
 - `crates/ferrex-player-playback/src/diagnostics.rs`
+- `crates/ferrex-player-playback/src/external_mpv.rs`
+- `crates/ferrex-player-playback/src/mpv_adapter.rs`
 - `mobile/android/app/src/test/kotlin/com/ferrex/android/core/playback/PlaybackFoundationTest.kt`
 - [Android / Android TV final QA acceptance packet](/reference/qa/android-final-qa/)
 - [Android playback QA matrix](/reference/qa/android-playback-matrix/)

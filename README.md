@@ -25,7 +25,9 @@ A Rust‑native media server and player focused on delivering a smooth and low l
 
 - Feels local, because it is: batched rendering of custom UI primitives keeps latency spikes in check as you fling through high‑DPI posters.
 - Zero‑copy HDR on Wayland: a Wayland‑subsurface path uses current GStreamer stable HDR support to preserve metadata and avoid expensive copies.
-- Pragmatic elsewhere: on other platforms, Ferrex can hand off to mpv.
+- Pragmatic elsewhere: playback runs behind a backend-neutral contract with
+  GStreamer rollback, an opt-in in-process libmpv native-window path, and an
+  explicit process-isolated mpv handoff.
 
 Status: pre-alpha (0.1.0-alpha). Expect rapid changes while core surfaces continue to stabilize.
 
@@ -35,7 +37,7 @@ Existing home media tools are flexible but often not fast in the ways that feel 
 
 ## Who it’s for
 
-Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.28 stable series for correct HDR metadata passthrough (tested with **GStreamer 1.28.4**). Windows and macOS may utilize mpv hand‑off or the alternate player backend that does not include any HDR passthrough or tone-mapping.
+Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.28 stable series for correct HDR metadata passthrough (tested with **GStreamer 1.28.4**). Windows and macOS have explicit in-process libmpv presenter handoff builds while GStreamer/external-mpv remain the rollback policy; Auto, HDR, and hardware-decoding capability claims stay gated on representative native-output evidence.
 
 ## Highlights
 
@@ -43,7 +45,8 @@ Self‑hosters and performance‑minded enthusiasts who value a fluid desktop ex
 - Animated poster grids that stream in as fast as your GPU can swallow textures.
 - Keyboard driven and animated UI navigation/scrolling.
 - Wayland HDR pipeline with a subsurface strategy tailored for native output.
-- mpv hand‑off with watch status tracking maintained.
+- In-process libmpv native-window playback and an external mpv handoff, both
+  with backend-neutral watch status and redacted diagnostics.
 
 ## Quickstart
 
@@ -132,16 +135,24 @@ See `ferrexctl --help` for all packaging options.
   - Tested environment: Arch Linux (Hyprland WM). Please report results for GNOME/KDE/wlroots compositors.
   - Player specifics and platform notes: see [crates/ferrex-player/README.md](crates/ferrex-player/README.md).
 
-- Other platforms: playback via the cross‑platform backend or "Open with MPV" from detail views.
+- Other platforms: the cross-platform GStreamer path remains the current Auto
+  policy. An mpv-enabled developer/release build can explicitly request
+  in-process native-window playback; the separate external action remains a
+  crash-isolated compatibility handoff.
 
 ### Compatibility
 
-| Platform          | Playback path              | HDR passthrough | Zero‑copy | Status             |
-|-------------------|----------------------------|-----------------|-----------|--------------------|
-| Linux (Wayland)   | GStreamer + subsurface     | Yes (1.28.x)    | Yes       | Primary, supported |
-| Linux (Xorg)      | Alt backend / mpv hand‑off | No              | No        | Works, less ideal  |
-| Windows           | Alt backend / mpv hand‑off | No (today)      | No        | Experimental       |
-| macOS             | Alt backend / mpv hand‑off | No (today)      | No        | Experimental       |
+| Platform | Current Auto/integrated path | Explicit mpv path | Evidence-qualified status |
+|---|---|---|---|
+| Linux (Wayland) | GStreamer 1.28 subsurface | In-process native window or external process | HYBRID. GStreamer HDR/zero-copy and mpv `gpu-next`/hwdec have platform evidence; integrated mpv is deferred. |
+| Linux (X11) | Integrated GStreamer | External process only in the reviewed package | HYBRID. mpv 0.41 X11 VO is excluded from the LGPL-only in-process build. |
+| Windows | GStreamer rollback | Compile-gated Win32 owned-overlay presenter; native-window/external fallback | Representative-system handoff ready; Auto, HDR, hwdec, taskbar/focus/fullscreen, and stress gates remain open. |
+| macOS | GStreamer rollback | Compile-gated AppKit child-window presenter; native-window/external fallback | Representative-system handoff ready; Auto, HDR/EDR, VideoToolbox, Spaces/fullscreen, and stress gates remain open. |
+
+See [Desktop playback backends](https://ferrexmedia.org/developer/desktop-playback-backends/)
+for build selection, deterministic fallback order, diagnostics, platform
+limitations, and rollback. The implementation specification and live rollout
+checklist are linked from the [architecture page](https://ferrexmedia.org/developer/architecture/).
 
 ## Security notes
 

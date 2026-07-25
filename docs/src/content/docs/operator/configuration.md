@@ -27,7 +27,14 @@ These are the most commonly used variables. See `.env.example` for the authorita
 - `DATABASE_URL` – Postgres connection URL (host/local use) plus `DATABASE_URL_CONTAINER` for in-container commands.
 - `REDIS_URL` – Redis connection URL (plus `REDIS_URL_CONTAINER` for in-container access).
 - `RUST_LOG` – Server logging filter, e.g. `sqlx=trace,ferrex=debug`.
-- `FERREX_MPV_PATH` – Optional override for mpv path on Windows if auto‑detection fails.
+- `FERREX_MPV_PATH` – Optional override for the separate external mpv executable,
+  primarily on Windows. It does not locate in-process libmpv.
+- `FERREX_MPV_CONFIG_POLICY` – In an mpv-enabled developer build, either
+  `deterministic` (default) or `trusted-user`. Trusted-user config and scripts
+  execute inside the Ferrex process.
+- `FERREX_MPV_LOG_LEVEL` – Optional fixed in-process libmpv message filter:
+  `none`, `fatal`, `error`, `warn`, `info`, `verbose`, `debug`, or `trace`.
+  Invalid values fail closed without being echoed.
 - TLS options – Paths can be provided via env (if you terminate TLS at the app). If you use a reverse proxy, terminate TLS there instead.
 - Player URL – Run the player against a custom server with `FERREX_SERVER_URL=https://host:port`.
 
@@ -223,6 +230,13 @@ just start --rust-log 'sqlx=trace,ferrex=debug'
 ```
 
 Alternatively, set `RUST_LOG` directly in `.env`.
+
+Desktop playback has an additional native-message filter. `RUST_LOG` controls
+whether Ferrex emits a target, while `FERREX_MPV_LOG_LEVEL` controls which
+messages libmpv sends to Ferrex. See
+[Desktop playback backends](/developer/desktop-playback-backends/) for the
+backend selector, fallback order, safe diagnostic procedure, and rollback
+policy.
 
 ## Demo Mode (Optional)
 

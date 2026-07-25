@@ -30,6 +30,7 @@ Related docs:
 - Phase 1 backend intelligence foundation: [Phase 1 intelligence foundation](/developer/intelligence-foundation/)
 - Player specifics and platform notes: [ferrex-player README](https://github.com/Lowband21/ferrex/blob/dev/crates/ferrex-player/README.md)
 - Player crate dependency boundaries: [Player dependency boundaries](/developer/player-dependency-boundaries/)
+- Native mpv migration: [architecture specification](https://github.com/Lowband21/ferrex/blob/dev/docs/specs/native-mpv-playback.md), [delivery plan](https://github.com/Lowband21/ferrex/blob/dev/docs/plans/native-mpv-playback-migration.md), [current playback baseline](/developer/native-playback-baseline/), [fixture/test matrix](/developer/native-playback-fixtures/), and [Wayland spike record](/developer/native-mpv-wayland-spike/)
 - Demo mode: [Demo mode](/operator/demo-mode/)
 - UI testing workflow: [UI testing workflow](/developer/ui-testing-workflow/)
 
@@ -44,18 +45,30 @@ nix develop .#ferrex-player --command cargo test -p ferrex-core --lib
 
 ## High‑Level Diagram
 
-```
-   +------------------------+            HTTP/WS             +------------------------+
-   |     ferrex-player      |   <----------------------->    |     ferrex-server      |
-   | (app shell + Iced UI)  |                                |   (Axum + Postgres)    |
-   |                        |  watch stat, metadata, images  |                        |
-   +-+--------------+-------+          +------+              +------+----------+------+
-     |              |                  |      |                     |          |
-     |              |                  |      |                     |          |
-     v              v                  v      v                     v          v
-  Appsink   Wayland subsurface    GStreamer pipeline            Postgres      Redis
-  Player     (HDR zero-copy)      (decode/metadata)             (state)  (rate-limiting)
-
+```text
++-------------------------------- ferrex-player --------------------------------+
+| Iced app shell, layout, controls, input, and dedicated controls overlay        |
+|                                                                                |
+| PlaybackCommand -> Ferrex-owned session/reducer -> PlaybackSnapshot            |
+|                         |                         ^                             |
+|                         v                         | PlaybackEvent               |
+|          +---------------------------+------------+------------------+          |
+|          |                           |                               |          |
+|  Subwave/GStreamer adapter    in-process libmpv adapter       external mpv IPC |
+|          |                           |                               |          |
+|  integrated Wayland/X11 or    mpv native VO (`gpu-next`)      process-isolated |
+|  embedded-frame fallback      (no frame enters Iced/wgpu)      compatibility   |
++----------+---------------------------+-------------------------------+----------+
+           |                           |                               |
+           +---------------------------+-------------------------------+
+                                       |
+                         authenticated HTTP/range/HLS
+                                       |
+                         +-------------v-------------+
+                         |       ferrex-server       |
+                         | Axum + Postgres + Redis   |
+                         | tickets, media, progress  |
+                         +---------------------------+
 ```
 
 ## Components
@@ -78,10 +91,12 @@ nix develop .#ferrex-player --command cargo test -p ferrex-core --lib
 - App shell: `ferrex-player-app` owns runtime bootstrap/config, state/domain composition, cross-domain routing surfaces, root update/view/subscription wiring, Iced daemon/application construction, presets, and logger/profiling hooks.
 - UI/presentation: `ferrex-player-ui` owns the Iced views/widgets, Iced task/subscription adapters, design tokens, shader widgets, WGSL assets, and 10-foot surfaces.
 - Data/API crates: `ferrex-player-auth`, `ferrex-player-repository`, `ferrex-player-library`, `ferrex-player-media`, `ferrex-player-metadata`, `ferrex-player-search`, `ferrex-player-settings`, `ferrex-player-user-admin`, and `ferrex-player-api` own player data-domain behavior and service contracts without pulling in Iced/subwave runtime code; settings only shares `iced_core` color/point DTOs. Async work crosses this boundary through `ferrex-player-foundation` domain tasks or dependency-light streams that the UI crate wraps.
-- Playback/video: `ferrex-player-playback` owns Subwave/MPV playback state, controls, subscriptions, and overlay helpers behind explicit ports that `ferrex-player-ui` adapts.
-- Video: subwave backend with platform‑optimized paths.
-  - Wayland/HDR: GStreamer path with subsurfaces enables zero‑copy HDR output.
-  - Other platforms: cross‑platform backend or mpv hand‑off with watch status tracking.
+- Playback/video: `ferrex-player-playback` owns Subwave/MPV playback state, controls, subscriptions, and overlay helpers behind explicit ports that `ferrex-player-ui` adapts. Its `contract` module is the migration boundary for Ferrex-owned backend-neutral commands, events, snapshots, track models, and fallback policy.
+- Video: backend-neutral control with platform-optimized presentation.
+  - Wayland HYBRID (D-022): GStreamer/Subwave remains integrated; mpv uses its native window until a safe per-session bridge path exists.
+  - Windows and macOS: fully integrated native-VO mpv presenters remain active migration targets with independent rollout gates.
+  - All platforms retain backend-neutral watch status and deterministic fallback.
+  - Operational selection, diagnostics, and rollback: [Desktop playback backends](/developer/desktop-playback-backends/).
 - Focus: smooth, low‑latency poster grids and animated navigation.
 
 ### Core (`ferrex-core`)
