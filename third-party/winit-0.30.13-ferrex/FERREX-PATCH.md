@@ -4,60 +4,44 @@ This directory is a source copy of crates.io `winit` 0.30.13
 (`a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d`).
 The upstream license is retained in `LICENSE`.
 
-Ferrex carries a narrow AppKit patch because its macOS native-mpv presenter
-keeps winit's window identity in an unordered staging `NSWindow` while moving
-the associated `WinitView` into mpv's externally owned root `NSWindow`.
-Upstream 0.30.13 assumes that `WinitView` always remains the staging window's
-content view. That assumption makes raw-handle recreation unsafe and leaves
-move, scale, focus, cursor, IME, and resize behavior tied to the wrong window
+## Why it exists
+
+Ferrex's macOS presenter keeps winit's logical window in an unordered donor
+`NSWindow` while hosting its renderer `WinitView` inside an externally owned
+`NSWindow`. Upstream winit 0.30.13 assumes that the renderer view remains the
+donor's content view, leaving window-sensitive state tied to the wrong host
 after reparenting.
 
-The Ferrex delta is intentionally limited to macOS implementation files. It
-must:
+The macOS-only patch:
 
-- retain the `WinitView` directly instead of recovering it through an unsafe
-  cast of the staging window's current content view;
-- preserve the staging `WindowId` for event routing;
-- use the view's actual host `NSWindow` for host-sensitive position, geometry,
-  scale, focus, cursor, IME, and drag behavior;
-- defer host-transition scale/resize delivery to the next main-run-loop turn
-  so AppKit reparent callbacks cannot re-enter winit's borrowed event handler;
-- snapshot foreign-root movement in physical coordinates at notification time
-  and deliver the newest position exactly once even if detach completes before
-  the deferred callback, before any donor scale-factor transition can change
-  how Iced converts that physical position;
-- retain the captured foreign scale and view size so a coalesced backing-scale
-  change is replayed before the final move, keep its size writer valid without
-  applying that request to the donor, and defer `Resized` until authoritative
-  donor reconciliation;
-- mirror relevant host-window notifications while the view is foreign-hosted;
-- remove those observations automatically when the view returns to staging;
-- leave staging-window visibility, destruction, and application identity under
-  normal winit ownership.
+- retains the actual `WinitView` instead of recovering it from the donor;
+- preserves the donor `WindowId` for event routing while using the view's
+  effective host for geometry, scale, focus, cursor, IME, and notifications;
+- prevents donor window operations from mutating the foreign host; and
+- removes foreign-host observations and restores donor ownership before close.
 
-Changed source files:
+The changed implementation files are:
 
-- `src/platform_impl/macos/view.rs` splits stable event identity from the
-  effective AppKit host, binds external-root notifications, preserves a final
-  host move across notification-to-detach races, reports view-local metrics,
-  and owns observer/IME/focus cleanup;
-- `src/platform_impl/macos/window_delegate.rs` retains the exact view, returns
-  effective-host queries, and prevents window/lifecycle setters from mutating
-  either mpv's root or the hidden donor while foreign-hosted;
-- `src/platform_impl/macos/window.rs` detaches a foreign-hosted view before the
-  donor closes.
+- `src/platform_impl/macos/view.rs`;
+- `src/platform_impl/macos/window_delegate.rs`; and
+- `src/platform_impl/macos/window.rs`.
 
-Notification registration is object-scoped to the current external root.
-Cleanup is deliberately name-scoped with `object: nil`: this removes a stale
-registration even when the previous root has already deallocated, while
-leaving the independent view-frame notification untouched.
+Detailed notification ordering, event coalescing, and teardown behavior is
+documented beside the implementation and its regression tests.
 
-The donor remains a winit-owned, unordered staging object so Iced keeps its
-normal logical window and renderer lifecycle. It is not a presented overlay;
-all externally visible window operations remain owned by mpv's root. Ferrex
-must route player fullscreen/lifecycle commands through libmpv and native
-background drag through the retained root, never through generic donor-window
-actions.
+Although limited to macOS, this is not a small semantic delta: it spans view
+retention, event identity, host metrics, focus, IME, notifications, scaling,
+and teardown. Ferrex will not carry or expand that surface indefinitely.
 
-Apple Silicon and Intel acceptance evidence is required before this patch can
-be treated as production-qualified.
+## Validation
+
+The foreign-view presenter passed functional one-window validation on Apple
+Silicon. Intel macOS is legacy and outside the supported validation matrix.
+
+## Exit contract
+
+This is a temporary fork. The next winit/Iced upgrade must consume released
+generic foreign-view support or select the Ferrex-owned AppKit host
+contingency; rebasing or expanding this fork is not an accepted outcome. The
+full upstream-or-delete decision is in the
+[native mpv design](../../docs/specs/native-mpv-playback.md#winit-fork-exit).

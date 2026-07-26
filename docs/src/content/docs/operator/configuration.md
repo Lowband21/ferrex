@@ -19,7 +19,9 @@ Back up `.env` if you keep long‑lived credentials. The generator creates stron
 
 ## Core Environment Variables
 
-These are the most commonly used variables. See `.env.example` for the authoritative list.
+These are commonly used variables. `.env.example` is authoritative for the
+generated server/stack environment; player-only variables may instead be set
+in the player's launch environment.
 
 - `TMDB_API_KEY` – Required for metadata lookups.
 - `SERVER_HOST` / `SERVER_PORT` – Bind address and port (defaults: `0.0.0.0` / `3000`).
@@ -29,12 +31,10 @@ These are the most commonly used variables. See `.env.example` for the authorita
 - `RUST_LOG` – Server logging filter, e.g. `sqlx=trace,ferrex=debug`.
 - `FERREX_MPV_PATH` – Optional override for the separate external mpv executable,
   primarily on Windows. It does not locate in-process libmpv.
-- `FERREX_MPV_CONFIG_POLICY` – In an mpv-enabled developer build, either
+- `FERREX_MPV_CONFIG_POLICY` – In an mpv-enabled build, either
   `deterministic` (default) or `trusted-user`. Trusted-user config and scripts
   execute inside the Ferrex process.
-- `FERREX_MPV_LOG_LEVEL` – Optional fixed in-process libmpv message filter:
-  `none`, `fatal`, `error`, `warn`, `info`, `verbose`, `debug`, or `trace`.
-  Invalid values fail closed without being echoed.
+- `FERREX_MPV_LOG_LEVEL` – Optional fixed in-process libmpv message filter.
 - TLS options – Paths can be provided via env (if you terminate TLS at the app). If you use a reverse proxy, terminate TLS there instead.
 - Player URL – Run the player against a custom server with `FERREX_SERVER_URL=https://host:port`.
 
@@ -235,8 +235,7 @@ Desktop playback has an additional native-message filter. `RUST_LOG` controls
 whether Ferrex emits a target, while `FERREX_MPV_LOG_LEVEL` controls which
 messages libmpv sends to Ferrex. See
 [Desktop playback backends](/developer/desktop-playback-backends/) for the
-backend selector, fallback order, safe diagnostic procedure, and rollback
-policy.
+supported levels and safe diagnostic procedure.
 
 ## Demo Mode (Optional)
 

@@ -139,55 +139,18 @@ Ferrex’s Wayland HDR path relies on the GStreamer 1.28 stable series. The Nix
 and Flatpak packaging pin **GStreamer 1.28.4**; when building outside those
 environments, use matching GStreamer and plugin development headers.
 
-## Experimental in-process mpv
+## In-process mpv
 
-Build with `--features mpv` to enable the developer-only in-process backend.
-The explicit **Play in MPV** action requests the compile-gated integrated
-presenter on Windows/macOS and the native-window backend elsewhere; failed
-presenter preflight/attachment falls back to native-window mode with a
-structured reason. Auto continues to use the existing backend during
-migration.
+Normal macOS builds enable in-process mpv automatically. On Apple Silicon,
+`Auto` uses the functionally validated in-root AppKit presenter and may fall
+back only to mpv's native window; GStreamer playback is unavailable. Intel
+Macs are outside the supported validation matrix.
 
-The reviewed macOS handoff bundle targets **macOS 15.0 or newer** on both
-Apple Silicon and Intel. Its bundle metadata and every staged Mach-O load
-command are audited against that floor; this handoff does not claim support
-for older macOS releases.
-
-Ferrex uses a deterministic mpv profile by default: standard user config,
-scripts, and external URL resolvers are disabled. Controlled native OSC/input
-bindings are enabled for native-window compatibility and disabled when Iced
-owns an integrated controls overlay. For trusted local development only,
-standard mpv config, `input.conf`, and scripts can be enabled explicitly:
-
-```bash
-FERREX_MPV_CONFIG_POLICY=trusted-user \
-  cargo run -p ferrex-player --features mpv
-```
-
-mpv config and scripts execute inside the Ferrex process. Do not enable this
-policy for untrusted configuration. Invalid policy values fail closed to the
-deterministic profile. Playback diagnostics report the effective policy,
-capability-gated external-subtitle/screenshot/shader/profile support, and only
-the active shader count—never config contents, profile names, or local paths. Extension authors
-should follow the
-[native mpv extension API](https://ferrexmedia.org/developer/native-mpv-extension-api/)
-for owner-thread, local-extension, raw-command, observation, and redaction
-rules.
-
-Native messages use a bounded verbose-at-startup then informational policy by
-default. Diagnostic runs may select a fixed filter without changing playback
-behavior:
-
-```bash
-FERREX_MPV_LOG_LEVEL=trace \
-  RUST_LOG=ferrex_player_playback=trace,ferrex_player_mpv=trace \
-  cargo run -p ferrex-player --features mpv
-```
-
-Accepted levels are `none`, `fatal`, `error`, `warn`, `info`, `verbose`,
-`debug`, and `trace`. Invalid values fail closed without being echoed. Copied
-messages remain credential/source-redacted, but traces can still reveal local
-filenames or system topology and must be reviewed before sharing.
+Other platforms enable the backend with `--features mpv`. Ferrex defaults to a
+deterministic mpv profile with user config, scripts, and external URL resolvers
+disabled. See [Desktop playback backends](https://ferrexmedia.org/developer/desktop-playback-backends/)
+for platform behavior, current limitations, trusted configuration, and safe
+diagnostics.
 
 ## Windows MPV override
 
@@ -202,10 +165,3 @@ When distributed as a Flatpak bundle:
 flatpak install --user ./ferrex-player*.flatpak
 flatpak run io.github.lowband21.FerrexPlayer
 ```
-
-The manifest enables the in-process mpv feature and bundles pinned mpv 0.41.0,
-FFmpeg 8.1.2, and libplacebo with a build-time-asserted LGPL-only profile.
-Wayland native-window mpv includes Vulkan, dmabuf, VA-API, PipeWire, and Pulse
-support. mpv 0.41's X11 VO is GPL-only and is deliberately excluded from this
-profile; Flatpak X11 sessions retain integrated GStreamer playback and the
-separate external-player compatibility action.

@@ -15,11 +15,17 @@ Ferrex’s native zero‑copy HDR path depends on Wayland subsurfaces and recent
 
 ## Will HDR come to Windows/macOS?
 
-That’s a goal. A cross‑platform native HDR path will require platform‑specific work and maturing dependencies. Until then, Windows/macOS can use the cross‑platform backend or the “Open with MPV” hand‑off.
+That remains a goal. macOS on Apple Silicon now uses native in-process mpv,
+but Ferrex does not yet claim HDR/EDR output or a particular VideoToolbox decode
+path. Windows likewise has no current HDR qualification.
 
-## How does MPV hand‑off preserve position and status?
+## How does mpv playback preserve position and status?
 
-The player communicates with mpv via IPC (Unix) or a named pipe (Windows) and keeps watch state synchronized with the server. You can override the mpv path on Windows using `FERREX_MPV_PATH` if auto‑detection fails.
+In-process libmpv implements the same backend-neutral state contract as the
+other player engines. The explicit external mpv action uses private IPC on
+Unix or a named pipe on Windows. Both keep watch state synchronized with the
+server. `FERREX_MPV_PATH` overrides only the external executable, primarily on
+Windows.
 
 ## What’s the default server port?
 
