@@ -52,6 +52,7 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "--disable-nonfree",
             "--disable-version3",
             "--enable-videotoolbox",
+            "--extra-libs=-liconv",
         ):
             self.assertIn(flag, BUILD)
         self.assertNotIn("brew install ffmpeg", BUILD)

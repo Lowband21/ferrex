@@ -140,6 +140,7 @@ mkdir -p "$ffmpeg_build"
         --enable-videotoolbox \
         --enable-securetransport \
         --enable-iconv \
+        --extra-libs=-liconv \
         --enable-zlib
     make -j"$jobs"
     make install
