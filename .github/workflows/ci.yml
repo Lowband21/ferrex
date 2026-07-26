@@ -407,9 +407,11 @@ jobs:
             -f hls -hls_time 1 -hls_list_size 0 "$fixture_dir/stream.m3u8"
           cc scripts/release/macos_gstreamer_bundle_smoke.c \
             $(pkg-config --cflags gstreamer-1.0 gio-2.0) \
-            -L"$app/Contents/Frameworks" \
             -Wl,-rpath,"$app/Contents/Frameworks" \
-            $(pkg-config --libs-only-l gstreamer-1.0 gio-2.0) \
+            "$app/Contents/Frameworks/libgstreamer-1.0.0.dylib" \
+            "$app/Contents/Frameworks/libgio-2.0.0.dylib" \
+            "$app/Contents/Frameworks/libgobject-2.0.0.dylib" \
+            "$app/Contents/Frameworks/libglib-2.0.0.dylib" \
             -o "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke"
           if otool -L "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke" | \
             grep -E '/opt/homebrew/|/usr/local/|/nix/store/' >/dev/null; then

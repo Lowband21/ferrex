@@ -132,8 +132,13 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "Contents/Resources/gio/modules",
             "libgiognutls",
             "https_test_server.py",
+            "libgstreamer-1.0.0.dylib",
+            "libgio-2.0.0.dylib",
+            "libgobject-2.0.0.dylib",
+            "libglib-2.0.0.dylib",
         ):
             self.assertIn(expected, WORKFLOW)
+        self.assertNotIn("pkg-config --libs-only-l", WORKFLOW)
         self.assertNotIn("export DYLD_LIBRARY_PATH", WORKFLOW)
         self.assertNotIn("Contents/PlugIns/gstreamer-1.0", WORKFLOW)
         self.assertNotIn("Contents/PlugIns/gio/modules", WORKFLOW)
