@@ -207,8 +207,11 @@ jobs:
           update: true
           install: >-
             base-devel
+            autoconf
             autoconf-archive
+            automake
             git
+            libtool
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-meson
             mingw-w64-ucrt-x86_64-ninja
