@@ -44,12 +44,11 @@ fn play_media_with_position(
             state.domains.media.state.pending_resume_position = Some(position);
             state.domains.player.state.pending_resume_position = Some(position);
 
-            let play = Task::done(DomainMessage::Player(
+            DomainUpdateResult::task(Task::done(DomainMessage::Player(
                 crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
                     media_file, media_id,
                 ),
-            ));
-            DomainUpdateResult::task(prepare_macos_player_overlay(play))
+            )))
         }
         Err(_) => {
             log::error!("Failed to get media with id {}", media_id);
@@ -146,17 +145,6 @@ const fn in_process_mpv_target() -> PlaybackTarget {
         PlaybackTarget::MPV_INTEGRATED
     } else {
         PlaybackTarget::MPV_NATIVE_WINDOW
-    }
-}
-
-fn prepare_macos_player_overlay(
-    play: Task<DomainMessage>,
-) -> Task<DomainMessage> {
-    if cfg!(target_os = "macos") {
-        Task::done(DomainMessage::Ui(UiShellMessage::OpenPlayerOverlay.into()))
-            .chain(play)
-    } else {
-        play
     }
 }
 

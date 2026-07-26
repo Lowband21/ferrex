@@ -310,19 +310,11 @@ pub fn handle_event(
             // Also prime the player domain for immediate seek during load
             state.domains.player.state.pending_resume_position = resume_opt;
 
-            let play = Task::done(DomainMessage::Player(
+            Task::done(DomainMessage::Player(
                 crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
                     media_file, media_id,
                 ),
-            ));
-            if cfg!(target_os = "macos") {
-                Task::done(DomainMessage::Ui(
-                    UiShellMessage::OpenPlayerOverlay.into(),
-                ))
-                .chain(play)
-            } else {
-                play
-            }
+            ))
         }
 
         // // Legacy transcoding events (deprecated)
@@ -805,6 +797,32 @@ mod tests {
             },
             media_id,
         )
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn normal_play_defers_donor_allocation_to_the_shell_handoff() {
+        let mut state = State::default();
+        let (media, media_id) = test_media_file("macos-auto");
+
+        let routed = output_messages(handle_event(
+            &mut state,
+            CrossDomainEvent::MediaPlayWithId(media, media_id),
+        ))
+        .await;
+
+        assert!(matches!(
+            routed.as_slice(),
+            [DomainMessage::Player(
+                PlaybackPlayerMessage::PlayMediaWithId(_, routed_id)
+            )] if *routed_id == media_id
+        ));
+        assert!(
+            state
+                .windows
+                .get(crate::domains::ui::windows::WindowKind::PlayerOverlay)
+                .is_none()
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
