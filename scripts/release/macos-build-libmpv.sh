@@ -264,7 +264,8 @@ PY
 
 # mpv's native macOS VO and VideoToolbox/libplacebo path are required. The
 # cplayer is not shipped: Ferrex links the shared client library and owns the
-# application bundle. Optional GPL and external-script surfaces stay disabled.
+# application bundle. Shader compilation stays in libplacebo; mpv's shaderc
+# option is for its Win32/D3D11 path. Optional GPL surfaces stay disabled.
 meson setup "$build_directory" "$source_directory" \
     --wrap-mode=nofallback \
     --buildtype=release \
@@ -285,7 +286,7 @@ meson setup "$build_directory" "$source_directory" \
     -Dgl=enabled \
     -Dgl-cocoa=enabled \
     -Dvulkan=enabled \
-    -Dshaderc=enabled \
+    -Dshaderc=disabled \
     -Dlcms2=disabled \
     -Dlibarchive=disabled \
     -Dlibbluray=disabled \
@@ -332,7 +333,7 @@ required = {
     "gl": "enabled",
     "gl-cocoa": "enabled",
     "vulkan": "enabled",
-    "shaderc": "enabled",
+    "shaderc": "disabled",
     "lua": "lua52",
 }
 wrong = {name: (values.get(name), expected) for name, expected in required.items() if values.get(name) != expected}
@@ -396,13 +397,14 @@ fi
     printf 'mpv_videotoolbox_pl=enabled\n'
     printf 'mpv_gl=enabled\n'
     printf 'mpv_vulkan=enabled\n'
+    printf 'mpv_shaderc=disabled\n'
     printf 'mpv_lua=lua52\n'
     printf 'ffmpeg_commit=%s\n' "$FFMPEG_COMMIT"
     printf 'ffmpeg_version=%s\n' "$(pkg-config --modversion libavcodec)"
     printf 'ffmpeg_gpl=false\nffmpeg_nonfree=false\nffmpeg_version3=false\n'
     printf 'libplacebo_commit=%s\n' "$LIBPLACEBO_COMMIT"
     printf 'libplacebo_version=%s\n' "$(pkg-config --modversion libplacebo)"
-    printf 'libplacebo_opengl=enabled\nlibplacebo_vulkan=enabled\n'
+    printf 'libplacebo_opengl=enabled\nlibplacebo_vulkan=enabled\nlibplacebo_shaderc=enabled\n'
     printf 'libass_commit=%s\n' "$LIBASS_COMMIT"
     printf 'libass_version=%s\n' "$(pkg-config --modversion libass)"
     printf 'libass_coretext=enabled\n'

@@ -66,7 +66,7 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "-Dvideotoolbox-gl=enabled",
             "-Dgl-cocoa=enabled",
             "-Dvulkan=enabled",
-            "-Dshaderc=enabled",
+            "-Dshaderc=disabled",
             "-Dlua=lua52",
         ):
             self.assertIn(flag, BUILD)
@@ -85,6 +85,7 @@ class MacOSBuildProfileTests(unittest.TestCase):
         self.assertIn("-Dfontconfig=disabled", BUILD)
         self.assertIn("-Dvk-proc-addr=enabled", BUILD)
         self.assertIn("-Dglslang=disabled", BUILD)
+        self.assertIn("-Dshaderc=enabled", BUILD)
 
     def test_homebrew_trust_is_transitive_but_not_prefix_wide(self) -> None:
         self.assertIn('brew deps --union "${homebrew_direct_formulae[@]}"', BUILD)
