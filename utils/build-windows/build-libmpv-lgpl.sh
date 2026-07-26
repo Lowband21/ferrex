@@ -57,7 +57,8 @@ checkout_exact mpv https://github.com/mpv-player/mpv.git "$MPV_COMMIT"
 
 # libass 0.17.4: exact shared build used for text/ASS subtitle rendering.
 pushd "$WORK/src/libass" >/dev/null
-./autogen.sh \
+./autogen.sh
+./configure \
 	--prefix="$PREFIX" \
 	--disable-static \
 	--enable-shared \
