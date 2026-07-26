@@ -79,7 +79,9 @@ ignore = [
     { id = "RUSTSEC-2022-0081", reason = "`json` is a transitive build-dependency of `hsluv` used by `ferrex-player`; it is not linked into runtime artifacts and there is no upstream upgrade path yet" },
     { id = "RUSTSEC-2024-0384", reason = "`instant` is required by `notify` v7; upstream replacement not yet available" },
     { id = "RUSTSEC-2024-0436", reason = "`paste` comes from `wgpu` transitive deps; awaiting ecosystem migration" },
+    { id = "RUSTSEC-2025-0141", reason = "`bincode` is transitively required by Iced profiling and hot-reload tooling; the advisory has no safe upgrade path" },
     { id = "RUSTSEC-2026-0105", reason = "`core2` is pulled in transitively through `image`/`ravif`; no safe upgrade path is available yet" },
+    { id = "RUSTSEC-2026-0192", reason = "`ttf-parser` is required by the Iced font stack; the advisory has no safe upgrade path" },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
