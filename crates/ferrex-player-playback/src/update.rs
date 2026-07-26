@@ -8,6 +8,7 @@ use crate::{
     contract::{
         BackendKind, BackendRequest, DurationDelta, EndReason, PlaybackCommand,
         PlaybackContentFit, PlaybackSnapshot, PlaybackSource, PlaybackState,
+        PlaybackTarget,
     },
     diagnostics::redact_playback_url,
     messages::{PlaybackExitDestination, PlaybackRequestId, PlayerMessage},
@@ -141,6 +142,20 @@ const fn backend_request_uses_integrated_presenter(
         request,
         BackendRequest::Exact(crate::contract::PlaybackTarget::MPV_INTEGRATED)
     ) || (macos_auto_is_integrated && matches!(request, BackendRequest::Auto))
+}
+
+fn mpv_runtime_failure_fallback(
+    target: PlaybackTarget,
+    macos: bool,
+) -> Option<BackendRequest> {
+    if target.backend != BackendKind::Mpv {
+        return None;
+    }
+    if !macos {
+        return Some(BackendRequest::Auto);
+    }
+    (target == PlaybackTarget::MPV_INTEGRATED)
+        .then_some(BackendRequest::Exact(PlaybackTarget::MPV_NATIVE_WINDOW))
 }
 
 /// Move a live external process into its kill-and-wait reaper and latch all
@@ -533,6 +548,30 @@ fn apply_snapshot_to_domain(
 /// Handle a terminal snapshot exactly once for its generation. `Some` means
 /// the snapshot was terminal, including terminal states that intentionally
 /// produce no follow-up message.
+fn finish_failed_playback<P>(
+    state: &mut PlayerDomainState,
+    ui: &mut dyn PlaybackUiShell,
+    snapshot: &PlaybackSnapshot,
+) -> Task<P::AppMessage>
+where
+    P: PlaybackUpdatePort + 'static,
+{
+    let message = snapshot
+        .last_error
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "Playback backend failed".to_string());
+    let progress = final_snapshot_progress(state, snapshot).map_or_else(
+        Task::none,
+        |(media_id, position, duration)| {
+            Task::done(P::send_progress_update(media_id, position, duration))
+        },
+    );
+    let _ = close_video(state);
+    ui.set_video_error(message);
+    progress
+}
+
 fn handle_synchronized_terminal<P>(
     state: &mut PlayerDomainState,
     ui: &mut dyn PlaybackUiShell,
@@ -599,14 +638,29 @@ where
         PlaybackState::Failed
             if snapshot.target.backend == BackendKind::Mpv =>
         {
+            let Some(fallback_request) = mpv_runtime_failure_fallback(
+                snapshot.target,
+                cfg!(target_os = "macos"),
+            ) else {
+                return Some(finish_failed_playback::<P>(state, ui, snapshot));
+            };
             let reason = snapshot
                 .last_error
                 .as_ref()
                 .map(ToString::to_string)
                 .unwrap_or_else(|| "unknown mpv failure".to_string());
-            warn!(
-                "playback_fallback code=backend_failure from=mpv-native-window to=gstreamer-auto detail={reason}"
-            );
+            if matches!(
+                fallback_request,
+                BackendRequest::Exact(PlaybackTarget::MPV_NATIVE_WINDOW)
+            ) {
+                warn!(
+                    "playback_fallback code=backend_failure from=mpv-integrated to=mpv-native-window detail={reason}"
+                );
+            } else {
+                warn!(
+                    "playback_fallback code=backend_failure from=mpv to=platform-auto detail={reason}"
+                );
+            }
             let final_progress = final_snapshot_progress(state, snapshot);
             let progress = final_progress.map_or_else(
                 Task::none,
@@ -623,7 +677,7 @@ where
             }
             let request = state.playback_handoff_request();
             let shutdown = close_video(state);
-            state.backend_request = BackendRequest::Auto;
+            state.backend_request = fallback_request;
             let fallback = if shutdown.is_some() {
                 message_after_root_shutdown::<P>(
                     shutdown,
@@ -636,20 +690,7 @@ where
             Some(sequence_tasks([progress, fallback]))
         }
         PlaybackState::Failed => {
-            let message = snapshot
-                .last_error
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| "Playback backend failed".to_string());
-            let progress = final_snapshot_progress(state, snapshot)
-                .map_or_else(Task::none, |(media_id, position, duration)| {
-                    Task::done(P::send_progress_update(
-                        media_id, position, duration,
-                    ))
-                });
-            let _ = close_video(state);
-            ui.set_video_error(message);
-            Some(progress)
+            Some(finish_failed_playback::<P>(state, ui, snapshot))
         }
         _ => Some(Task::none()),
     }
@@ -3172,6 +3213,33 @@ mod tests {
             ),
             true,
         ));
+    }
+
+    #[test]
+    fn macos_mpv_runtime_failure_falls_back_once() {
+        assert_eq!(
+            mpv_runtime_failure_fallback(
+                crate::contract::PlaybackTarget::MPV_INTEGRATED,
+                true,
+            ),
+            Some(BackendRequest::Exact(
+                crate::contract::PlaybackTarget::MPV_NATIVE_WINDOW,
+            ))
+        );
+        assert_eq!(
+            mpv_runtime_failure_fallback(
+                crate::contract::PlaybackTarget::MPV_NATIVE_WINDOW,
+                true,
+            ),
+            None
+        );
+        assert_eq!(
+            mpv_runtime_failure_fallback(
+                crate::contract::PlaybackTarget::MPV_INTEGRATED,
+                false,
+            ),
+            Some(BackendRequest::Auto)
+        );
     }
 
     fn recording_test_guard() -> std::sync::MutexGuard<'static, ()> {
