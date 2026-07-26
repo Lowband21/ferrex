@@ -1,10 +1,11 @@
 //! Conservative capability gate for the macOS native-root presenter.
 //!
 //! mpv's modern macOS backend owns its `NSWindow` and video layer. Ferrex may
-//! place a transparent Iced child window above that native root only after the
-//! relationship has been proven across AppKit lifetime, fullscreen, Spaces,
-//! scale, and teardown transitions. Until then this module deterministically
-//! selects mpv's ordinary native window and never advertises `wid` embedding.
+//! reparent its transparent Iced `NSView` into that native root's content
+//! hierarchy only after the relationship has been proven across AppKit
+//! lifetime, fullscreen, Spaces, scale, and teardown transitions. No controls
+//! `NSWindow` participates in presentation, and the presenter never advertises
+//! `wid` embedding.
 
 use std::{fmt, num::NonZeroUsize};
 
@@ -44,6 +45,11 @@ impl MacOsPresenterBuildMode {
         }
     }
 
+    /// Whether this build may attach the AppKit in-root presenter.
+    pub const fn enabled(self) -> bool {
+        matches!(self, Self::Spike)
+    }
+
     /// Mode compiled into a macOS target.
     #[cfg(target_os = "macos")]
     pub fn compiled() -> Self {
@@ -55,8 +61,8 @@ impl MacOsPresenterBuildMode {
 /// Native relationship under evaluation for macOS integration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MacOsPresenterStrategy {
-    /// mpv owns the root `NSWindow`; a transparent Iced child follows it.
-    NativeRootChildWindow,
+    /// mpv owns the root `NSWindow`; a transparent Iced view lives within it.
+    NativeRootSubview,
 }
 
 /// Stable, non-sensitive reason an integrated presenter is not available.
@@ -65,7 +71,7 @@ pub enum MacOsPresenterBlocker {
     AppKitMainThreadUnavailable,
     MpvWindowUnavailable,
     MpvWindowLifetimeUnverified,
-    ChildWindowRelationshipUnverified,
+    InRootViewRelationshipUnverified,
     ContentLayoutUnverified,
     BackingScaleUnverified,
     FocusOcclusionUnverified,
@@ -82,8 +88,8 @@ impl MacOsPresenterBlocker {
             Self::AppKitMainThreadUnavailable => "appkit_main_thread",
             Self::MpvWindowUnavailable => "mpv_window",
             Self::MpvWindowLifetimeUnverified => "mpv_window_lifetime",
-            Self::ChildWindowRelationshipUnverified => {
-                "child_window_relationship"
+            Self::InRootViewRelationshipUnverified => {
+                "in_root_view_relationship"
             }
             Self::ContentLayoutUnverified => "content_layout",
             Self::BackingScaleUnverified => "backing_scale",
@@ -105,7 +111,7 @@ pub struct MacOsPresenterEvidence {
     pub appkit_main_thread: bool,
     pub mpv_window_available: bool,
     pub mpv_window_lifetime_verified: bool,
-    pub child_window_relationship_verified: bool,
+    pub in_root_view_relationship_verified: bool,
     pub content_layout_verified: bool,
     pub backing_scale_verified: bool,
     pub focus_occlusion_verified: bool,
@@ -126,7 +132,7 @@ impl MacOsPresenterEvidence {
             appkit_main_thread: true,
             mpv_window_available: true,
             mpv_window_lifetime_verified: true,
-            child_window_relationship_verified: true,
+            in_root_view_relationship_verified: true,
             content_layout_verified: true,
             backing_scale_verified: true,
             focus_occlusion_verified: true,
@@ -153,8 +159,8 @@ impl MacOsPresenterEvidence {
                 MacOsPresenterBlocker::MpvWindowLifetimeUnverified,
             ),
             (
-                self.child_window_relationship_verified,
-                MacOsPresenterBlocker::ChildWindowRelationshipUnverified,
+                self.in_root_view_relationship_verified,
+                MacOsPresenterBlocker::InRootViewRelationshipUnverified,
             ),
             (
                 self.content_layout_verified,
@@ -231,7 +237,7 @@ impl MacOsPresenterDecision {
         });
 
         Self {
-            strategy: MacOsPresenterStrategy::NativeRootChildWindow,
+            strategy: MacOsPresenterStrategy::NativeRootSubview,
             capabilities,
             blockers,
             fallback,
@@ -246,24 +252,20 @@ impl MacOsPresenterDecision {
 
 /// Capabilities of the developer AppKit presenter path.
 ///
-/// The spike is intentionally explicit-only until the manual display, Spaces,
-/// fullscreen, HDR, and teardown matrix has been recorded. In particular,
-/// this function does not claim native HDR support.
+/// The spike remains conservative and does not advertise HDR until the native
+/// Apple Silicon and Intel matrix proves real HDR/EDR behavior.
 pub fn macos_presenter_capabilities(
     build_mode: MacOsPresenterBuildMode,
 ) -> PresenterCapabilities {
     PresenterCapabilities {
-        integrated_overlay: matches!(
-            build_mode,
-            MacOsPresenterBuildMode::Spike
-        ),
+        integrated_overlay: build_mode.enabled(),
         embedded_surface: false,
         native_hdr: false,
         fractional_scaling: true,
         native_window_fallback: true,
         fullscreen_owner: Some(FullscreenOwner::VideoOutput),
         compositor_requirement: Some(
-            "macOS AppKit child-window composition".to_owned(),
+            "macOS AppKit in-root NSView composition".to_owned(),
         ),
     }
 }
@@ -303,15 +305,37 @@ impl fmt::Debug for MacOsWindow {
     }
 }
 
-/// Iced overlay window borrowed for one AppKit attach operation.
+/// Opaque, non-null AppKit `NSView` identity.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MacOsView(NonZeroUsize);
+
+impl MacOsView {
+    /// Wrap a non-null pointer obtained from an AppKit object lease.
+    pub const fn from_non_zero(value: NonZeroUsize) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> usize {
+        self.0.get()
+    }
+}
+
+impl fmt::Debug for MacOsView {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MacOsView(<redacted>)")
+    }
+}
+
+/// Iced view and its original staging owner, borrowed for one attach.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MacOsPresenterHost {
-    pub overlay: MacOsWindow,
+    pub view: MacOsView,
+    pub original_owner: MacOsWindow,
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
 impl MacOsPresenterHost {
-    /// Resolve Iced's AppKit `NSView` lease to its owning `NSWindow`.
+    /// Capture Iced's AppKit `NSView` and its original owner `NSWindow`.
     pub fn from_captured_iced_host(
         host: &crate::native_video_slot::CapturedIcedHost,
     ) -> Result<Self, PlaybackError> {
@@ -344,24 +368,29 @@ impl MacOsPresenterHost {
         let window = view.window().ok_or_else(|| {
             presenter_error("Iced AppKit NSView is not installed in a window")
         })?;
-        let raw = NonZeroUsize::new(Retained::as_ptr(&window) as usize)
-            .ok_or_else(|| presenter_error("Iced AppKit NSWindow is null"))?;
+        let view_raw = NonZeroUsize::new(Retained::as_ptr(&view) as usize)
+            .ok_or_else(|| presenter_error("Iced AppKit NSView is null"))?;
+        let owner_raw = NonZeroUsize::new(Retained::as_ptr(&window) as usize)
+            .ok_or_else(|| {
+            presenter_error("Iced AppKit NSWindow is null")
+        })?;
         Ok(Self {
-            overlay: MacOsWindow::from_non_zero(raw),
+            view: MacOsView::from_non_zero(view_raw),
+            original_owner: MacOsWindow::from_non_zero(owner_raw),
         })
     }
 }
 
-/// Logical screen rectangle used to align the transparent overlay.
+/// Logical rectangle in the mpv root content view's local coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MacOsScreenRect {
+pub struct MacOsViewRect {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
 }
 
-impl MacOsScreenRect {
+impl MacOsViewRect {
     fn validate(self) -> Result<Self, MacOsPresenterError> {
         if [self.x, self.y, self.width, self.height]
             .into_iter()
@@ -378,82 +407,111 @@ impl MacOsScreenRect {
     }
 }
 
-/// AppKit observations retained by the spike for scale/occlusion diagnostics.
+/// Pointer-free AppKit observations retained for integration diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacOsWindowSnapshot {
-    pub content_rect: MacOsScreenRect,
+    pub content_bounds: MacOsViewRect,
+    pub overlay_frame: MacOsViewRect,
     pub backing_scale_factor: f64,
     pub visible_on_active_space: bool,
     pub occluded: bool,
     pub miniaturized: bool,
+    pub fullscreen: bool,
+    pub overlay_in_root_content: bool,
+    pub overlay_topmost: bool,
+    pub child_window_count: usize,
+}
+
+/// Original state restored after the Iced view leaves mpv's hierarchy.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MacOsViewState {
+    pub frame: MacOsViewRect,
+    pub autoresizing_mask: u64,
+    pub hidden: bool,
 }
 
 /// AppKit operations isolated behind a display-free fakeable interface.
+///
+/// Deliberately absent are child-window, screen-positioning, and overlay-window
+/// visibility operations. Presentation is exclusively an in-root `NSView`.
 pub trait MacOsWindowSystem {
-    /// Retain a trusted AppKit window identity for subsequent operations.
     fn retain_window(
         &mut self,
         window: MacOsWindow,
     ) -> Result<(), MacOsPresenterError>;
     fn release_window(&mut self, window: MacOsWindow);
+    fn retain_view(
+        &mut self,
+        view: MacOsView,
+    ) -> Result<(), MacOsPresenterError>;
+    fn release_view(&mut self, view: MacOsView);
     fn is_window(&self, window: MacOsWindow) -> bool;
-    fn parent_window(&self, window: MacOsWindow) -> Option<MacOsWindow>;
-    fn collection_behavior(
+    fn is_view(&self, view: MacOsView) -> bool;
+    fn view_window(&self, view: MacOsView) -> Option<MacOsWindow>;
+    fn is_window_content_view(
         &self,
-        window: MacOsWindow,
-    ) -> Result<u64, MacOsPresenterError>;
-    fn set_collection_behavior(
-        &mut self,
-        window: MacOsWindow,
-        behavior: u64,
-    ) -> Result<(), MacOsPresenterError>;
-    fn ignores_mouse_events(
+        owner: MacOsWindow,
+        view: MacOsView,
+    ) -> bool;
+    fn view_state(
         &self,
-        window: MacOsWindow,
-    ) -> Result<bool, MacOsPresenterError>;
-    fn set_ignores_mouse_events(
+        view: MacOsView,
+    ) -> Result<MacOsViewState, MacOsPresenterError>;
+    fn set_view_frame(
         &mut self,
-        window: MacOsWindow,
-        ignores: bool,
+        view: MacOsView,
+        frame: MacOsViewRect,
     ) -> Result<(), MacOsPresenterError>;
-    fn add_child_above(
+    fn set_view_autoresizing_mask(
+        &mut self,
+        view: MacOsView,
+        mask: u64,
+    ) -> Result<(), MacOsPresenterError>;
+    fn set_view_hidden(
+        &mut self,
+        view: MacOsView,
+        hidden: bool,
+    ) -> Result<(), MacOsPresenterError>;
+    fn reparent_view_above(
         &mut self,
         root: MacOsWindow,
-        child: MacOsWindow,
+        view: MacOsView,
     ) -> Result<(), MacOsPresenterError>;
-    fn remove_child(&mut self, root: MacOsWindow, child: MacOsWindow);
+    fn raise_view_above(
+        &mut self,
+        root: MacOsWindow,
+        view: MacOsView,
+    ) -> Result<(), MacOsPresenterError>;
+    /// Remove `view` from mpv, then restore it if `owner` remains usable.
+    fn restore_view_to_owner(&mut self, owner: MacOsWindow, view: MacOsView);
     fn snapshot(
         &self,
         root: MacOsWindow,
+        view: MacOsView,
     ) -> Result<MacOsWindowSnapshot, MacOsPresenterError>;
-    fn position_overlay(
+    fn focus_view(
         &mut self,
-        overlay: MacOsWindow,
-        rect: MacOsScreenRect,
+        root: MacOsWindow,
+        view: MacOsView,
     ) -> Result<(), MacOsPresenterError>;
-    fn set_visible_without_activation(
+    fn begin_window_drag(
         &mut self,
-        overlay: MacOsWindow,
-        visible: bool,
-    ) -> Result<(), MacOsPresenterError>;
-    fn activate(
-        &mut self,
-        window: MacOsWindow,
-    ) -> Result<(), MacOsPresenterError>;
+        root: MacOsWindow,
+    ) -> Result<bool, MacOsPresenterError>;
 }
 
-const COLLECTION_TRANSIENT: u64 = 1 << 3;
-const COLLECTION_FULLSCREEN_AUXILIARY: u64 = 1 << 8;
+const VIEW_WIDTH_SIZABLE: u64 = 1 << 1;
+const VIEW_HEIGHT_SIZABLE: u64 = 1 << 4;
 
 #[derive(Debug, Clone, Copy)]
 struct MacOsAttachment {
     identity: PresenterIdentity,
-    overlay: MacOsWindow,
-    original_collection_behavior: u64,
-    original_ignores_mouse_events: bool,
+    view: MacOsView,
+    original_owner: MacOsWindow,
+    original_state: MacOsViewState,
 }
 
-/// UI-thread-local AppKit native-root/child-overlay presenter.
+/// UI-thread-local AppKit native-root/in-root-view presenter.
 ///
 /// mpv retains fullscreen ownership. The callback serializes a fullscreen
 /// request through mpv; the presenter never independently toggles the root.
@@ -515,7 +573,7 @@ where
     }
 
     pub const fn relationship(&self) -> MacOsPresenterStrategy {
-        MacOsPresenterStrategy::NativeRootChildWindow
+        MacOsPresenterStrategy::NativeRootSubview
     }
 
     pub const fn last_snapshot(&self) -> Option<MacOsWindowSnapshot> {
@@ -528,7 +586,40 @@ where
             presenter_error("macOS presenter is not attached")
         })?;
         self.windows
-            .activate(attachment.overlay)
+            .focus_view(self.video_root, attachment.view)
+            .map_err(PlaybackError::from)?;
+        Ok(())
+    }
+
+    /// Hand the active mouse-down event to AppKit so the retained mpv root,
+    /// rather than the hidden Iced staging owner, participates in the drag.
+    ///
+    /// Presses that race attachment, visibility, or teardown are intentionally
+    /// ignored; they must not resurrect or move the donor window.
+    pub fn begin_window_drag(&mut self) -> Result<bool, PlaybackError> {
+        let Some(attachment) = self.attachment else {
+            return Ok(false);
+        };
+        if self.applied_visible != Some(true)
+            || self.suspended
+            || !self.windows.is_window(self.video_root)
+            || !self.windows.is_view(attachment.view)
+            || self.windows.view_window(attachment.view)
+                != Some(self.video_root)
+        {
+            return Ok(false);
+        }
+        let snapshot =
+            self.windows.snapshot(self.video_root, attachment.view)?;
+        if !snapshot.visible_on_active_space
+            || snapshot.miniaturized
+            || snapshot.fullscreen
+            || !snapshot.overlay_in_root_content
+        {
+            return Ok(false);
+        }
+        self.windows
+            .begin_window_drag(self.video_root)
             .map_err(Into::into)
     }
 
@@ -547,19 +638,22 @@ where
         }
     }
 
-    fn refresh_position_and_visibility(
+    fn refresh_geometry_and_visibility(
         &mut self,
         attachment: MacOsAttachment,
     ) -> Result<(), PlaybackError> {
         if !self.windows.is_window(self.video_root)
-            || !self.windows.is_window(attachment.overlay)
+            || !self.windows.is_window(attachment.original_owner)
+            || !self.windows.is_view(attachment.view)
         {
             return Err(presenter_error(
-                "macOS presenter window was destroyed before synchronization",
+                "macOS presenter AppKit lease was destroyed before synchronization",
             ));
         }
-        let snapshot = self.windows.snapshot(self.video_root)?;
-        let rect = snapshot.content_rect.validate()?;
+        let mut snapshot =
+            self.windows.snapshot(self.video_root, attachment.view)?;
+        let bounds = snapshot.content_bounds.validate()?;
+        let overlay_frame = snapshot.overlay_frame.validate()?;
         if !snapshot.backing_scale_factor.is_finite()
             || snapshot.backing_scale_factor <= 0.0
         {
@@ -567,23 +661,47 @@ where
                 "AppKit returned an invalid backing scale factor",
             ));
         }
-        if self.last_snapshot.map(|snapshot| snapshot.content_rect)
-            != Some(rect)
+        if !snapshot.overlay_in_root_content
+            || self.windows.view_window(attachment.view)
+                != Some(self.video_root)
         {
-            self.windows.position_overlay(attachment.overlay, rect)?;
+            return Err(presenter_error(
+                "Iced AppKit view left the mpv content hierarchy",
+            ));
+        }
+        let mut repaired = false;
+        if !snapshot.overlay_topmost {
+            self.windows
+                .raise_view_above(self.video_root, attachment.view)?;
+            repaired = true;
+        }
+        if overlay_frame != bounds {
+            self.windows.set_view_frame(attachment.view, bounds)?;
+            repaired = true;
+        }
+        if repaired {
+            snapshot =
+                self.windows.snapshot(self.video_root, attachment.view)?;
+            if !snapshot.overlay_in_root_content
+                || !snapshot.overlay_topmost
+                || snapshot.overlay_frame.validate()? != bounds
+                || self.windows.view_window(attachment.view)
+                    != Some(self.video_root)
+            {
+                return Err(presenter_error(
+                    "Iced AppKit view geometry or z-order repair did not stick",
+                ));
+            }
         }
         let visible = self.requested_visible
             && !self.suspended
             && self.geometry_visible
             && snapshot.visible_on_active_space
             && !snapshot.miniaturized;
-        // Do not hide solely from the root's occlusion bit. AppKit may count
-        // this presenter's own transparent child as occluding the mpv root,
-        // which would otherwise create a show/hide feedback loop. Parent/child
-        // ordering already follows other-app occlusion.
+        // AppKit naturally occludes the view with its owning mpv window. Do
+        // not mutate visibility from the root's transient occlusion bit.
         if self.applied_visible != Some(visible) {
-            self.windows
-                .set_visible_without_activation(attachment.overlay, visible)?;
+            self.windows.set_view_hidden(attachment.view, !visible)?;
             self.applied_visible = Some(visible);
         }
         self.last_snapshot = Some(snapshot);
@@ -591,26 +709,33 @@ where
     }
 
     fn restore_attachment(&mut self, attachment: MacOsAttachment) {
-        if self.windows.is_window(attachment.overlay) {
-            let _ = self
-                .windows
-                .set_visible_without_activation(attachment.overlay, false);
-            if self.windows.parent_window(attachment.overlay)
-                == Some(self.video_root)
-            {
-                self.windows
-                    .remove_child(self.video_root, attachment.overlay);
-            }
-            let _ = self.windows.set_collection_behavior(
-                attachment.overlay,
-                attachment.original_collection_behavior,
+        if self.windows.is_view(attachment.view) {
+            // Prevent a one-frame flash while the Iced renderer returns to its
+            // staging owner. The staging window itself is never used to
+            // present controls and its visibility is not changed here.
+            let _ = self.windows.set_view_hidden(attachment.view, true);
+            // First remove the view from mpv unconditionally, then restore it
+            // only if the retained donor is still usable.
+            self.windows.restore_view_to_owner(
+                attachment.original_owner,
+                attachment.view,
             );
-            let _ = self.windows.set_ignores_mouse_events(
-                attachment.overlay,
-                attachment.original_ignores_mouse_events,
+            let _ = self.windows.set_view_frame(
+                attachment.view,
+                attachment.original_state.frame,
+            );
+            let _ = self.windows.set_view_autoresizing_mask(
+                attachment.view,
+                attachment.original_state.autoresizing_mask,
+            );
+            let _ = self.windows.set_view_hidden(
+                attachment.view,
+                attachment.original_state.hidden,
             );
         }
-        self.windows.release_window(attachment.overlay);
+        // Restoration must happen while both objects are still retained.
+        self.windows.release_view(attachment.view);
+        self.windows.release_window(attachment.original_owner);
         self.applied_visible = None;
     }
 }
@@ -630,7 +755,7 @@ where
         identity: PresenterIdentity,
         host: Self::Host<'_>,
     ) -> Result<(), PlaybackError> {
-        if !matches!(self.build_mode, MacOsPresenterBuildMode::Spike) {
+        if !self.build_mode.enabled() {
             return Err(presenter_error(
                 "macOS integrated presenter is disabled in this build",
             ));
@@ -640,61 +765,62 @@ where
                 "macOS presenter attach was requested more than once",
             ));
         }
-        if host.overlay == self.video_root {
+        if host.original_owner == self.video_root {
             return Err(presenter_error(
-                "macOS presenter received identical root and overlay windows",
+                "Iced AppKit view is already owned by the mpv root window",
             ));
         }
-        self.windows.retain_window(host.overlay)?;
-        if !self.windows.is_window(host.overlay)
+        self.windows.retain_window(host.original_owner)?;
+        if let Err(error) = self.windows.retain_view(host.view) {
+            self.windows.release_window(host.original_owner);
+            return Err(error.into());
+        }
+        if !self.windows.is_window(host.original_owner)
             || !self.windows.is_window(self.video_root)
+            || !self.windows.is_view(host.view)
         {
-            self.windows.release_window(host.overlay);
+            self.windows.release_view(host.view);
+            self.windows.release_window(host.original_owner);
             return Err(presenter_error(
-                "macOS presenter received a stale AppKit window",
+                "macOS presenter received a stale AppKit host",
             ));
         }
-        if self.windows.parent_window(host.overlay).is_some() {
-            self.windows.release_window(host.overlay);
+        if self.windows.view_window(host.view) != Some(host.original_owner)
+            || !self
+                .windows
+                .is_window_content_view(host.original_owner, host.view)
+        {
+            self.windows.release_view(host.view);
+            self.windows.release_window(host.original_owner);
             return Err(presenter_error(
-                "Iced AppKit overlay already has a parent window",
+                "Iced AppKit NSView is not its captured owner's content view",
             ));
         }
 
-        let original_collection_behavior =
-            match self.windows.collection_behavior(host.overlay) {
-                Ok(behavior) => behavior,
-                Err(error) => {
-                    self.windows.release_window(host.overlay);
-                    return Err(error.into());
-                }
-            };
-        let original_ignores_mouse_events =
-            match self.windows.ignores_mouse_events(host.overlay) {
-                Ok(ignores) => ignores,
-                Err(error) => {
-                    self.windows.release_window(host.overlay);
-                    return Err(error.into());
-                }
-            };
+        let original_state = match self.windows.view_state(host.view) {
+            Ok(state) => state,
+            Err(error) => {
+                self.windows.release_view(host.view);
+                self.windows.release_window(host.original_owner);
+                return Err(error.into());
+            }
+        };
         let attachment = MacOsAttachment {
             identity,
-            overlay: host.overlay,
-            original_collection_behavior,
-            original_ignores_mouse_events,
+            view: host.view,
+            original_owner: host.original_owner,
+            original_state,
         };
 
-        let behavior = original_collection_behavior
-            | COLLECTION_TRANSIENT
-            | COLLECTION_FULLSCREEN_AUXILIARY;
         let setup = (|| {
-            self.windows
-                .set_visible_without_activation(host.overlay, false)?;
+            self.windows.set_view_hidden(host.view, true)?;
             self.applied_visible = Some(false);
-            self.windows.set_ignores_mouse_events(host.overlay, false)?;
             self.windows
-                .set_collection_behavior(host.overlay, behavior)?;
-            self.windows.add_child_above(self.video_root, host.overlay)
+                .reparent_view_above(self.video_root, host.view)?;
+            self.windows.set_view_autoresizing_mask(
+                host.view,
+                VIEW_WIDTH_SIZABLE | VIEW_HEIGHT_SIZABLE,
+            )
         })();
         if let Err(error) = setup {
             self.restore_attachment(attachment);
@@ -702,11 +828,12 @@ where
         }
 
         self.attachment = Some(attachment);
-        if let Err(error) = self.refresh_position_and_visibility(attachment) {
+        if let Err(error) = self.refresh_geometry_and_visibility(attachment) {
             self.attachment = None;
             self.restore_attachment(attachment);
             return Err(error);
         }
+        self.attachment = Some(attachment);
         Ok(())
     }
 
@@ -722,7 +849,7 @@ where
         })?;
         let attachment = self.ensure_identity(identity)?;
         self.geometry_visible = geometry.is_visible();
-        self.refresh_position_and_visibility(attachment)
+        self.refresh_geometry_and_visibility(attachment)
     }
 
     fn set_visible(
@@ -731,8 +858,15 @@ where
         visible: bool,
     ) -> Result<(), PlaybackError> {
         let attachment = self.ensure_identity(identity)?;
+        let was_applied = self.applied_visible;
         self.requested_visible = visible;
-        self.refresh_position_and_visibility(attachment)
+        self.refresh_geometry_and_visibility(attachment)?;
+        if was_applied != Some(true) && self.applied_visible == Some(true) {
+            // Winit's donor window is deliberately not made key. Keyboard
+            // input follows the reparented view through mpv's root instead.
+            self.windows.focus_view(self.video_root, attachment.view)?;
+        }
+        Ok(())
     }
 
     fn set_suspended(
@@ -742,7 +876,7 @@ where
     ) -> Result<(), PlaybackError> {
         let attachment = self.ensure_identity(identity)?;
         self.suspended = suspended;
-        self.refresh_position_and_visibility(attachment)
+        self.refresh_geometry_and_visibility(attachment)
     }
 
     fn set_fullscreen(
@@ -769,6 +903,7 @@ where
         }
         self.attachment = None;
         self.requested_visible = false;
+        self.suspended = false;
         self.geometry_visible = false;
         self.applied_visible = None;
         self.last_snapshot = None;
@@ -789,6 +924,10 @@ pub struct AppKitWindowSystem {
         MacOsWindow,
         objc2::rc::Retained<objc2_app_kit::NSWindow>,
     >,
+    views: std::collections::HashMap<
+        MacOsView,
+        objc2::rc::Retained<objc2_app_kit::NSView>,
+    >,
 }
 
 #[cfg(target_os = "macos")]
@@ -797,6 +936,7 @@ impl fmt::Debug for AppKitWindowSystem {
         formatter
             .debug_struct("AppKitWindowSystem")
             .field("retained_window_count", &self.windows.len())
+            .field("retained_view_count", &self.views.len())
             .finish()
     }
 }
@@ -808,7 +948,7 @@ impl AppKitWindowSystem {
         objc2::MainThreadMarker::new().is_some()
     }
 
-    /// Retain mpv's live `NSWindow` on the AppKit main thread.
+    /// Resolve and retain mpv's live `NSWindow` on the AppKit main thread.
     ///
     /// Call this only after `vo-configured=true` and a non-zero macOS
     /// `window-id` observation. mpv owns the source pointer contract.
@@ -819,6 +959,7 @@ impl AppKitWindowSystem {
         Ok(Self {
             _main_thread: main_thread,
             windows: std::collections::HashMap::from([(video_root, root)]),
+            views: std::collections::HashMap::new(),
         })
     }
 
@@ -830,17 +971,34 @@ impl AppKitWindowSystem {
         window: MacOsWindow,
     ) -> Result<objc2::rc::Retained<objc2_app_kit::NSWindow>, MacOsPresenterError>
     {
-        // SAFETY: callers obtain identities only from mpv's macOS
-        // VOCTRL_GET_WINDOW_ID or NSView.window. Both are NSWindow pointers,
-        // and construction is restricted to the AppKit main thread.
+        let main_thread = objc2::MainThreadMarker::new()
+            .ok_or(MacOsPresenterError::AppKitMainThreadRequired)?;
+        let app = objc2_app_kit::NSApplication::sharedApplication(main_thread);
+        app.windows()
+            .into_iter()
+            .find(|candidate| Self::window_identity(candidate) == window)
+            .ok_or_else(|| {
+                MacOsPresenterError::Operation(
+                    "AppKit NSWindow identity is no longer live".to_owned(),
+                )
+            })
+    }
+
+    fn retain_native_view(
+        view: MacOsView,
+    ) -> Result<objc2::rc::Retained<objc2_app_kit::NSView>, MacOsPresenterError>
+    {
+        // SAFETY: the identity comes from raw-window-handle's live `ns_view`
+        // lease and is retained on the AppKit main thread before that host
+        // lease can end.
         unsafe {
             objc2::rc::Retained::retain(
-                window.get() as *mut objc2_app_kit::NSWindow
+                view.get() as *mut objc2_app_kit::NSView
             )
         }
         .ok_or_else(|| {
             MacOsPresenterError::Operation(
-                "could not retain AppKit NSWindow".to_owned(),
+                "could not retain AppKit NSView".to_owned(),
             )
         })
     }
@@ -856,11 +1014,76 @@ impl AppKitWindowSystem {
         })
     }
 
-    fn identity(window: &objc2_app_kit::NSWindow) -> MacOsWindow {
+    fn view(
+        &self,
+        view: MacOsView,
+    ) -> Result<&objc2_app_kit::NSView, MacOsPresenterError> {
+        self.views.get(&view).map(AsRef::as_ref).ok_or_else(|| {
+            MacOsPresenterError::Operation(
+                "AppKit view lease is unavailable".to_owned(),
+            )
+        })
+    }
+
+    fn window_identity(window: &objc2_app_kit::NSWindow) -> MacOsWindow {
         let raw = NonZeroUsize::new(window as *const _ as usize)
             .expect("Objective-C object references are non-null");
         MacOsWindow::from_non_zero(raw)
     }
+
+    fn view_identity(view: &objc2_app_kit::NSView) -> MacOsView {
+        let raw = NonZeroUsize::new(view as *const _ as usize)
+            .expect("Objective-C object references are non-null");
+        MacOsView::from_non_zero(raw)
+    }
+}
+
+/// Synchronously remove mpv's live native root from the visible AppKit window
+/// set without destroying it.
+///
+/// Shutdown remains asynchronous because libmpv may dispatch teardown work
+/// back to AppKit. `orderOut:` is the non-destructive visibility barrier that
+/// lets the shell restore or a replacement root open without a two-window
+/// interval. Pointer identity is matched only against AppKit's retained live
+/// application windows; the observed mpv value is never blindly retained at
+/// teardown.
+#[cfg(target_os = "macos")]
+pub(crate) fn withdraw_mpv_root_window(
+    native_window_id: i64,
+) -> Result<(), PlaybackError> {
+    let target = MacOsWindow::from_mpv_window_id(native_window_id)
+        .map_err(PlaybackError::from)?;
+    let main_thread = objc2::MainThreadMarker::new().ok_or_else(|| {
+        presenter_error(
+            "mpv native-root withdrawal requires the AppKit main thread",
+        )
+    })?;
+    let app = objc2_app_kit::NSApplication::sharedApplication(main_thread);
+    for window in app.windows() {
+        let Some(raw) =
+            NonZeroUsize::new(objc2::rc::Retained::as_ptr(&window) as usize)
+        else {
+            continue;
+        };
+        if MacOsWindow::from_non_zero(raw) != target {
+            continue;
+        }
+        window.orderOut(None);
+        if window.isVisible() {
+            return Err(presenter_error(
+                "AppKit kept mpv's native root visible after orderOut",
+            ));
+        }
+        log::debug!("mpv native root withdrawn before asynchronous teardown");
+        return Ok(());
+    }
+
+    // Absence from NSApplication.windows means the observed root has already
+    // left the application's live top-level window set.
+    log::debug!(
+        "mpv native root was already absent from AppKit's live window set"
+    );
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -879,146 +1102,256 @@ impl MacOsWindowSystem for AppKitWindowSystem {
         self.windows.remove(&window);
     }
 
-    fn is_window(&self, window: MacOsWindow) -> bool {
-        self.is_live(window)
-    }
-
-    fn parent_window(&self, window: MacOsWindow) -> Option<MacOsWindow> {
-        self.window(window)
-            .ok()
-            .and_then(objc2_app_kit::NSWindow::parentWindow)
-            .as_deref()
-            .map(Self::identity)
-    }
-
-    fn collection_behavior(
-        &self,
-        window: MacOsWindow,
-    ) -> Result<u64, MacOsPresenterError> {
-        Ok(self.window(window)?.collectionBehavior().0 as u64)
-    }
-
-    fn set_collection_behavior(
+    fn retain_view(
         &mut self,
-        window: MacOsWindow,
-        behavior: u64,
+        view: MacOsView,
     ) -> Result<(), MacOsPresenterError> {
-        let behavior = usize::try_from(behavior).map_err(|_| {
-            MacOsPresenterError::Operation(
-                "AppKit collection behavior is out of range".to_owned(),
-            )
-        })?;
-        self.window(window)?.setCollectionBehavior(
-            objc2_app_kit::NSWindowCollectionBehavior::from_bits_retain(
-                behavior,
-            ),
-        );
-        Ok(())
-    }
-
-    fn ignores_mouse_events(
-        &self,
-        window: MacOsWindow,
-    ) -> Result<bool, MacOsPresenterError> {
-        Ok(self.window(window)?.ignoresMouseEvents())
-    }
-
-    fn set_ignores_mouse_events(
-        &mut self,
-        window: MacOsWindow,
-        ignores: bool,
-    ) -> Result<(), MacOsPresenterError> {
-        self.window(window)?.setIgnoresMouseEvents(ignores);
-        Ok(())
-    }
-
-    fn add_child_above(
-        &mut self,
-        root: MacOsWindow,
-        child: MacOsWindow,
-    ) -> Result<(), MacOsPresenterError> {
-        // SAFETY: both retained objects are NSWindows, have no existing child
-        // relationship, and this is executed on the AppKit main thread.
-        unsafe {
-            self.window(root)?.addChildWindow_ordered(
-                self.window(child)?,
-                objc2_app_kit::NSWindowOrderingMode::Above,
-            );
+        if !self.views.contains_key(&view) {
+            self.views.insert(view, Self::retain_native_view(view)?);
         }
         Ok(())
     }
 
-    fn remove_child(&mut self, root: MacOsWindow, child: MacOsWindow) {
-        if let (Ok(root), Ok(child)) = (self.window(root), self.window(child)) {
-            root.removeChildWindow(child);
+    fn release_view(&mut self, view: MacOsView) {
+        self.views.remove(&view);
+    }
+
+    fn is_window(&self, window: MacOsWindow) -> bool {
+        self.is_live(window)
+    }
+
+    fn is_view(&self, view: MacOsView) -> bool {
+        self.views.contains_key(&view)
+    }
+
+    fn view_window(&self, view: MacOsView) -> Option<MacOsWindow> {
+        self.view(view)
+            .ok()
+            .and_then(objc2_app_kit::NSView::window)
+            .as_deref()
+            .map(Self::window_identity)
+    }
+
+    fn is_window_content_view(
+        &self,
+        owner: MacOsWindow,
+        view: MacOsView,
+    ) -> bool {
+        self.window(owner)
+            .ok()
+            .and_then(objc2_app_kit::NSWindow::contentView)
+            .as_deref()
+            .map(Self::view_identity)
+            == Some(view)
+    }
+
+    fn view_state(
+        &self,
+        view: MacOsView,
+    ) -> Result<MacOsViewState, MacOsPresenterError> {
+        let view = self.view(view)?;
+        let frame = view.frame();
+        Ok(MacOsViewState {
+            frame: MacOsViewRect {
+                x: frame.origin.x,
+                y: frame.origin.y,
+                width: frame.size.width,
+                height: frame.size.height,
+            },
+            autoresizing_mask: view.autoresizingMask().0 as u64,
+            hidden: view.isHidden(),
+        })
+    }
+
+    fn set_view_frame(
+        &mut self,
+        view: MacOsView,
+        frame: MacOsViewRect,
+    ) -> Result<(), MacOsPresenterError> {
+        let frame = frame.validate()?;
+        self.view(view)?.setFrame(objc2_foundation::NSRect::new(
+            objc2_foundation::NSPoint::new(frame.x, frame.y),
+            objc2_foundation::NSSize::new(frame.width, frame.height),
+        ));
+        Ok(())
+    }
+
+    fn set_view_autoresizing_mask(
+        &mut self,
+        view: MacOsView,
+        mask: u64,
+    ) -> Result<(), MacOsPresenterError> {
+        let mask = usize::try_from(mask).map_err(|_| {
+            MacOsPresenterError::Operation(
+                "AppKit autoresizing mask is out of range".to_owned(),
+            )
+        })?;
+        self.view(view)?.setAutoresizingMask(
+            objc2_app_kit::NSAutoresizingMaskOptions::from_bits_retain(mask),
+        );
+        Ok(())
+    }
+
+    fn raise_view_above(
+        &mut self,
+        root: MacOsWindow,
+        view: MacOsView,
+    ) -> Result<(), MacOsPresenterError> {
+        let root_content =
+            self.window(root)?.contentView().ok_or_else(|| {
+                MacOsPresenterError::Operation(
+                    "mpv AppKit window has no content view".to_owned(),
+                )
+            })?;
+        let view = self.view(view)?;
+        root_content.addSubview_positioned_relativeTo(
+            view,
+            objc2_app_kit::NSWindowOrderingMode::Above,
+            None,
+        );
+        Ok(())
+    }
+
+    fn set_view_hidden(
+        &mut self,
+        view: MacOsView,
+        hidden: bool,
+    ) -> Result<(), MacOsPresenterError> {
+        self.view(view)?.setHidden(hidden);
+        Ok(())
+    }
+
+    fn reparent_view_above(
+        &mut self,
+        root: MacOsWindow,
+        view: MacOsView,
+    ) -> Result<(), MacOsPresenterError> {
+        let root_content =
+            self.window(root)?.contentView().ok_or_else(|| {
+                MacOsPresenterError::Operation(
+                    "mpv AppKit window has no content view".to_owned(),
+                )
+            })?;
+        let view = self.view(view)?;
+        view.removeFromSuperview();
+        root_content.addSubview_positioned_relativeTo(
+            view,
+            objc2_app_kit::NSWindowOrderingMode::Above,
+            None,
+        );
+        Ok(())
+    }
+
+    fn restore_view_to_owner(&mut self, owner: MacOsWindow, view: MacOsView) {
+        let Ok(view) = self.view(view) else {
+            return;
+        };
+        view.removeFromSuperview();
+        if let Ok(owner) = self.window(owner) {
+            owner.setContentView(Some(view));
         }
     }
 
     fn snapshot(
         &self,
         root: MacOsWindow,
+        view: MacOsView,
     ) -> Result<MacOsWindowSnapshot, MacOsPresenterError> {
         let root = self.window(root)?;
+        let view = self.view(view)?;
         let content = root.contentView().ok_or_else(|| {
             MacOsPresenterError::Operation(
                 "mpv AppKit window has no content view".to_owned(),
             )
         })?;
-        let window_rect = content.convertRect_toView(content.bounds(), None);
-        let screen_rect = root.convertRectToScreen(window_rect);
+        let bounds = content.bounds();
+        let overlay_frame = view.frame();
         let occluded = !root
             .occlusionState()
             .contains(objc2_app_kit::NSWindowOcclusionState::Visible);
+        let overlay_in_root_content =
+            view.window().as_deref().map(Self::window_identity)
+                == Some(Self::window_identity(root))
+                && view.isDescendantOf(&content);
+        let overlay_topmost = content
+            .subviews()
+            .into_iter()
+            .last()
+            .is_some_and(|candidate| {
+                Self::view_identity(&candidate) == Self::view_identity(view)
+            });
+        let child_window_count = root
+            .childWindows()
+            .map(|children| children.count())
+            .unwrap_or(0);
         Ok(MacOsWindowSnapshot {
-            content_rect: MacOsScreenRect {
-                x: screen_rect.origin.x,
-                y: screen_rect.origin.y,
-                width: screen_rect.size.width,
-                height: screen_rect.size.height,
+            content_bounds: MacOsViewRect {
+                x: bounds.origin.x,
+                y: bounds.origin.y,
+                width: bounds.size.width,
+                height: bounds.size.height,
+            },
+            overlay_frame: MacOsViewRect {
+                x: overlay_frame.origin.x,
+                y: overlay_frame.origin.y,
+                width: overlay_frame.size.width,
+                height: overlay_frame.size.height,
             },
             backing_scale_factor: root.backingScaleFactor(),
             visible_on_active_space: root.isVisible() && root.isOnActiveSpace(),
             occluded,
             miniaturized: root.isMiniaturized(),
+            fullscreen: root
+                .styleMask()
+                .contains(objc2_app_kit::NSWindowStyleMask::FullScreen),
+            overlay_in_root_content,
+            overlay_topmost,
+            child_window_count,
         })
     }
 
-    fn position_overlay(
+    fn focus_view(
         &mut self,
-        overlay: MacOsWindow,
-        rect: MacOsScreenRect,
+        root: MacOsWindow,
+        view: MacOsView,
     ) -> Result<(), MacOsPresenterError> {
-        let rect = rect.validate()?;
-        self.window(overlay)?.setFrame_display(
-            objc2_foundation::NSRect::new(
-                objc2_foundation::NSPoint::new(rect.x, rect.y),
-                objc2_foundation::NSSize::new(rect.width, rect.height),
-            ),
-            true,
-        );
-        Ok(())
-    }
-
-    fn set_visible_without_activation(
-        &mut self,
-        overlay: MacOsWindow,
-        visible: bool,
-    ) -> Result<(), MacOsPresenterError> {
-        let overlay = self.window(overlay)?;
-        if visible {
-            overlay.orderFront(None);
+        if self
+            .window(root)?
+            .makeFirstResponder(Some(self.view(view)?))
+        {
+            Ok(())
         } else {
-            overlay.orderOut(None);
+            Err(MacOsPresenterError::Operation(
+                "mpv AppKit window rejected the Iced first responder"
+                    .to_owned(),
+            ))
         }
-        Ok(())
     }
 
-    fn activate(
+    fn begin_window_drag(
         &mut self,
-        window: MacOsWindow,
-    ) -> Result<(), MacOsPresenterError> {
-        self.window(window)?.makeKeyWindow();
-        Ok(())
+        root: MacOsWindow,
+    ) -> Result<bool, MacOsPresenterError> {
+        let Some(event) =
+            objc2_app_kit::NSApplication::sharedApplication(self._main_thread)
+                .currentEvent()
+        else {
+            return Ok(false);
+        };
+        if event.r#type() != objc2_app_kit::NSEventType::LeftMouseDown {
+            return Ok(false);
+        }
+        let root = self.window(root)?;
+        let event_targets_root = event
+            .window(self._main_thread)
+            .as_deref()
+            .map(Self::window_identity)
+            == Some(Self::window_identity(root));
+        if !event_targets_root {
+            return Ok(false);
+        }
+        root.performWindowDragWithEvent(&event);
+        Ok(true)
     }
 }
 
@@ -1038,6 +1371,75 @@ impl From<MacOsPresenterError> for PlaybackError {
     fn from(error: MacOsPresenterError) -> Self {
         presenter_error(error.to_string())
     }
+}
+
+/// Pointer-free facts required before a presenter failure can be called a
+/// completed native-window fallback.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NativeFallbackWindowObservation {
+    visible: bool,
+    on_active_space: bool,
+    miniaturized: bool,
+    has_content_view: bool,
+    can_become_key: bool,
+    movable: bool,
+    titled: bool,
+    resizable: bool,
+    child_window_count: usize,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl NativeFallbackWindowObservation {
+    const fn qualifies(self) -> bool {
+        self.visible
+            && self.on_active_space
+            && !self.miniaturized
+            && self.has_content_view
+            && self.can_become_key
+            && self.movable
+            && self.titled
+            && self.resizable
+            && self.child_window_count == 0
+    }
+}
+
+/// Confirm that mpv's post-detach AppKit root is a live visible, movable,
+/// resizable native window. The raw identity is matched only inside AppKit and
+/// is never retained in the evidence projection.
+#[cfg(target_os = "macos")]
+pub(crate) fn verify_mpv_native_fallback_window(
+    native_window_id: i64,
+) -> Result<bool, PlaybackError> {
+    let target = MacOsWindow::from_mpv_window_id(native_window_id)
+        .map_err(PlaybackError::from)?;
+    let main_thread = objc2::MainThreadMarker::new().ok_or_else(|| {
+        presenter_error(
+            "mpv native fallback verification requires the AppKit main thread",
+        )
+    })?;
+    let app = objc2_app_kit::NSApplication::sharedApplication(main_thread);
+    let Some(window) = app.windows().into_iter().find(|candidate| {
+        AppKitWindowSystem::window_identity(candidate) == target
+    }) else {
+        return Ok(false);
+    };
+    let style = window.styleMask();
+    Ok(NativeFallbackWindowObservation {
+        visible: window.isVisible(),
+        on_active_space: window.isOnActiveSpace(),
+        miniaturized: window.isMiniaturized(),
+        has_content_view: window.contentView().is_some(),
+        can_become_key: window.canBecomeKeyWindow(),
+        movable: window.isMovable(),
+        titled: style.contains(objc2_app_kit::NSWindowStyleMask::Titled),
+        resizable: style.contains(objc2_app_kit::NSWindowStyleMask::Resizable),
+        child_window_count: window
+            .childWindows()
+            .map(|children| children.count())
+            .unwrap_or(0),
+    }
+    .qualifies())
 }
 
 fn presenter_error(message: impl Into<String>) -> PlaybackError {
@@ -1063,6 +1465,10 @@ mod tests {
         MacOsWindow::from_non_zero(NonZeroUsize::new(value).unwrap())
     }
 
+    fn view(value: usize) -> MacOsView {
+        MacOsView::from_non_zero(NonZeroUsize::new(value).unwrap())
+    }
+
     fn identity(value: u64) -> PresenterIdentity {
         PresenterIdentity::new(
             SessionGeneration::new(value),
@@ -1082,65 +1488,191 @@ mod tests {
     #[derive(Debug, Clone)]
     struct WindowState {
         live: bool,
-        parent: Option<MacOsWindow>,
-        behavior: u64,
-        ignores_mouse: bool,
+        content_view: MacOsView,
         visible: bool,
-        frame: Option<MacOsScreenRect>,
+        active_space: bool,
+        occluded: bool,
+        miniaturized: bool,
+        fullscreen: bool,
+        backing_scale_factor: f64,
+        child_window_count: usize,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct ViewState {
+        live: bool,
+        window: Option<MacOsWindow>,
+        superview: Option<MacOsView>,
+        topmost_in_superview: bool,
+        frame: MacOsViewRect,
+        autoresizing_mask: u64,
+        hidden: bool,
+    }
+
+    #[derive(Debug, Default)]
+    struct FakeState {
+        windows: HashMap<MacOsWindow, WindowState>,
+        views: HashMap<MacOsView, ViewState>,
+        retained_windows: HashMap<MacOsWindow, usize>,
+        retained_views: HashMap<MacOsView, usize>,
+        dragged_roots: Vec<MacOsWindow>,
+        drag_event_available: bool,
     }
 
     #[derive(Debug, Clone)]
     struct FakeAppKit {
-        state: Rc<RefCell<HashMap<MacOsWindow, WindowState>>>,
-        snapshot: Rc<RefCell<MacOsWindowSnapshot>>,
+        state: Rc<RefCell<FakeState>>,
         operations: Rc<RefCell<Vec<String>>>,
+        fail_next: Rc<RefCell<Option<&'static str>>>,
     }
 
     impl FakeAppKit {
-        fn new(video: MacOsWindow, overlay: MacOsWindow) -> Self {
+        fn new(
+            video: MacOsWindow,
+            owner: MacOsWindow,
+            overlay: MacOsView,
+        ) -> Self {
+            let root_content = view(9_000_000 + video.get());
+            let content_bounds = MacOsViewRect {
+                x: 0.0,
+                y: 0.0,
+                width: 1280.0,
+                height: 720.0,
+            };
             Self {
-                state: Rc::new(RefCell::new(HashMap::from([
-                    (
-                        video,
-                        WindowState {
-                            live: true,
-                            parent: None,
-                            behavior: 0,
-                            ignores_mouse: false,
-                            visible: true,
-                            frame: None,
-                        },
-                    ),
-                    (
-                        overlay,
-                        WindowState {
-                            live: true,
-                            parent: None,
-                            behavior: 0x20,
-                            ignores_mouse: true,
-                            visible: false,
-                            frame: None,
-                        },
-                    ),
-                ]))),
-                snapshot: Rc::new(RefCell::new(MacOsWindowSnapshot {
-                    content_rect: MacOsScreenRect {
-                        x: 40.0,
-                        y: 80.0,
-                        width: 1280.0,
-                        height: 720.0,
-                    },
-                    backing_scale_factor: 2.0,
-                    visible_on_active_space: true,
-                    occluded: false,
-                    miniaturized: false,
+                state: Rc::new(RefCell::new(FakeState {
+                    windows: HashMap::from([
+                        (
+                            video,
+                            WindowState {
+                                live: true,
+                                content_view: root_content,
+                                visible: true,
+                                active_space: true,
+                                occluded: false,
+                                miniaturized: false,
+                                fullscreen: false,
+                                backing_scale_factor: 2.0,
+                                child_window_count: 0,
+                            },
+                        ),
+                        (
+                            owner,
+                            WindowState {
+                                live: true,
+                                content_view: overlay,
+                                // The shell hides the retained donor before it
+                                // asks the presenter to expose the in-root view.
+                                visible: false,
+                                active_space: true,
+                                occluded: false,
+                                miniaturized: false,
+                                fullscreen: false,
+                                backing_scale_factor: 2.0,
+                                child_window_count: 0,
+                            },
+                        ),
+                    ]),
+                    views: HashMap::from([
+                        (
+                            root_content,
+                            ViewState {
+                                live: true,
+                                window: Some(video),
+                                superview: None,
+                                topmost_in_superview: false,
+                                frame: content_bounds,
+                                autoresizing_mask: 0,
+                                hidden: false,
+                            },
+                        ),
+                        (
+                            overlay,
+                            ViewState {
+                                live: true,
+                                window: Some(owner),
+                                superview: None,
+                                topmost_in_superview: false,
+                                frame: MacOsViewRect {
+                                    x: 5.0,
+                                    y: 10.0,
+                                    width: 640.0,
+                                    height: 360.0,
+                                },
+                                autoresizing_mask: 0x20,
+                                hidden: false,
+                            },
+                        ),
+                    ]),
+                    drag_event_available: true,
+                    ..FakeState::default()
                 })),
                 operations: Rc::new(RefCell::new(Vec::new())),
+                fail_next: Rc::new(RefCell::new(None)),
             }
         }
 
         fn operation(&self, value: impl Into<String>) {
             self.operations.borrow_mut().push(value.into());
+        }
+
+        fn maybe_fail(
+            &self,
+            operation: &'static str,
+        ) -> Result<(), MacOsPresenterError> {
+            if self.fail_next.borrow().as_ref() == Some(&operation) {
+                self.fail_next.borrow_mut().take();
+                self.operation(format!("fail:{operation}"));
+                Err(MacOsPresenterError::Operation(format!(
+                    "injected {operation} failure"
+                )))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn fail_on(&self, operation: &'static str) {
+            *self.fail_next.borrow_mut() = Some(operation);
+        }
+
+        fn original_view_state(&self, overlay: MacOsView) -> MacOsViewState {
+            let state = self.state.borrow().views[&overlay];
+            MacOsViewState {
+                frame: state.frame,
+                autoresizing_mask: state.autoresizing_mask,
+                hidden: state.hidden,
+            }
+        }
+
+        fn visible_top_level_count(&self) -> usize {
+            self.state
+                .borrow()
+                .windows
+                .values()
+                .filter(|window| window.visible)
+                .count()
+        }
+
+        fn lease_count(&self) -> usize {
+            let state = self.state.borrow();
+            state.retained_windows.values().sum::<usize>()
+                + state.retained_views.values().sum::<usize>()
+        }
+
+        fn assert_host_restored(
+            &self,
+            owner: MacOsWindow,
+            overlay: MacOsView,
+            original: MacOsViewState,
+        ) {
+            let state = self.state.borrow();
+            let view = state.views[&overlay];
+            assert_eq!(view.window, Some(owner));
+            assert_eq!(view.superview, None);
+            assert_eq!(state.windows[&owner].content_view, overlay);
+            assert_eq!(view.frame, original.frame);
+            assert_eq!(view.autoresizing_mask, original.autoresizing_mask);
+            assert_eq!(view.hidden, original.hidden);
         }
     }
 
@@ -1149,124 +1681,253 @@ mod tests {
             &mut self,
             window: MacOsWindow,
         ) -> Result<(), MacOsPresenterError> {
-            self.operation("retain");
-            self.is_window(window)
-                .then_some(())
-                .ok_or_else(|| MacOsPresenterError::Operation("stale".into()))
+            self.operation("retain_window");
+            if !self.is_window(window) {
+                return Err(MacOsPresenterError::Operation("stale".into()));
+            }
+            *self
+                .state
+                .borrow_mut()
+                .retained_windows
+                .entry(window)
+                .or_default() += 1;
+            Ok(())
         }
 
-        fn release_window(&mut self, _window: MacOsWindow) {
-            self.operation("release");
+        fn release_window(&mut self, window: MacOsWindow) {
+            self.operation("release_window");
+            let mut state = self.state.borrow_mut();
+            let count = state.retained_windows.get_mut(&window).unwrap();
+            *count -= 1;
+            if *count == 0 {
+                state.retained_windows.remove(&window);
+            }
+        }
+
+        fn retain_view(
+            &mut self,
+            view: MacOsView,
+        ) -> Result<(), MacOsPresenterError> {
+            self.operation("retain_view");
+            if !self.is_view(view) {
+                return Err(MacOsPresenterError::Operation("stale".into()));
+            }
+            *self
+                .state
+                .borrow_mut()
+                .retained_views
+                .entry(view)
+                .or_default() += 1;
+            Ok(())
+        }
+
+        fn release_view(&mut self, view: MacOsView) {
+            self.operation("release_view");
+            let mut state = self.state.borrow_mut();
+            let count = state.retained_views.get_mut(&view).unwrap();
+            *count -= 1;
+            if *count == 0 {
+                state.retained_views.remove(&view);
+            }
         }
 
         fn is_window(&self, window: MacOsWindow) -> bool {
             self.state
                 .borrow()
+                .windows
                 .get(&window)
                 .is_some_and(|state| state.live)
         }
 
-        fn parent_window(&self, window: MacOsWindow) -> Option<MacOsWindow> {
+        fn is_view(&self, view: MacOsView) -> bool {
             self.state
                 .borrow()
-                .get(&window)
-                .and_then(|state| state.parent)
+                .views
+                .get(&view)
+                .is_some_and(|state| state.live)
         }
 
-        fn collection_behavior(
+        fn view_window(&self, view: MacOsView) -> Option<MacOsWindow> {
+            self.state
+                .borrow()
+                .views
+                .get(&view)
+                .and_then(|state| state.window)
+        }
+
+        fn is_window_content_view(
             &self,
-            window: MacOsWindow,
-        ) -> Result<u64, MacOsPresenterError> {
-            Ok(self.state.borrow()[&window].behavior)
+            owner: MacOsWindow,
+            view: MacOsView,
+        ) -> bool {
+            let state = self.state.borrow();
+            state.windows.get(&owner).is_some_and(|window| {
+                window.content_view == view
+                    && state.views[&view].window == Some(owner)
+            })
         }
 
-        fn set_collection_behavior(
+        fn view_state(
+            &self,
+            view: MacOsView,
+        ) -> Result<MacOsViewState, MacOsPresenterError> {
+            let state = self.state.borrow().views[&view];
+            Ok(MacOsViewState {
+                frame: state.frame,
+                autoresizing_mask: state.autoresizing_mask,
+                hidden: state.hidden,
+            })
+        }
+
+        fn set_view_frame(
             &mut self,
-            window: MacOsWindow,
-            behavior: u64,
+            view: MacOsView,
+            frame: MacOsViewRect,
         ) -> Result<(), MacOsPresenterError> {
-            self.operation(format!("behavior:{behavior:#x}"));
-            self.state.borrow_mut().get_mut(&window).unwrap().behavior =
-                behavior;
+            self.operation("set_frame");
+            self.maybe_fail("set_frame")?;
+            self.state.borrow_mut().views.get_mut(&view).unwrap().frame = frame;
             Ok(())
         }
 
-        fn ignores_mouse_events(
-            &self,
-            window: MacOsWindow,
-        ) -> Result<bool, MacOsPresenterError> {
-            Ok(self.state.borrow()[&window].ignores_mouse)
-        }
-
-        fn set_ignores_mouse_events(
+        fn set_view_autoresizing_mask(
             &mut self,
-            window: MacOsWindow,
-            ignores: bool,
+            view: MacOsView,
+            mask: u64,
         ) -> Result<(), MacOsPresenterError> {
-            self.operation(format!("ignores:{ignores}"));
+            self.operation("set_autoresizing");
+            self.maybe_fail("set_autoresizing")?;
             self.state
                 .borrow_mut()
-                .get_mut(&window)
+                .views
+                .get_mut(&view)
                 .unwrap()
-                .ignores_mouse = ignores;
+                .autoresizing_mask = mask;
             Ok(())
         }
 
-        fn add_child_above(
+        fn set_view_hidden(
+            &mut self,
+            view: MacOsView,
+            hidden: bool,
+        ) -> Result<(), MacOsPresenterError> {
+            self.operation(format!("set_hidden:{hidden}"));
+            self.maybe_fail("set_hidden")?;
+            self.state.borrow_mut().views.get_mut(&view).unwrap().hidden =
+                hidden;
+            Ok(())
+        }
+
+        fn reparent_view_above(
             &mut self,
             root: MacOsWindow,
-            child: MacOsWindow,
+            view: MacOsView,
         ) -> Result<(), MacOsPresenterError> {
-            self.operation("add_child");
-            self.state.borrow_mut().get_mut(&child).unwrap().parent =
-                Some(root);
+            self.operation("reparent_view");
+            self.maybe_fail("reparent_view")?;
+            let mut state = self.state.borrow_mut();
+            let root_content = state.windows[&root].content_view;
+            let view = state.views.get_mut(&view).unwrap();
+            view.window = Some(root);
+            view.superview = Some(root_content);
+            view.topmost_in_superview = true;
             Ok(())
         }
 
-        fn remove_child(&mut self, root: MacOsWindow, child: MacOsWindow) {
-            self.operation("remove_child");
+        fn raise_view_above(
+            &mut self,
+            root: MacOsWindow,
+            view: MacOsView,
+        ) -> Result<(), MacOsPresenterError> {
+            self.operation("raise_view");
+            self.maybe_fail("raise_view")?;
             let mut state = self.state.borrow_mut();
-            let child = state.get_mut(&child).unwrap();
-            if child.parent == Some(root) {
-                child.parent = None;
+            let root_content = state.windows[&root].content_view;
+            let view = state.views.get_mut(&view).unwrap();
+            if view.window != Some(root) || view.superview != Some(root_content)
+            {
+                return Err(MacOsPresenterError::Operation(
+                    "view is outside root".into(),
+                ));
             }
+            view.topmost_in_superview = true;
+            Ok(())
+        }
+
+        fn restore_view_to_owner(
+            &mut self,
+            owner: MacOsWindow,
+            view: MacOsView,
+        ) {
+            self.operation("restore_owner");
+            let mut state = self.state.borrow_mut();
+            let owner_live =
+                state.windows.get(&owner).is_some_and(|window| window.live);
+            if owner_live {
+                state.windows.get_mut(&owner).unwrap().content_view = view;
+            }
+            let view_state = state.views.get_mut(&view).unwrap();
+            view_state.window = owner_live.then_some(owner);
+            view_state.superview = None;
+            view_state.topmost_in_superview = false;
         }
 
         fn snapshot(
             &self,
-            _root: MacOsWindow,
+            root: MacOsWindow,
+            view: MacOsView,
         ) -> Result<MacOsWindowSnapshot, MacOsPresenterError> {
-            Ok(*self.snapshot.borrow())
+            let state = self.state.borrow();
+            let root_state = &state.windows[&root];
+            let root_content = root_state.content_view;
+            let view_state = &state.views[&view];
+            Ok(MacOsWindowSnapshot {
+                content_bounds: state.views[&root_content].frame,
+                overlay_frame: view_state.frame,
+                backing_scale_factor: root_state.backing_scale_factor,
+                visible_on_active_space: root_state.visible
+                    && root_state.active_space,
+                occluded: root_state.occluded,
+                miniaturized: root_state.miniaturized,
+                fullscreen: root_state.fullscreen,
+                overlay_in_root_content: view_state.window == Some(root)
+                    && view_state.superview == Some(root_content),
+                overlay_topmost: view_state.topmost_in_superview,
+                child_window_count: root_state.child_window_count,
+            })
         }
 
-        fn position_overlay(
+        fn focus_view(
             &mut self,
-            overlay: MacOsWindow,
-            rect: MacOsScreenRect,
+            root: MacOsWindow,
+            view: MacOsView,
         ) -> Result<(), MacOsPresenterError> {
-            self.operation("position");
-            self.state.borrow_mut().get_mut(&overlay).unwrap().frame =
-                Some(rect);
-            Ok(())
+            self.operation("focus_root_view");
+            (self.view_window(view) == Some(root))
+                .then_some(())
+                .ok_or_else(|| {
+                    MacOsPresenterError::Operation(
+                        "view is outside root".into(),
+                    )
+                })
         }
 
-        fn set_visible_without_activation(
+        fn begin_window_drag(
             &mut self,
-            overlay: MacOsWindow,
-            visible: bool,
-        ) -> Result<(), MacOsPresenterError> {
-            self.operation(format!("visible:{visible}"));
-            self.state.borrow_mut().get_mut(&overlay).unwrap().visible =
-                visible;
-            Ok(())
-        }
-
-        fn activate(
-            &mut self,
-            _window: MacOsWindow,
-        ) -> Result<(), MacOsPresenterError> {
-            self.operation("activate");
-            Ok(())
+            root: MacOsWindow,
+        ) -> Result<bool, MacOsPresenterError> {
+            self.operation("begin_window_drag");
+            self.maybe_fail("begin_window_drag")?;
+            if !self.state.borrow().drag_event_available {
+                return Ok(false);
+            }
+            if !self.is_window(root) {
+                return Err(MacOsPresenterError::Operation(
+                    "drag root is stale".into(),
+                ));
+            }
+            self.state.borrow_mut().dragged_roots.push(root);
+            Ok(true)
         }
     }
 
@@ -1285,6 +1946,63 @@ mod tests {
         assert_eq!(fallback.to, PlaybackTarget::MPV_NATIVE_WINDOW);
         assert!(fallback.detail.contains("appkit_main_thread"));
         assert!(fallback.detail.contains("spaces"));
+    }
+
+    #[test]
+    fn native_fallback_requires_one_manageable_live_mpv_root() {
+        let verified = NativeFallbackWindowObservation {
+            visible: true,
+            on_active_space: true,
+            miniaturized: false,
+            has_content_view: true,
+            can_become_key: true,
+            movable: true,
+            titled: true,
+            resizable: true,
+            child_window_count: 0,
+        };
+        assert!(verified.qualifies());
+
+        for unqualified in [
+            NativeFallbackWindowObservation {
+                visible: false,
+                ..verified
+            },
+            NativeFallbackWindowObservation {
+                on_active_space: false,
+                ..verified
+            },
+            NativeFallbackWindowObservation {
+                miniaturized: true,
+                ..verified
+            },
+            NativeFallbackWindowObservation {
+                has_content_view: false,
+                ..verified
+            },
+            NativeFallbackWindowObservation {
+                can_become_key: false,
+                ..verified
+            },
+            NativeFallbackWindowObservation {
+                movable: false,
+                ..verified
+            },
+            NativeFallbackWindowObservation {
+                titled: false,
+                ..verified
+            },
+            NativeFallbackWindowObservation {
+                resizable: false,
+                ..verified
+            },
+            NativeFallbackWindowObservation {
+                child_window_count: 1,
+                ..verified
+            },
+        ] {
+            assert!(!unqualified.qualifies());
+        }
     }
 
     #[test]
@@ -1367,20 +2085,25 @@ mod tests {
             MacOsPresenterBuildMode::parse(Some("spike")).unwrap(),
             MacOsPresenterBuildMode::Spike
         );
+        assert!(!MacOsPresenterBuildMode::Disabled.enabled());
+        assert!(MacOsPresenterBuildMode::Spike.enabled());
         assert!(MacOsPresenterBuildMode::parse(Some("production")).is_err());
         assert!(MacOsWindow::from_mpv_window_id(0).is_err());
         assert_eq!(MacOsWindow::from_mpv_window_id(42).unwrap().get(), 42);
         let high_bit = MacOsWindow::from_mpv_window_id(i64::MIN).unwrap();
         assert_eq!(high_bit.get() as u64, i64::MIN as u64);
         assert!(!format!("{:?}", window(42)).contains("42"));
+        assert!(!format!("{:?}", view(43)).contains("43"));
     }
 
     #[test]
-    fn child_overlay_tracks_geometry_visibility_fullscreen_and_detach() {
+    fn in_root_view_tracks_visibility_fullscreen_focus_and_detach() {
         let video = window(10);
-        let overlay = window(20);
-        let appkit = FakeAppKit::new(video, overlay);
+        let donor = window(20);
+        let overlay = view(30);
+        let appkit = FakeAppKit::new(video, donor, overlay);
         let observed = appkit.clone();
+        let original = observed.original_view_state(overlay);
         let fullscreen_values = Rc::new(RefCell::new(Vec::new()));
         let fullscreen_values_for_callback = Rc::clone(&fullscreen_values);
         let mut presenter = MacOsPresenter::new(
@@ -1395,66 +2118,327 @@ mod tests {
         let id = identity(1);
 
         presenter
-            .attach(id, MacOsPresenterHost { overlay })
+            .attach(
+                id,
+                MacOsPresenterHost {
+                    view: overlay,
+                    original_owner: donor,
+                },
+            )
             .unwrap();
         {
             let state = observed.state.borrow();
-            assert_eq!(state[&overlay].parent, Some(video));
+            let overlay_state = state.views[&overlay];
+            let root_content = state.windows[&video].content_view;
+            assert_eq!(overlay_state.window, Some(video));
+            assert_eq!(overlay_state.superview, Some(root_content));
             assert_eq!(
-                state[&overlay].behavior,
-                0x20 | COLLECTION_TRANSIENT | COLLECTION_FULLSCREEN_AUXILIARY
+                overlay_state.autoresizing_mask,
+                VIEW_WIDTH_SIZABLE | VIEW_HEIGHT_SIZABLE
             );
-            assert!(!state[&overlay].ignores_mouse);
-            assert!(!state[&overlay].visible);
+            assert!(overlay_state.hidden);
+            assert_eq!(state.windows[&video].child_window_count, 0);
+            assert!(!state.windows[&donor].visible);
         }
+        assert_eq!(observed.visible_top_level_count(), 1);
 
         presenter.synchronize(id, geometry(true)).unwrap();
         presenter.set_visible(id, true).unwrap();
-        assert!(observed.state.borrow()[&overlay].visible);
+        let state = observed.state.borrow();
+        let root_content = state.windows[&video].content_view;
+        assert!(!state.views[&overlay].hidden);
         assert_eq!(
-            observed.state.borrow()[&overlay].frame,
-            Some(observed.snapshot.borrow().content_rect)
+            state.views[&overlay].frame,
+            state.views[&root_content].frame
         );
+        assert!(!state.windows[&donor].visible);
+        drop(state);
         assert_eq!(
             presenter.last_snapshot().unwrap().backing_scale_factor,
             2.0
         );
+        assert!(presenter.last_snapshot().unwrap().overlay_in_root_content);
+        assert!(presenter.last_snapshot().unwrap().overlay_topmost);
+        assert_eq!(
+            presenter.last_snapshot().unwrap().overlay_frame,
+            presenter.last_snapshot().unwrap().content_bounds
+        );
+        assert_eq!(presenter.last_snapshot().unwrap().child_window_count, 0);
 
         presenter.set_suspended(id, true).unwrap();
-        assert!(!observed.state.borrow()[&overlay].visible);
+        assert!(observed.state.borrow().views[&overlay].hidden);
         presenter.set_suspended(id, false).unwrap();
-        assert!(observed.state.borrow()[&overlay].visible);
+        assert!(!observed.state.borrow().views[&overlay].hidden);
         presenter
             .set_fullscreen(id, FullscreenOwner::VideoOutput, true)
             .unwrap();
         assert_eq!(&*fullscreen_values.borrow(), &[true]);
-        presenter.focus_overlay().unwrap();
+        assert_eq!(
+            observed
+                .operations
+                .borrow()
+                .iter()
+                .filter(|operation| operation.as_str() == "focus_root_view")
+                .count(),
+            1
+        );
 
         presenter.detach(id);
-        let state = observed.state.borrow();
-        assert_eq!(state[&overlay].parent, None);
-        assert_eq!(state[&overlay].behavior, 0x20);
-        assert!(state[&overlay].ignores_mouse);
-        assert!(!state[&overlay].visible);
-        drop(state);
+        observed.assert_host_restored(donor, overlay, original);
+        assert_eq!(observed.lease_count(), 0);
+        assert_eq!(observed.visible_top_level_count(), 1);
         let operations = observed.operations.borrow();
         let hide = operations
             .iter()
-            .position(|operation| operation == "visible:false")
+            .position(|operation| operation == "set_hidden:true")
             .unwrap();
         let attach = operations
             .iter()
-            .position(|operation| operation == "add_child")
+            .position(|operation| operation == "reparent_view")
             .unwrap();
         assert!(hide < attach);
-        assert!(operations.iter().any(|operation| operation == "release"));
+        let restore = operations
+            .iter()
+            .rposition(|operation| operation == "restore_owner")
+            .unwrap();
+        let release_view = operations
+            .iter()
+            .rposition(|operation| operation == "release_view")
+            .unwrap();
+        let release_window = operations
+            .iter()
+            .rposition(|operation| operation == "release_window")
+            .unwrap();
+        assert!(restore < release_view);
+        assert!(release_view < release_window);
+        assert!(
+            operations
+                .iter()
+                .all(|operation| !operation.contains("window_visible"))
+        );
+    }
+
+    #[test]
+    fn synchronize_repairs_stale_overlay_frame_when_root_bounds_are_unchanged()
+    {
+        let video = window(11);
+        let donor = window(12);
+        let overlay = view(13);
+        let appkit = FakeAppKit::new(video, donor, overlay);
+        let observed = appkit.clone();
+        let mut presenter = MacOsPresenter::new(
+            appkit,
+            |_| Ok(()),
+            video,
+            MacOsPresenterBuildMode::Spike,
+        );
+        let id = identity(11);
+        presenter
+            .attach(
+                id,
+                MacOsPresenterHost {
+                    view: overlay,
+                    original_owner: donor,
+                },
+            )
+            .unwrap();
+
+        let expected = {
+            let state = observed.state.borrow();
+            let root_content = state.windows[&video].content_view;
+            state.views[&root_content].frame
+        };
+        observed
+            .state
+            .borrow_mut()
+            .views
+            .get_mut(&overlay)
+            .unwrap()
+            .frame = MacOsViewRect {
+            x: 17.0,
+            y: 23.0,
+            width: 400.0,
+            height: 300.0,
+        };
+        observed.operations.borrow_mut().clear();
+
+        presenter.synchronize(id, geometry(true)).unwrap();
+
+        assert_eq!(observed.state.borrow().views[&overlay].frame, expected);
+        assert_eq!(presenter.last_snapshot().unwrap().overlay_frame, expected);
+        let operations = observed.operations.borrow();
+        assert_eq!(
+            operations
+                .iter()
+                .filter(|operation| operation.as_str() == "set_frame")
+                .count(),
+            1
+        );
+        assert!(!operations.iter().any(|operation| operation == "raise_view"));
+    }
+
+    #[test]
+    fn synchronize_repairs_lost_topmost_order_without_reparenting_host() {
+        let video = window(14);
+        let donor = window(15);
+        let overlay = view(16);
+        let appkit = FakeAppKit::new(video, donor, overlay);
+        let observed = appkit.clone();
+        let mut presenter = MacOsPresenter::new(
+            appkit,
+            |_| Ok(()),
+            video,
+            MacOsPresenterBuildMode::Spike,
+        );
+        let id = identity(12);
+        presenter
+            .attach(
+                id,
+                MacOsPresenterHost {
+                    view: overlay,
+                    original_owner: donor,
+                },
+            )
+            .unwrap();
+
+        observed
+            .state
+            .borrow_mut()
+            .views
+            .get_mut(&overlay)
+            .unwrap()
+            .topmost_in_superview = false;
+        observed.operations.borrow_mut().clear();
+
+        presenter.synchronize(id, geometry(true)).unwrap();
+
+        assert!(observed.state.borrow().views[&overlay].topmost_in_superview);
+        assert!(presenter.last_snapshot().unwrap().overlay_topmost);
+        let operations = observed.operations.borrow();
+        assert_eq!(
+            operations
+                .iter()
+                .filter(|operation| operation.as_str() == "raise_view")
+                .count(),
+            1
+        );
+        assert!(
+            !operations
+                .iter()
+                .any(|operation| operation == "reparent_view"),
+            "z-order repair must not detach the live foreign-hosted view"
+        );
+        assert!(!operations.iter().any(|operation| operation == "set_frame"));
+    }
+
+    #[test]
+    fn native_drag_targets_visible_attached_mpv_root_and_other_states_no_op() {
+        let video = window(21);
+        let donor = window(22);
+        let overlay = view(23);
+        let appkit = FakeAppKit::new(video, donor, overlay);
+        let observed = appkit.clone();
+        let mut presenter = MacOsPresenter::new(
+            appkit,
+            |_| Ok(()),
+            video,
+            MacOsPresenterBuildMode::Spike,
+        );
+        let id = identity(21);
+
+        assert!(!presenter.begin_window_drag().unwrap());
+        presenter
+            .attach(
+                id,
+                MacOsPresenterHost {
+                    view: overlay,
+                    original_owner: donor,
+                },
+            )
+            .unwrap();
+        assert!(!presenter.begin_window_drag().unwrap());
+
+        presenter.synchronize(id, geometry(true)).unwrap();
+        presenter.set_visible(id, true).unwrap();
+        assert!(presenter.begin_window_drag().unwrap());
+        assert_eq!(observed.state.borrow().dragged_roots, vec![video]);
+        assert!(!observed.state.borrow().dragged_roots.contains(&donor));
+
+        observed.state.borrow_mut().drag_event_available = false;
+        assert!(!presenter.begin_window_drag().unwrap());
+        observed.state.borrow_mut().drag_event_available = true;
+
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&video)
+            .unwrap()
+            .active_space = false;
+        assert!(!presenter.begin_window_drag().unwrap());
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&video)
+            .unwrap()
+            .active_space = true;
+
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&video)
+            .unwrap()
+            .miniaturized = true;
+        assert!(!presenter.begin_window_drag().unwrap());
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&video)
+            .unwrap()
+            .miniaturized = false;
+
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&video)
+            .unwrap()
+            .fullscreen = true;
+        assert!(!presenter.begin_window_drag().unwrap());
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&video)
+            .unwrap()
+            .fullscreen = false;
+
+        presenter.set_suspended(id, true).unwrap();
+        assert!(!presenter.begin_window_drag().unwrap());
+        presenter.set_suspended(id, false).unwrap();
+        observed
+            .state
+            .borrow_mut()
+            .views
+            .get_mut(&overlay)
+            .unwrap()
+            .window = Some(donor);
+        assert!(!presenter.begin_window_drag().unwrap());
+        assert_eq!(observed.state.borrow().dragged_roots, vec![video]);
+
+        presenter.detach(id);
+        assert!(!presenter.begin_window_drag().unwrap());
     }
 
     #[test]
     fn occlusion_does_not_oscillate_overlay_and_stale_generations_fail_safe() {
         let video = window(30);
-        let overlay = window(40);
-        let appkit = FakeAppKit::new(video, overlay);
+        let donor = window(40);
+        let overlay = view(50);
+        let appkit = FakeAppKit::new(video, donor, overlay);
         let observed = appkit.clone();
         let mut presenter = MacOsPresenter::new(
             appkit,
@@ -1464,34 +2448,212 @@ mod tests {
         );
         let id = identity(2);
         presenter
-            .attach(id, MacOsPresenterHost { overlay })
+            .attach(
+                id,
+                MacOsPresenterHost {
+                    view: overlay,
+                    original_owner: donor,
+                },
+            )
             .unwrap();
         presenter.synchronize(id, geometry(true)).unwrap();
         presenter.set_visible(id, true).unwrap();
-        assert!(observed.state.borrow()[&overlay].visible);
+        assert!(!observed.state.borrow().views[&overlay].hidden);
 
         let operation_count = observed.operations.borrow().len();
-        observed.snapshot.borrow_mut().occluded = true;
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&video)
+            .unwrap()
+            .occluded = true;
         presenter.synchronize(id, geometry(true)).unwrap();
-        assert!(observed.state.borrow()[&overlay].visible);
+        assert!(!observed.state.borrow().views[&overlay].hidden);
         assert_eq!(observed.operations.borrow().len(), operation_count);
 
-        observed.snapshot.borrow_mut().miniaturized = true;
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&video)
+            .unwrap()
+            .miniaturized = true;
         presenter.synchronize(id, geometry(true)).unwrap();
-        assert!(!observed.state.borrow()[&overlay].visible);
+        assert!(observed.state.borrow().views[&overlay].hidden);
 
         let stale = identity(3);
         assert!(presenter.synchronize(stale, geometry(true)).is_err());
         presenter.detach(stale);
-        assert_eq!(observed.state.borrow()[&overlay].parent, Some(video));
+        assert_eq!(observed.state.borrow().views[&overlay].window, Some(video));
         presenter.detach(id);
+        assert_eq!(observed.lease_count(), 0);
+    }
+
+    #[test]
+    fn partial_attach_failure_restores_donor_before_releasing_leases() {
+        let video = window(60);
+        let donor = window(70);
+        let overlay = view(80);
+        let appkit = FakeAppKit::new(video, donor, overlay);
+        let observed = appkit.clone();
+        let original = observed.original_view_state(overlay);
+        // Initial refresh sets local root bounds after reparenting.
+        observed.fail_on("set_frame");
+        let mut presenter = MacOsPresenter::new(
+            appkit,
+            |_| Ok(()),
+            video,
+            MacOsPresenterBuildMode::Spike,
+        );
+
+        let error = presenter
+            .attach(
+                identity(4),
+                MacOsPresenterHost {
+                    view: overlay,
+                    original_owner: donor,
+                },
+            )
+            .unwrap_err();
+
+        assert!(error.message.contains("injected set_frame failure"));
+        observed.assert_host_restored(donor, overlay, original);
+        assert_eq!(observed.lease_count(), 0);
+        assert_eq!(observed.visible_top_level_count(), 1);
+        let operations = observed.operations.borrow();
+        let reparent = operations
+            .iter()
+            .position(|operation| operation == "reparent_view")
+            .unwrap();
+        let failure = operations
+            .iter()
+            .position(|operation| operation == "fail:set_frame")
+            .unwrap();
+        let restore = operations
+            .iter()
+            .position(|operation| operation == "restore_owner")
+            .unwrap();
+        let release = operations
+            .iter()
+            .position(|operation| operation == "release_view")
+            .unwrap();
+        assert!(reparent < failure);
+        assert!(failure < restore);
+        assert!(restore < release);
+    }
+
+    #[test]
+    fn donor_invalidation_still_removes_view_from_mpv_before_release() {
+        let video = window(81);
+        let donor = window(82);
+        let overlay = view(83);
+        let appkit = FakeAppKit::new(video, donor, overlay);
+        let observed = appkit.clone();
+        let mut presenter = MacOsPresenter::new(
+            appkit,
+            |_| Ok(()),
+            video,
+            MacOsPresenterBuildMode::Spike,
+        );
+        let id = identity(5);
+        presenter
+            .attach(
+                id,
+                MacOsPresenterHost {
+                    view: overlay,
+                    original_owner: donor,
+                },
+            )
+            .unwrap();
+        observed
+            .state
+            .borrow_mut()
+            .windows
+            .get_mut(&donor)
+            .unwrap()
+            .live = false;
+
+        presenter.detach(id);
+
+        let state = observed.state.borrow();
+        assert_eq!(state.views[&overlay].window, None);
+        assert_eq!(state.views[&overlay].superview, None);
+        drop(state);
+        assert_eq!(observed.lease_count(), 0);
+        let operations = observed.operations.borrow();
+        let restore = operations
+            .iter()
+            .rposition(|operation| operation == "restore_owner")
+            .unwrap();
+        let release = operations
+            .iter()
+            .rposition(|operation| operation == "release_view")
+            .unwrap();
+        assert!(restore < release);
+    }
+
+    #[test]
+    fn one_hundred_attach_sync_fullscreen_detach_cycles_have_zero_growth() {
+        let video = window(90);
+        let donor = window(100);
+        let overlay = view(110);
+        let appkit = FakeAppKit::new(video, donor, overlay);
+        let observed = appkit.clone();
+        let original = observed.original_view_state(overlay);
+        let fullscreen_values = Rc::new(RefCell::new(Vec::new()));
+        let callback_values = Rc::clone(&fullscreen_values);
+        let mut presenter = MacOsPresenter::new(
+            appkit,
+            move |fullscreen| {
+                callback_values.borrow_mut().push(fullscreen);
+                Ok(())
+            },
+            video,
+            MacOsPresenterBuildMode::Spike,
+        );
+
+        for cycle in 1..=100 {
+            let id = identity(cycle);
+            let host = MacOsPresenterHost {
+                view: overlay,
+                original_owner: donor,
+            };
+            presenter.attach(id, host).unwrap();
+            presenter.synchronize(id, geometry(true)).unwrap();
+            presenter.set_visible(id, true).unwrap();
+            presenter
+                .set_fullscreen(id, FullscreenOwner::VideoOutput, true)
+                .unwrap();
+            presenter
+                .set_fullscreen(id, FullscreenOwner::VideoOutput, false)
+                .unwrap();
+            assert!(presenter.last_snapshot().unwrap().overlay_in_root_content);
+            assert!(presenter.last_snapshot().unwrap().overlay_topmost);
+            assert_eq!(
+                presenter.last_snapshot().unwrap().overlay_frame,
+                presenter.last_snapshot().unwrap().content_bounds
+            );
+            assert_eq!(
+                presenter.last_snapshot().unwrap().child_window_count,
+                0
+            );
+            assert_eq!(observed.visible_top_level_count(), 1);
+            presenter.detach(id);
+            observed.assert_host_restored(donor, overlay, original);
+            assert_eq!(observed.lease_count(), 0, "cycle {cycle}");
+        }
+
+        assert_eq!(fullscreen_values.borrow().len(), 200);
+        assert_eq!(observed.visible_top_level_count(), 1);
     }
 
     #[test]
     fn disabled_presenter_rejects_attach_without_mutating_appkit() {
-        let video = window(50);
-        let overlay = window(60);
-        let appkit = FakeAppKit::new(video, overlay);
+        let video = window(120);
+        let donor = window(130);
+        let overlay = view(140);
+        let appkit = FakeAppKit::new(video, donor, overlay);
         let observed = appkit.clone();
         let mut presenter = MacOsPresenter::new(
             appkit,
@@ -1502,7 +2664,13 @@ mod tests {
 
         assert!(
             presenter
-                .attach(identity(4), MacOsPresenterHost { overlay })
+                .attach(
+                    identity(5),
+                    MacOsPresenterHost {
+                        view: overlay,
+                        original_owner: donor,
+                    },
+                )
                 .is_err()
         );
         assert!(observed.operations.borrow().is_empty());

@@ -17,6 +17,9 @@ pub struct PlaybackSubscriptionState {
     /// Any backend snapshot currently represents an active lifecycle.
     pub has_active_playback: bool,
     pub playback_target: Option<PlaybackTarget>,
+    /// Integrated presentation or a pending native-window fallback proof
+    /// still needs UI-thread AppKit/Win32 refresh turns.
+    pub native_presenter_refresh_required: bool,
     pub controls_visible: bool,
     pub event_signal: Option<PlaybackEventSignal>,
     pub is_playing: bool,
@@ -70,7 +73,7 @@ pub fn subscription(
     // platform relationship while the integrated session is active.
     if state.has_internal_video
         && state.has_active_playback
-        && state.playback_target == Some(PlaybackTarget::MPV_INTEGRATED)
+        && state.native_presenter_refresh_required
     {
         subs.push(
             iced::time::every(std::time::Duration::from_millis(16))

@@ -216,7 +216,7 @@ fn view_tenfoot_search_overlay(state: &State) -> Element<'_, Message> {
             tenfoot_guidance_chip("Search/Done browses results"),
             tenfoot_guidance_chip("Esc hides keys"),
             Space::new().width(Length::Fill),
-            text("Remote/D-pad text entry is available here · Native gamepad backend is not wired yet")
+            text("Remote/D-pad text entry is available here")
                 .size(18)
                 .color(MediaServerTheme::TEXT_DIMMED),
         ]
@@ -884,7 +884,9 @@ fn view_search_panel(
     .spacing(12.0)
     .align_y(Alignment::Center);
 
-    if matches!(surface, SearchSurface::Overlay) {
+    if matches!(surface, SearchSurface::Overlay)
+        && crate::domains::ui::search_surface::detached_search_allowed(state)
+    {
         header_row = header_row.push(
             button(text("Pop out").size(14))
                 .on_press(DomainMessage::Ui(

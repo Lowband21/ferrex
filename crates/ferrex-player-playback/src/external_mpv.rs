@@ -1,7 +1,10 @@
 //! Minimal external MPV player management for HDR passthrough
 //! This module spawns MPV as a separate process and tracks playback position
 
-use crate::diagnostics::{contains_access_token, redact_playback_url};
+use crate::{
+    diagnostics::{contains_access_token, redact_playback_url},
+    session::PlaybackShutdownBarrier,
+};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
@@ -221,13 +224,13 @@ impl ExternalMpvHandle {
             let stream = match UnixStream::connect(&socket_path) {
                 Ok(stream) => stream,
                 Err(error) => {
-                    let _ = process.kill();
+                    terminate_child(&mut process);
                     return Err(error.into());
                 }
             };
             // Set non-blocking mode to prevent UI freezing
             if let Err(error) = stream.set_nonblocking(true) {
-                let _ = process.kill();
+                terminate_child(&mut process);
                 return Err(error.into());
             }
             Arc::new(Mutex::new(BufReader::new(stream)))
@@ -259,7 +262,7 @@ impl ExternalMpvHandle {
                                 .as_ref()
                                 .map(|p| p.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "(no log file)".to_string());
-                            let _ = process.kill();
+                            terminate_child(&mut process);
                             return Err(format!(
                                 "Failed to connect to MPV named pipe after retries: {}. \
 IPC may be blocked or mpv failed to start. If antivirus is running, add an exception. \
@@ -375,14 +378,22 @@ See mpv log for details: {}",
         };
 
         // Start observing properties - ID must be a number, not a string
-        handle.observe_property(1, "time-pos")?;
-        handle.observe_property(2, "eof-reached")?;
-        handle.observe_property(3, "fullscreen")?;
-        handle.observe_property(4, "duration")?;
+        let setup_result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            handle.observe_property(1, "time-pos")?;
+            handle.observe_property(2, "eof-reached")?;
+            handle.observe_property(3, "fullscreen")?;
+            handle.observe_property(4, "duration")?;
 
-        // Keep authenticated media out of argv/process listings. The socket is
-        // local to this Ferrex process and is removed when the handle drops.
-        handle.send_command(&["loadfile", url, "replace"])?;
+            // Keep authenticated media out of argv/process listings. The
+            // socket is local to this Ferrex process and is removed when the
+            // handle drops.
+            handle.send_command(&["loadfile", url, "replace"])?;
+            Ok(())
+        })();
+        if let Err(error) = setup_result {
+            let _ = handle.terminate_and_wait();
+            return Err(error);
+        }
 
         Ok(handle)
     }
@@ -559,12 +570,67 @@ See mpv log for details: {}",
     pub fn kill(&mut self) {
         let _ = self.process.kill();
     }
+
+    /// Transfer process ownership to a reaper and return a positive absence
+    /// barrier. A replacement root or retained shell must not be shown until
+    /// both termination and `Child::wait` have completed.
+    pub(crate) fn begin_shutdown_barrier(
+        self: Box<Self>,
+    ) -> PlaybackShutdownBarrier {
+        let (sender, completion) = tokio::sync::oneshot::channel();
+        let spawn = std::thread::Builder::new()
+            .name("ferrex-external-mpv-reaper".to_string())
+            .spawn(move || {
+                let mut handle = self;
+                let result = handle.terminate_and_wait();
+                // Release IPC/socket ownership before publishing completion.
+                drop(handle);
+                let _ = sender.send(result);
+            });
+        match spawn {
+            Ok(_reaper) => PlaybackShutdownBarrier::new(completion),
+            Err(error) => PlaybackShutdownBarrier::failed(format!(
+                "external mpv reaper could not start: {error}"
+            )),
+        }
+    }
+
+    fn terminate_and_wait(&mut self) -> Result<(), String> {
+        match self.process.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {}
+            Err(error) => {
+                return Err(format!(
+                    "external mpv status could not be observed: {error}"
+                ));
+            }
+        }
+
+        if let Err(kill_error) = self.process.kill() {
+            match self.process.try_wait() {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) | Err(_) => {
+                    return Err(format!(
+                        "external mpv could not be terminated: {kill_error}"
+                    ));
+                }
+            }
+        }
+        self.process.wait().map(|_| ()).map_err(|error| {
+            format!("external mpv could not be reaped: {error}")
+        })
+    }
 }
 
 impl Drop for ExternalMpvHandle {
     fn drop(&mut self) {
         self.kill();
     }
+}
+
+fn terminate_child(process: &mut Child) {
+    let _ = process.kill();
+    let _ = process.wait();
 }
 
 #[cfg(unix)]

@@ -310,10 +310,13 @@ impl PresenterLifecycle {
         self.requested_fullscreen
     }
 
-    #[cfg(all(
-        feature = "mpv",
-        feature = "ui",
-        any(target_os = "windows", target_os = "macos", test)
+    #[cfg(any(
+        test,
+        all(
+            feature = "mpv",
+            feature = "ui",
+            any(target_os = "windows", target_os = "macos")
+        )
     ))]
     pub(crate) const fn readiness(&self) -> (bool, bool, bool) {
         (self.host_ready, self.video_output_ready, self.attached)
@@ -383,7 +386,11 @@ impl PresenterLifecycle {
                 Vec::new(),
             );
         }
-        if self.failed {
+        // A failed integrated presenter still has one valid terminal input:
+        // Detach retires its projection before the session can publish a
+        // verified native-window fallback. All other inputs remain inert so a
+        // failed generation cannot be revived accidentally.
+        if self.failed && !matches!(&envelope.input, PresenterInput::Detach) {
             return PresenterTransition::new(
                 PresenterDisposition::IgnoredNoChange,
                 Vec::new(),
@@ -1376,6 +1383,16 @@ mod tests {
                 if reason.code == FallbackReasonCode::PresenterFailed
                     && reason.from == Some(PlaybackTarget::MPV_INTEGRATED)
                     && reason.to == PlaybackTarget::MPV_NATIVE_WINDOW
+        )));
+
+        let retired = input(&mut lifecycle, PresenterInput::Detach);
+        assert_eq!(lifecycle.state(), PresenterState::Detached);
+        assert_eq!(lifecycle.readiness(), (false, false, false));
+        assert!(retired.effects.iter().any(|effect| matches!(
+            effect,
+            PresenterEffect::Event(PresenterEvent::StateChanged(
+                PresenterState::Detached
+            ))
         )));
     }
 

@@ -50,81 +50,110 @@ fn icon_button(
     .into()
 }
 
+fn shield_native_root_drag<'a>(
+    surface: Element<'a, PlayerMessage, Theme, iced::Renderer>,
+    enabled: bool,
+) -> Element<'a, PlayerMessage, Theme, iced::Renderer> {
+    if enabled {
+        mouse_area(surface)
+            .on_press(PlayerMessage::ShowControls)
+            .into()
+    } else {
+        surface
+    }
+}
+
 impl PlayerDomainState {
     /// Build the full controls overlay
     pub fn build_controls(
         &self,
+        shield_native_drag: bool,
     ) -> iced::Element<'_, PlayerMessage, Theme, iced::Renderer> {
-        let controls = column![
-            // Top bar with title and buttons
-            container(
+        // Only these rendered surfaces consume background presses. The
+        // full-height spacer deliberately stays event-transparent so the
+        // central video can initiate an AppKit native-root drag.
+        let top_bar = container(
+            row![
+                // Left side - navigation buttons with spacing
                 row![
-                    // Left side - navigation buttons with spacing
-                    row![
-                        icon_button(Icon::ArrowLeft, Some(PlayerMessage::NavigateBack)),
-                        Space::new().width(Length::Fixed(5.0)),
-                        icon_button(Icon::House, Some(PlayerMessage::NavigateHome)),
-                    ]
-                    .align_y(Alignment::Center),
-                    // Center - Title with HDR indicator
-                    container(
-                        row![
-                            text(
-                                self.current_media
-                                    .as_ref()
-                                    .map(|m| m.filename.clone())
-                                    .unwrap_or_else(|| "Unknown".to_string())
-                            )
-                            .size(18)
-                            .color([1.0, 1.0, 1.0, 1.0]),
-                            // HDR indicator
-                            if self.is_hdr_content {
-                                row![
-                                    Space::new().width(Length::Fixed(10.0)),
-                                    container(text("HDR").size(12).color([1.0, 0.8, 0.0, 1.0]))
-                                        .padding([2, 6])
-                                        .style(theme::container_hdr_badge),
-                                ]
-                            } else {
-                                row![]
-                            }
-                        ]
-                        .align_y(Alignment::Center)
-                    )
-                    .width(Length::Fill)
-                    .center_x(Length::Fill),
-                    // Right side - fullscreen button in top
                     icon_button(
-                        if self.is_fullscreen {
-                            Icon::Minimize2
-                        } else {
-                            Icon::Maximize2
-                        },
-                        Some(PlayerMessage::ToggleFullscreen)
+                        Icon::ArrowLeft,
+                        Some(PlayerMessage::NavigateBack)
                     ),
+                    Space::new().width(Length::Fixed(5.0)),
+                    icon_button(Icon::House, Some(PlayerMessage::NavigateHome)),
                 ]
-                .spacing(10)
-                .align_y(Alignment::Center)
-                .padding(15)
-            )
-            .width(Length::Fill),
+                .align_y(Alignment::Center),
+                // Center - Title with HDR indicator
+                container(
+                    row![
+                        text(
+                            self.current_media
+                                .as_ref()
+                                .map(|m| m.filename.clone())
+                                .unwrap_or_else(|| "Unknown".to_string())
+                        )
+                        .size(18)
+                        .color([1.0, 1.0, 1.0, 1.0]),
+                        // HDR indicator
+                        if self.is_hdr_content {
+                            row![
+                                Space::new().width(Length::Fixed(10.0)),
+                                container(
+                                    text("HDR")
+                                        .size(12)
+                                        .color([1.0, 0.8, 0.0, 1.0])
+                                )
+                                .padding([2, 6])
+                                .style(theme::container_hdr_badge),
+                            ]
+                        } else {
+                            row![]
+                        }
+                    ]
+                    .align_y(Alignment::Center)
+                )
+                .width(Length::Fill)
+                .center_x(Length::Fill),
+                // Right side - fullscreen button in top
+                icon_button(
+                    if self.is_fullscreen {
+                        Icon::Minimize2
+                    } else {
+                        Icon::Maximize2
+                    },
+                    Some(PlayerMessage::ToggleFullscreen)
+                ),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .padding(15),
+        )
+        .width(Length::Fill)
+        .into();
+        let top_bar = shield_native_root_drag(top_bar, shield_native_drag);
+
+        let bottom_controls = column![
+            // Seek bar - no padding so it reaches edges
+            self.build_seek_bar(),
+            // Control buttons - with padding
+            container(self.build_control_buttons())
+                .padding(
+                    crate::constants::player_controls::CONTROL_BUTTONS_PADDING
+                )
+                .width(Length::Fill),
+        ]
+        .spacing(0)
+        .width(Length::Fill)
+        .into();
+        let bottom_controls =
+            shield_native_root_drag(bottom_controls, shield_native_drag);
+
+        let controls = column![
+            top_bar,
             // Spacer to push controls to bottom
             Space::new().height(Length::Fill),
-            // Bottom controls
-            column![
-                // Seek bar - no padding so it reaches edges
-                self.build_seek_bar(),
-                // Spacer between seek bar and controls (40px to match bottom padding)
-                //Space::new().height(Length::Fixed(15.0)),
-                // Control buttons - with padding
-                container(self.build_control_buttons())
-                    .padding(
-                        crate::constants::player_controls::CONTROL_BUTTONS_PADDING
-                    )
-                    .width(Length::Fill),
-            ]
-            .spacing(0)
-            .width(Length::Fill),
+            bottom_controls,
         ];
         controls.into()
     }

@@ -7,11 +7,11 @@
 use crate::{
     contract::{
         AudioTrack, BackendKind, BackendRequest, EndReason,
-        PlaybackCapabilities, PlaybackCommand, PlaybackSnapshot,
-        PlaybackSource, PlaybackState, PlaybackTarget, SessionGeneration,
-        SubtitleTrack, TrackId,
+        PlaybackCapabilities, PlaybackSnapshot, PlaybackSource, PlaybackState,
+        PlaybackTarget, SessionGeneration, SubtitleTrack, TrackId,
     },
     diagnostics::{PlaybackDiagnosticSnapshot, redact_playback_url},
+    messages::{PlaybackExitDestination, PlaybackRequestId},
     session::PlaybackSession,
 };
 use ferrex_core::player_prelude::{MediaFile, MediaID};
@@ -39,6 +39,48 @@ pub struct PlayerDomainState {
     pub current_source: Option<PlaybackSource>,
     pub is_resolving_stream_url: bool,
     pub stream_url_resolution_failed: bool,
+    /// Last allocated source-request identity. This counter is intentionally
+    /// preserved by [`Self::reset`] so a delayed completion can never match a
+    /// later playback request.
+    pub playback_request_counter: PlaybackRequestId,
+    /// Latest media/source request allowed to mutate playback state.
+    pub active_playback_request: Option<PlaybackRequestId>,
+    /// Active request whose authenticated source has been accepted.
+    pub resolved_playback_request: Option<PlaybackRequestId>,
+    /// Request that owns the currently open in-process backend session.
+    pub session_playback_request: Option<PlaybackRequestId>,
+    /// Media identity owned by the currently open in-process backend session.
+    ///
+    /// A replacement request may update `current_media_id` while the previous
+    /// session remains visible during authorization. Terminal progress must
+    /// remain attributed to the session that produced the snapshot.
+    pub session_media_id: Option<MediaID>,
+    /// Request that entered the shell's integrated single-window handoff.
+    ///
+    /// This provenance survives an in-session mpv-to-embedded fallback so the
+    /// shell can restore itself even if the replacement snapshot has no mpv
+    /// fallback chain of its own.
+    pub integrated_playback_request: Option<PlaybackRequestId>,
+    /// A playback root owner is being destroyed away from the UI reducer. No shell
+    /// restoration or replacement backend may begin while this is true.
+    pub root_shutdown_in_progress: bool,
+    /// Root owner destruction failed without positive absence proof. This
+    /// latch blocks every later backend launch until the process is restarted.
+    pub root_shutdown_failed: bool,
+    /// Request that owned the hidden retained shell when native teardown
+    /// started. Completion uses this to retire or transfer shell ownership.
+    pub root_shutdown_retired_request: Option<PlaybackRequestId>,
+    /// A user exit received while teardown is already in flight. It overrides
+    /// an older replacement/fallback continuation once completion arrives.
+    pub root_shutdown_exit_destination: Option<PlaybackExitDestination>,
+    /// Current request that explicitly selected the external-process backend.
+    /// This intent is allocated atomically with the source request.
+    pub external_playback_intent_request: Option<PlaybackRequestId>,
+    /// Request that owns the live external process and its snapshot.
+    pub external_playback_request: Option<PlaybackRequestId>,
+    /// Media identity owned by the live external process. A newer request may
+    /// replace `current_media_id` while the old process is still shutting down.
+    pub external_media_id: Option<MediaID>,
 
     // Video instance (unified)
     pub video_opt: Option<PlaybackSession>,
@@ -152,6 +194,31 @@ impl fmt::Debug for PlayerDomainState {
                 "stream_url_resolution_failed",
                 &self.stream_url_resolution_failed,
             )
+            .field("playback_request_counter", &self.playback_request_counter)
+            .field("active_playback_request", &self.active_playback_request)
+            .field("resolved_playback_request", &self.resolved_playback_request)
+            .field("session_playback_request", &self.session_playback_request)
+            .field("session_media_id", &self.session_media_id)
+            .field(
+                "integrated_playback_request",
+                &self.integrated_playback_request,
+            )
+            .field("root_shutdown_in_progress", &self.root_shutdown_in_progress)
+            .field("root_shutdown_failed", &self.root_shutdown_failed)
+            .field(
+                "root_shutdown_retired_request",
+                &self.root_shutdown_retired_request,
+            )
+            .field(
+                "root_shutdown_exit_destination",
+                &self.root_shutdown_exit_destination,
+            )
+            .field(
+                "external_playback_intent_request",
+                &self.external_playback_intent_request,
+            )
+            .field("external_playback_request", &self.external_playback_request)
+            .field("external_media_id", &self.external_media_id)
             .field("video_opt", &video_opt)
             .field("playback_generation", &self.playback_generation)
             .field("backend_request", &self.backend_request)
@@ -230,6 +297,19 @@ impl Default for PlayerDomainState {
             current_source: None,
             is_resolving_stream_url: false,
             stream_url_resolution_failed: false,
+            playback_request_counter: PlaybackRequestId::INITIAL,
+            active_playback_request: None,
+            resolved_playback_request: None,
+            session_playback_request: None,
+            session_media_id: None,
+            integrated_playback_request: None,
+            root_shutdown_in_progress: false,
+            root_shutdown_failed: false,
+            root_shutdown_retired_request: None,
+            root_shutdown_exit_destination: None,
+            external_playback_intent_request: None,
+            external_playback_request: None,
+            external_media_id: None,
             video_opt: None,
             playback_generation: SessionGeneration::new(0),
             backend_request: BackendRequest::Auto,
@@ -291,6 +371,16 @@ impl Default for PlayerDomainState {
 )]
 impl PlayerDomainState {
     pub fn reset(&mut self) {
+        // Preserve the monotonic counter while retiring every request-scoped
+        // capability. Delayed async messages are rejected by identity.
+        self.active_playback_request = None;
+        self.resolved_playback_request = None;
+        self.session_playback_request = None;
+        self.session_media_id = None;
+        self.integrated_playback_request = None;
+        self.external_playback_intent_request = None;
+        self.external_playback_request = None;
+        self.external_media_id = None;
         self.current_media = None;
         self.current_media_id = None;
         self.current_url = None;
@@ -328,6 +418,94 @@ impl PlayerDomainState {
         self.clear_external_playback();
     }
 
+    /// Allocate the next source request and invalidate every earlier async
+    /// source completion. Exhaustion fails closed instead of reusing an ID.
+    pub fn begin_playback_request(&mut self) -> Option<PlaybackRequestId> {
+        let next = self.playback_request_counter.next()?;
+        self.playback_request_counter = next;
+        self.active_playback_request = Some(next);
+        self.resolved_playback_request = None;
+        self.integrated_playback_request = None;
+        self.external_playback_intent_request = None;
+        Some(next)
+    }
+
+    /// Retire the current source request without resetting the monotonic
+    /// counter or an already-open older session.
+    pub fn invalidate_playback_request(&mut self) {
+        self.active_playback_request = None;
+        self.resolved_playback_request = None;
+        self.external_playback_intent_request = None;
+        self.is_resolving_stream_url = false;
+    }
+
+    /// Whether an async result still belongs to the newest media request.
+    pub fn is_active_playback_request(
+        &self,
+        request: PlaybackRequestId,
+    ) -> bool {
+        self.active_playback_request == Some(request)
+    }
+
+    /// Mark one current request's authenticated source as accepted.
+    pub fn resolve_playback_request(
+        &mut self,
+        request: PlaybackRequestId,
+    ) -> bool {
+        if !self.is_active_playback_request(request) {
+            return false;
+        }
+        self.resolved_playback_request = Some(request);
+        true
+    }
+
+    /// Whether a shell/backend continuation is still authorized.
+    pub fn is_resolved_playback_request(
+        &self,
+        request: PlaybackRequestId,
+    ) -> bool {
+        self.active_playback_request == Some(request)
+            && self.resolved_playback_request == Some(request)
+    }
+
+    /// Whether native teardown still lacks positive completion proof.
+    pub fn root_shutdown_blocks_launch(&self) -> bool {
+        self.root_shutdown_in_progress || self.root_shutdown_failed
+    }
+
+    /// Whether this request still owns an explicit external-process launch.
+    pub fn is_external_playback_intent(
+        &self,
+        request: PlaybackRequestId,
+    ) -> bool {
+        self.active_playback_request == Some(request)
+            && self.external_playback_intent_request == Some(request)
+    }
+
+    /// Bind the current request to the external-process launch path.
+    pub fn request_external_playback(
+        &mut self,
+        request: PlaybackRequestId,
+    ) -> bool {
+        if self.active_playback_request != Some(request) {
+            return false;
+        }
+        self.external_playback_intent_request = Some(request);
+        true
+    }
+
+    /// Request that owns the visible backend or, before backend creation, the
+    /// resolved single-window handoff.
+    pub fn playback_handoff_request(&self) -> Option<PlaybackRequestId> {
+        match self.session_playback_request {
+            Some(request) => Some(request),
+            None => match self.external_playback_request {
+                Some(request) => Some(request),
+                None => self.resolved_playback_request,
+            },
+        }
+    }
+
     /// Replace the current in-process source and keep the compatibility URI
     /// synchronized for code that does not yet understand authenticated
     /// headers.
@@ -348,6 +526,16 @@ impl PlayerDomainState {
             .as_ref()
             .map(PlaybackSession::snapshot)
             .or(self.external_mpv_snapshot.as_ref())
+    }
+
+    /// Whether an existing or not-yet-proven-absent root still owns the
+    /// backend-neutral progress projection.
+    ///
+    /// UI request routing may stage a replacement resume hint while this is
+    /// true, but must not overwrite `last_valid_*`: terminal actions still
+    /// attribute those values to the visible session's media.
+    pub fn has_observable_playback_root(&self) -> bool {
+        self.playback_snapshot().is_some() || self.root_shutdown_blocks_launch()
     }
 
     /// Whether an in-process backend currently owns a presentation session.
@@ -399,6 +587,8 @@ impl PlayerDomainState {
     /// Start the reduced external-player lifecycle after process creation.
     pub fn begin_external_playback(
         &mut self,
+        request: PlaybackRequestId,
+        media_id: Option<MediaID>,
         generation: SessionGeneration,
         position: f64,
         duration: f64,
@@ -421,6 +611,8 @@ impl PlayerDomainState {
             .filter(|duration| *duration > Duration::ZERO);
         snapshot.fullscreen = fullscreen;
         self.external_mpv_snapshot = Some(snapshot);
+        self.external_playback_request = Some(request);
+        self.external_media_id = media_id;
     }
 
     /// Mark the spawned process ready without exposing its native handle.
@@ -473,8 +665,29 @@ impl PlayerDomainState {
 
     /// Drop the external process owner and its reduced lifecycle together.
     pub fn clear_external_playback(&mut self) {
+        debug_assert!(
+            self.external_mpv_handle.is_none(),
+            "live external process must pass through the root shutdown barrier"
+        );
         self.external_mpv_handle = None;
         self.external_mpv_snapshot = None;
+        self.external_playback_request = None;
+        self.external_media_id = None;
+    }
+
+    /// Retire a positively absent external root only when the completion still
+    /// belongs to that process owner.
+    pub fn clear_external_playback_for_request(
+        &mut self,
+        request: Option<PlaybackRequestId>,
+    ) -> bool {
+        if self.external_mpv_handle.is_some()
+            || (request.is_some() && self.external_playback_request != request)
+        {
+            return false;
+        }
+        self.clear_external_playback();
+        true
     }
 
     pub fn playback_diagnostics(&self) -> Option<PlaybackDiagnosticSnapshot> {
@@ -528,19 +741,6 @@ impl PlayerDomainState {
             self.track_notification = None;
         }
     }
-
-    /// Stop native/internal playback and release the video handle without resetting all state
-    pub fn stop_native_playback(&mut self) {
-        if let Some(mut video) = self.video_opt.take() {
-            let _ = video.apply_command(PlaybackCommand::Stop);
-            drop(video);
-        }
-        self.seeking = false;
-        self.dragging = false;
-        self.last_seek_position = None;
-        self.pending_seek_position = None;
-        self.last_seek_time = None;
-    }
 }
 
 fn valid_external_duration(seconds: f64) -> Option<Duration> {
@@ -589,8 +789,11 @@ mod tests {
     fn external_process_lifecycle_reduces_into_the_neutral_snapshot() {
         let mut state = PlayerDomainState::default();
         let generation = SessionGeneration::new(9);
+        let request = PlaybackRequestId::new(3);
 
         state.begin_external_playback(
+            request,
+            None,
             generation,
             f64::NAN,
             f64::INFINITY,
@@ -640,6 +843,8 @@ mod tests {
     fn reset_clears_external_snapshot_ownership() {
         let mut state = PlayerDomainState::default();
         state.begin_external_playback(
+            PlaybackRequestId::new(4),
+            None,
             SessionGeneration::new(4),
             3.0,
             20.0,

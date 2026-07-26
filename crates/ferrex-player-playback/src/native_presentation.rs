@@ -49,6 +49,10 @@ trait PlatformPresenterDriver {
         command: PresenterCommand,
         host: Option<&CapturedIcedHost>,
     ) -> Result<(), PlaybackError>;
+
+    fn begin_native_root_drag(&mut self) -> Result<bool, PlaybackError> {
+        Ok(false)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,9 +145,10 @@ impl BridgeInner {
     }
 
     /// Re-query the platform-owned video root even when Iced's logical slot
-    /// geometry has not changed. Win32 owned windows do not follow their owner
-    /// and AppKit child windows still need occlusion/Space refreshes, so this
-    /// deliberately bypasses lifecycle geometry-revision deduplication.
+    /// geometry has not changed. Win32 owned windows do not follow their owner,
+    /// while the AppKit in-root view must still detect root-content replacement
+    /// and active-Space/occlusion transitions. This deliberately bypasses
+    /// lifecycle geometry-revision deduplication.
     fn refresh_platform_window(
         &mut self,
         host: Option<&CapturedIcedHost>,
@@ -448,8 +453,9 @@ impl NativePresentation {
         ))
     }
 
-    /// Conservative macOS gate. This remains explicit-spike-only until the
-    /// representative Spaces/fullscreen/scale/teardown matrix is signed off.
+    /// Conservative macOS gate. Enabled candidates still require the external
+    /// representative Spaces/fullscreen/scale/HDR/teardown matrix before their
+    /// exact archives may be promoted.
     #[cfg(target_os = "macos")]
     pub(crate) fn try_new(
         generation: SessionGeneration,
@@ -513,10 +519,10 @@ impl NativePresentation {
                 previous_window == Some(window_id),
             );
         }
-        if let Some(old) = self.slot.borrow_mut().take() {
-            if !old.is_detached() {
-                let _ = old.detach();
-            }
+        if let Some(old) = self.slot.borrow_mut().take()
+            && !old.is_detached()
+        {
+            let _ = old.detach();
         }
         if replacing_slot {
             self.advance_generation();
@@ -732,6 +738,18 @@ impl NativePresentation {
 
     pub(crate) fn refresh_platform_window(&self) {
         self.inner.borrow_mut().refresh_platform_window(None);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn begin_native_root_drag(&self) -> Result<bool, PlaybackError> {
+        if self.confirmed_fullscreen.get() == Some(true) {
+            return Ok(false);
+        }
+        let mut inner = self.inner.borrow_mut();
+        let Some(driver) = inner.driver.as_mut() else {
+            return Ok(false);
+        };
+        driver.begin_native_root_drag()
     }
 
     pub(crate) fn take_fullscreen_request(&self) -> Option<bool> {
@@ -969,6 +987,10 @@ impl PlatformPresenterDriver for MacOsPresenterDriver {
             }
         }
     }
+
+    fn begin_native_root_drag(&mut self) -> Result<bool, PlaybackError> {
+        self.presenter.begin_window_drag()
+    }
 }
 
 fn presenter_input_label(input: &PresenterInput) -> &'static str {
@@ -1178,6 +1200,18 @@ mod tests {
             event,
             PresenterEvent::FallbackRequested(reason)
                 if reason.to == PlaybackTarget::MPV_NATIVE_WINDOW
+        )));
+
+        let retired = bridge.handle(
+            None,
+            PresenterInputEnvelope::new(identity, PresenterInput::Detach),
+        );
+        assert!(retired.requests_snapshot_sync());
+        assert_eq!(bridge.lifecycle.state(), PresenterState::Detached);
+        assert_eq!(bridge.lifecycle.readiness(), (false, false, false));
+        assert!(bridge.pending_events.iter().any(|event| matches!(
+            event,
+            PresenterEvent::StateChanged(PresenterState::Detached)
         )));
     }
 

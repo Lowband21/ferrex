@@ -239,3 +239,11 @@ iced_runtime = { git = "https://github.com/Lowband21/iced-ferrex.git", package =
 #[[bench]]
 #name = "grid_rendering_bench"
 #harness = false
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The native presenter must preserve real controller input while the Iced view
+# is hosted inside mpv's AppKit window. Keep the runtime dependency macOS-only
+# so other desktop targets retain their existing input stacks.
+# gilrs-core 0.6.8's Windows feature guard is not target-gated, so retain the
+# default feature on Darwin; Cargo still excludes its Windows-only dependency.
+gilrs = "0.11.2"

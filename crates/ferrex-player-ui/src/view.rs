@@ -47,6 +47,26 @@ use iced::{Element, Font, Length, Theme};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+fn compose_search_overlay<'a>(
+    state: &'a State,
+    content: Element<'a, DomainMessage, Theme, iced::Renderer>,
+) -> Element<'a, DomainMessage, Theme, iced::Renderer> {
+    if !state.domains.search.state.presentation.is_overlay() {
+        return content;
+    }
+    let Some(overlay) =
+        crate::domains::ui::views::components::view_search_overlay(state)
+    else {
+        return content;
+    };
+    Stack::new()
+        .push(content)
+        .push(overlay)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
 #[cfg_attr(
     any(
         feature = "profile-with-puffin",
@@ -72,8 +92,11 @@ pub fn view(
     if state.windows.is_player_overlay_window(window_id) {
         // A dedicated native-root overlay renders no library shell, header, or
         // background scene. Its surface consists solely of player controls,
-        // status plates, and the transparent native-video slot region.
-        return view_player(state, Some(window_id)).map(DomainMessage::Player);
+        // status plates, the transparent native-video slot region, and any
+        // in-root search surface opened by those canonical controls.
+        let player =
+            view_player(state, Some(window_id)).map(DomainMessage::Player);
+        return compose_search_overlay(state, player);
     }
     // debug timing disabled in tests to simplify renderer unification
     // Check for first-run setup
@@ -375,25 +398,7 @@ pub fn view(
         }
     };
 
-    let with_search_overlay =
-        if state.domains.search.state.presentation.is_overlay() {
-            if let Some(overlay) =
-                crate::domains::ui::views::components::view_search_overlay(
-                    state,
-                )
-            {
-                Stack::new()
-                    .push(layered)
-                    .push(overlay)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-            } else {
-                layered
-            }
-        } else {
-            layered
-        };
+    let with_search_overlay = compose_search_overlay(state, layered);
 
     // Overlay toast notifications if any are active
     if state.domains.ui.state.toast_manager.has_toasts() {
@@ -736,10 +741,12 @@ fn theater_plate_cache_key(request: &ImageRequest) -> u64 {
 mod tests {
     use super::*;
     use crate::{
+        domains::{search::types::SearchPresentation, ui::windows::WindowKind},
         infra::constants::layout::header::HEIGHT as HEADER_HEIGHT,
         state::InterfaceMode,
     };
     use ferrex_core::player_prelude::MovieID;
+    use iced::advanced::widget::Tree;
     use uuid::Uuid;
 
     fn detail_state(interface_mode: InterfaceMode) -> State {
@@ -754,6 +761,27 @@ mod tests {
             backdrop_handle: None,
         };
         state
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn player_overlay_root_composes_open_search_in_the_same_window() {
+        let mut state = State::new_with_interface_mode(
+            "http://localhost:9".to_string(),
+            InterfaceMode::TenFoot,
+        );
+        state.window_size = iced::Size::new(1_280.0, 720.0);
+        state.domains.ui.state.view = ViewState::Player;
+        state.domains.search.state.presentation = SearchPresentation::Overlay;
+        let overlay = iced::window::Id::unique();
+        state.windows.set(WindowKind::PlayerOverlay, overlay);
+
+        let element = view(&state, overlay);
+        let tree = Tree::new(element.as_widget());
+        assert_eq!(
+            tree.children.len(),
+            2,
+            "player content and search must share one PlayerOverlay root"
+        );
     }
 
     #[test]

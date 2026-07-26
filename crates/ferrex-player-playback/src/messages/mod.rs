@@ -13,11 +13,53 @@ use iced::ContentFit;
 use std::fmt;
 use std::time::Duration;
 
+/// Monotonic identity for one media-source request.
+///
+/// This is deliberately distinct from a playback session generation: URL
+/// authorization exists before a backend session, and one request may replace
+/// or fall back across multiple backend sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PlaybackRequestId(u64);
+
+impl PlaybackRequestId {
+    /// Reserved initial value before the first request is allocated.
+    pub const INITIAL: Self = Self(0);
+
+    /// Construct an identity for deterministic state-machine tests.
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Return the numeric identity for diagnostics and tests.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Advance to a never-reused request identity.
+    pub const fn next(self) -> Option<Self> {
+        match self.0.checked_add(1) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+}
+
+/// Navigation performed only after playback teardown is positively complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackExitDestination {
+    None,
+    Back,
+    Home,
+}
+
 #[derive(Clone)]
 pub enum PlayerMessage {
     // Media control
     PlayMedia(MediaFile),
     PlayMediaWithId(MediaFile, MediaID),
+    /// Atomically allocate a media request whose resolved source must be
+    /// handed to the explicit external-process backend.
+    PlayMediaWithIdExternally(MediaFile, MediaID),
     NavigateBack, // Navigate to previous view
     NavigateHome, // Navigate to home/library view
 
@@ -26,7 +68,25 @@ pub enum PlayerMessage {
     Pause,
     PlayPause,
     Stop,
-    ResetAfterStop, // Internal message to reset state after progress update
+    /// Complete teardown for the request captured when exit began. A delayed
+    /// reset must never erase a newer playback request.
+    ResetAfterStop(Option<PlaybackRequestId>),
+    /// Finish reset/navigation after any root teardown barrier.
+    CompletePlaybackExit {
+        request: Option<PlaybackRequestId>,
+        destination: PlaybackExitDestination,
+    },
+    /// Restore the retained shell after a root teardown that must preserve
+    /// the current error/request projection instead of resetting playback.
+    RestoreShellAfterRootShutdown {
+        request: Option<PlaybackRequestId>,
+    },
+    /// Positive completion from the root owner reaper. The wrapped action
+    /// cannot be reduced until the in-flight shutdown phase is cleared.
+    RootShutdownCompleted {
+        request: Option<PlaybackRequestId>,
+        continuation: Box<PlayerMessage>,
+    },
 
     // Seeking
     Seek(f64),
@@ -49,7 +109,11 @@ pub enum PlayerMessage {
     PreviousEpisode,
 
     // Video events
-    VideoLoaded(bool), // Success flag
+    /// Backend-open completion scoped to the source request that created it.
+    VideoLoaded {
+        request: PlaybackRequestId,
+        success: bool,
+    },
     VideoReadyToPlay, // Video is ready to be loaded and played (from streaming domain)
     EndOfStream,
     /// Synchronize a legacy adapter snapshot on the bounded controls timer,
@@ -74,10 +138,48 @@ pub enum PlayerMessage {
 
     // External player control
     PlayExternal,
-    // Internal: set a resolved, redacted source and trigger playback.
+    /// Resume an explicit external-player handoff after root owner teardown.
+    ResumeExternalPlaybackAfterRootShutdown {
+        request: PlaybackRequestId,
+    },
+    /// Shell-ordered continuation after the retained main window is hidden and
+    /// any integrated controls donor has been closed without restoration.
+    OpenExternalStreamSource {
+        request: PlaybackRequestId,
+    },
+    /// Continue with an in-process backend only after a failed external spawn
+    /// has restored the request-owned retained shell.
+    ResumeInternalPlaybackAfterExternalLaunchFailure {
+        request: PlaybackRequestId,
+    },
+    // Internal/current-domain replacement: allocate a fresh request identity,
+    // set a resolved, redacted source, and trigger playback.
     SetStreamSource(PlaybackSource),
+    /// Completion of one asynchronous authenticated stream-source request.
+    StreamSourceResolved {
+        request: PlaybackRequestId,
+        source: PlaybackSource,
+    },
+    /// Internal shell-ordered continuation after the retained main window has
+    /// completed its integrated-playback hide action.
+    OpenResolvedStreamSource {
+        request: PlaybackRequestId,
+    },
+    /// Resume source selection after an older root is fully destroyed.
+    ResumeResolvedStreamSourceAfterRootShutdown {
+        request: PlaybackRequestId,
+        retired_request: Option<PlaybackRequestId>,
+    },
+    /// Fail closed when root teardown could not establish completion.
+    RootShutdownFailed {
+        request: Option<PlaybackRequestId>,
+        message: String,
+    },
     // Internal: surface stream authorization failures before opening a renderer
-    StreamUrlResolutionFailed(String),
+    StreamUrlResolutionFailed {
+        request: PlaybackRequestId,
+        message: String,
+    },
 
     // UI control
     ShowControls,
@@ -85,6 +187,11 @@ pub enum PlayerMessage {
     DisableFullscreen,
     ToggleSettings,
     MouseMoved(iced::Point),
+    /// Begin an AppKit-managed drag of mpv's retained native root window.
+    ///
+    /// This is emitted only by the central video/background surface in the
+    /// integrated macOS presentation path. Other targets keep `VideoClicked`.
+    BeginNativeRootDrag,
     VideoClicked,
     VideoDoubleClicked,
 
@@ -111,12 +218,16 @@ pub enum PlayerMessage {
     CheckControlsVisibility,
 
     // External player status messages
-    ExternalPlaybackStarted,
+    ExternalPlaybackStarted {
+        request: PlaybackRequestId,
+    },
     ExternalPlaybackUpdate {
         position: f64,
         duration: f64,
     },
-    ExternalPlaybackEnded,
+    ExternalPlaybackEnded {
+        request: PlaybackRequestId,
+    },
     PollExternalMpv,
     ProgressHeartbeat,
 }
@@ -133,6 +244,9 @@ impl fmt::Debug for PlayerMessage {
             PlayerMessage::PlayMediaWithId(media, id) => {
                 write!(f, "PlayMediaWithId({:?}, {:?})", media, id)
             }
+            PlayerMessage::PlayMediaWithIdExternally(media, id) => {
+                write!(f, "PlayMediaWithIdExternally({:?}, {:?})", media, id)
+            }
             PlayerMessage::NavigateBack => write!(f, "NavigateBack"),
             PlayerMessage::NavigateHome => write!(f, "NavigateHome"),
 
@@ -141,7 +255,16 @@ impl fmt::Debug for PlayerMessage {
             PlayerMessage::Pause => write!(f, "Pause"),
             PlayerMessage::PlayPause => write!(f, "PlayPause"),
             PlayerMessage::Stop => write!(f, "Stop"),
-            PlayerMessage::ResetAfterStop => write!(f, "ResetAfterStop"),
+            PlayerMessage::ResetAfterStop(_) => write!(f, "ResetAfterStop"),
+            PlayerMessage::CompletePlaybackExit { .. } => {
+                write!(f, "CompletePlaybackExit")
+            }
+            PlayerMessage::RestoreShellAfterRootShutdown { .. } => {
+                write!(f, "RestoreShellAfterRootShutdown")
+            }
+            PlayerMessage::RootShutdownCompleted { .. } => {
+                write!(f, "RootShutdownCompleted")
+            }
 
             // Seeking
             PlayerMessage::Seek(pos) => write!(f, "Seek({})", pos),
@@ -168,8 +291,8 @@ impl fmt::Debug for PlayerMessage {
             PlayerMessage::PreviousEpisode => write!(f, "PreviousEpisode"),
 
             // Video events
-            PlayerMessage::VideoLoaded(success) => {
-                write!(f, "VideoLoaded({})", success)
+            PlayerMessage::VideoLoaded { request, success } => {
+                write!(f, "VideoLoaded({request:?}, {success})")
             }
             PlayerMessage::VideoReadyToPlay => write!(f, "VideoReadyToPlay"),
             PlayerMessage::EndOfStream => write!(f, "EndOfStream"),
@@ -199,11 +322,43 @@ impl fmt::Debug for PlayerMessage {
 
             // External player control
             PlayerMessage::PlayExternal => write!(f, "PlayExternal"),
+            PlayerMessage::ResumeExternalPlaybackAfterRootShutdown { request } => {
+                write!(f, "ResumeExternalPlaybackAfterRootShutdown({request:?})")
+            }
+            PlayerMessage::OpenExternalStreamSource { request } => {
+                write!(f, "OpenExternalStreamSource({request:?})")
+            }
+            PlayerMessage::ResumeInternalPlaybackAfterExternalLaunchFailure {
+                request,
+            } => {
+                write!(
+                    f,
+                    "ResumeInternalPlaybackAfterExternalLaunchFailure({request:?})"
+                )
+            }
             PlayerMessage::SetStreamSource(_) => {
                 write!(f, "SetStreamSource(<redacted>)")
             }
-            PlayerMessage::StreamUrlResolutionFailed(_) => {
-                write!(f, "StreamUrlResolutionFailed(<redacted>)")
+            PlayerMessage::StreamSourceResolved { request, .. } => {
+                write!(f, "StreamSourceResolved({request:?}, <redacted>)")
+            }
+            PlayerMessage::OpenResolvedStreamSource { request } => {
+                write!(f, "OpenResolvedStreamSource({request:?})")
+            }
+            PlayerMessage::ResumeResolvedStreamSourceAfterRootShutdown {
+                request,
+                ..
+            } => {
+                write!(
+                    f,
+                    "ResumeResolvedStreamSourceAfterRootShutdown({request:?})"
+                )
+            }
+            PlayerMessage::RootShutdownFailed { request, .. } => {
+                write!(f, "RootShutdownFailed({request:?}, <redacted>)")
+            }
+            PlayerMessage::StreamUrlResolutionFailed { request, .. } => {
+                write!(f, "StreamUrlResolutionFailed({request:?}, <redacted>)")
             }
 
             // UI control
@@ -213,6 +368,9 @@ impl fmt::Debug for PlayerMessage {
             PlayerMessage::ToggleSettings => write!(f, "ToggleSettings"),
             PlayerMessage::MouseMoved(point) => {
                 write!(f, "MouseMoved({:?})", point)
+            }
+            PlayerMessage::BeginNativeRootDrag => {
+                write!(f, "BeginNativeRootDrag")
             }
             PlayerMessage::VideoClicked => write!(f, "VideoClicked"),
             PlayerMessage::VideoDoubleClicked => {
@@ -263,8 +421,8 @@ impl fmt::Debug for PlayerMessage {
             PlayerMessage::CheckControlsVisibility => {
                 write!(f, "CheckControlsVisibility")
             }
-            PlayerMessage::ExternalPlaybackStarted => {
-                write!(f, "ExternalPlaybackStarted")
+            PlayerMessage::ExternalPlaybackStarted { request } => {
+                write!(f, "ExternalPlaybackStarted({request:?})")
             }
             PlayerMessage::ProgressHeartbeat => write!(f, "ProgressHeartbeat"),
             PlayerMessage::ExternalPlaybackUpdate { position, duration } => {
@@ -274,8 +432,8 @@ impl fmt::Debug for PlayerMessage {
                     position, duration
                 )
             }
-            PlayerMessage::ExternalPlaybackEnded => {
-                write!(f, "ExternalPlaybackEnded")
+            PlayerMessage::ExternalPlaybackEnded { request } => {
+                write!(f, "ExternalPlaybackEnded({request:?})")
             }
             PlayerMessage::PollExternalMpv => write!(f, "PollExternalMpv"),
         }

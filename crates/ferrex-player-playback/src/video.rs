@@ -10,7 +10,7 @@ use crate::{
         PlaybackCommand, PlaybackContentFit, PlaybackError, PlaybackSource,
         SessionGeneration,
     },
-    session::PlaybackSession,
+    session::{PlaybackSession, PlaybackShutdownBarrier},
     state::PlayerDomainState,
     subwave_adapter::SubwavePlaybackAdapter,
     update::{PlaybackUiShell, PlaybackUpdatePort},
@@ -30,17 +30,41 @@ use std::time::Duration;
     ),
     profiling::function
 )]
-pub fn close_video(state: &mut PlayerDomainState) {
+pub(crate) fn close_video(
+    state: &mut PlayerDomainState,
+) -> Option<PlaybackShutdownBarrier> {
+    let mut shutdown_barrier = None;
+    let retired_request = state
+        .session_playback_request
+        .or(state.integrated_playback_request);
     if let Some(mut video) = state.video_opt.take() {
         log::info!("Closing video");
         let _ = video.apply_command(PlaybackCommand::Stop);
+        shutdown_barrier = match video.begin_shutdown_barrier() {
+            Ok(barrier) => barrier,
+            Err(error) => {
+                log::error!(
+                    "Playback shutdown could not establish its completion barrier: {error}"
+                );
+                Some(PlaybackShutdownBarrier::failed(error.to_string()))
+            }
+        };
+        if shutdown_barrier.is_some() {
+            state.root_shutdown_in_progress = true;
+            state.root_shutdown_failed = false;
+            state.root_shutdown_retired_request = retired_request;
+            state.root_shutdown_exit_destination = None;
+        }
         drop(video);
     }
+    state.session_playback_request = None;
+    state.session_media_id = None;
     state.last_valid_position = 0.0;
     state.last_valid_duration = 0.0;
     state.dragging = false;
     state.last_seek_position = None;
     state.seeking = false;
+    shutdown_barrier
 }
 
 #[cfg_attr(
@@ -58,6 +82,19 @@ pub fn load_video<P>(
 where
     P: PlaybackUpdatePort + 'static,
 {
+    if state.root_shutdown_blocks_launch() {
+        if state.root_shutdown_failed {
+            ui.set_video_error(
+                "Playback is blocked because native window teardown could not be proven complete"
+                    .to_string(),
+            );
+        }
+        log::warn!(
+            "Playback backend launch deferred behind native shutdown proof"
+        );
+        return Task::none();
+    }
+
     // Check if video is already loaded or loading
     if state.video_opt.is_some() {
         log::warn!("Video already loaded, skipping duplicate load");
@@ -80,7 +117,7 @@ where
     let duration_hint_before_close = state.last_valid_duration;
 
     // Close existing video if any (should not happen due to guard above)
-    close_video(state);
+    let _ = close_video(state);
 
     // Restore playback hints immediately so UI elements reflect intended progress
     if let Some(resume) = pending_resume_hint {
@@ -108,6 +145,24 @@ where
             return Task::none();
         }
     };
+    let request = match state
+        .resolved_playback_request
+        .filter(|request| state.is_active_playback_request(*request))
+    {
+        Some(request) => request,
+        None => {
+            let Some(request) = state.begin_playback_request() else {
+                ui.set_video_error(
+                    "Playback request identity exhausted".to_string(),
+                );
+                state.is_loading_video = false;
+                return Task::none();
+            };
+            let accepted = state.resolve_playback_request(request);
+            debug_assert!(accepted);
+            request
+        }
+    };
     let url = source.uri().clone();
 
     log::info!("=== VIDEO LOADING DEBUG ===");
@@ -116,12 +171,11 @@ where
     // Seed duration from server metadata. Backend/presenter selection must not
     // use a filename as HDR evidence; native output capability is confirmed by
     // the selected backend's observed snapshot/diagnostics.
-    if let Some(current_media) = &state.current_media {
-        if let Some(metadata) = &current_media.media_file_metadata
-            && let Some(duration) = metadata.duration
-        {
-            state.last_valid_duration = duration;
-        }
+    if let Some(current_media) = &state.current_media
+        && let Some(metadata) = &current_media.media_file_metadata
+        && let Some(duration) = metadata.duration
+    {
+        state.last_valid_duration = duration;
     }
 
     // Validate URL is valid UTF-8 before using
@@ -146,9 +200,10 @@ where
         log::error!("Playback session generation exhausted");
         ui.set_video_error("Playback session generation exhausted".to_string());
         state.is_loading_video = false;
-        return Task::done(P::playback_message(PlayerMessage::VideoLoaded(
-            false,
-        )));
+        return Task::done(P::playback_message(PlayerMessage::VideoLoaded {
+            request,
+            success: false,
+        }));
     };
     state.playback_generation = generation;
 
@@ -203,16 +258,26 @@ where
 
             state.terminal_generation_handled = None;
             state.video_opt = Some(video);
+            state.session_playback_request = Some(request);
+            state.session_media_id = state.current_media_id;
             state.is_loading_video = false;
             ui.set_player_view();
 
-            Task::done(P::playback_message(PlayerMessage::VideoLoaded(true)))
+            Task::done(P::playback_message(PlayerMessage::VideoLoaded {
+                request,
+                success: true,
+            }))
         }
         Err(e) => {
             log::error!("Failed to create video: {}", e);
             ui.set_video_error(format!("{}", e));
             state.is_loading_video = false;
-            Task::done(P::playback_message(PlayerMessage::VideoLoaded(false)))
+            state.session_playback_request = None;
+            state.session_media_id = None;
+            Task::done(P::playback_message(PlayerMessage::VideoLoaded {
+                request,
+                success: false,
+            }))
         }
     }
 }

@@ -151,6 +151,58 @@ pub fn playback_surface_status(
     }
 }
 
+fn native_root_drag_policy(
+    target: Option<crate::contract::PlaybackTarget>,
+    has_native_host: bool,
+    is_macos: bool,
+) -> bool {
+    is_macos
+        && has_native_host
+        && target == Some(crate::contract::PlaybackTarget::MPV_INTEGRATED)
+}
+
+/// Whether central player-surface presses should be handed to AppKit as native
+/// root-window drags instead of using the ordinary video-click action.
+///
+/// The native host check keeps pre-host and fallback rendering on the canonical
+/// click path. The platform condition is compile-time so Windows and Linux
+/// retain their existing behavior.
+pub fn native_root_drag_surface_enabled(
+    snapshot: Option<&PlaybackSnapshot>,
+    native_host_window: Option<iced::window::Id>,
+) -> bool {
+    native_root_drag_policy(
+        snapshot.map(|snapshot| snapshot.target),
+        native_host_window.is_some(),
+        cfg!(target_os = "macos"),
+    )
+}
+
+/// Select the canonical action for a central video/background press.
+pub fn central_surface_press_message(
+    snapshot: Option<&PlaybackSnapshot>,
+    native_host_window: Option<iced::window::Id>,
+) -> PlayerMessage {
+    if native_root_drag_surface_enabled(snapshot, native_host_window) {
+        PlayerMessage::BeginNativeRootDrag
+    } else {
+        PlayerMessage::VideoClicked
+    }
+}
+
+fn shield_native_root_drag<'a>(
+    surface: iced::Element<'a, PlayerMessage, Theme, iced_wgpu::Renderer>,
+    enabled: bool,
+) -> iced::Element<'a, PlayerMessage, Theme, iced_wgpu::Renderer> {
+    if enabled {
+        mouse_area(surface)
+            .on_press(PlayerMessage::ShowControls)
+            .into()
+    } else {
+        surface
+    }
+}
+
 /// Render a static status plate without requesting a frame-rate redraw loop.
 pub fn playback_status_overlay(
     status: PlaybackSurfaceStatus,
@@ -243,8 +295,12 @@ impl PlayerDomainState {
             .into();
         }
 
+        let native_root_drag =
+            native_root_drag_surface_enabled(playback, native_host_window);
+        let central_press =
+            central_surface_press_message(playback, native_host_window);
         if let Some(video) = self.playback_widget(native_host_window) {
-            let clickable_video = self.video_view(video);
+            let clickable_video = self.video_view(video, central_press);
 
             // Overlay stack: video, snapshot-derived transient status, then
             // controls. The status plate is static and never drives redraws.
@@ -256,7 +312,7 @@ impl PlayerDomainState {
                 children.push(playback_status_overlay(status));
             }
             if self.controls {
-                children.push(self.controls_overlay());
+                children.push(self.controls_overlay(native_root_drag));
             }
 
             let player_with_overlay: iced::Element<PlayerMessage, Theme> =
@@ -264,7 +320,10 @@ impl PlayerDomainState {
 
             let player_with_settings: iced::Element<PlayerMessage, Theme> =
                 if self.show_settings {
-                    let settings = self.settings_panel();
+                    let settings = shield_native_root_drag(
+                        self.settings_panel(),
+                        native_root_drag,
+                    );
                     let positioned_settings = container(row![
                         Space::new().width(Length::Fill),
                         container(settings)
@@ -295,14 +354,15 @@ impl PlayerDomainState {
                 Theme,
                 iced_wgpu::Renderer,
             > = if self.show_quality_menu {
-                let quality_menu = self.quality_menu_overlay();
+                let quality_menu = self.quality_menu_overlay(native_root_drag);
                 iced::widget::Stack::with_children(vec![
                     player_with_settings,
                     quality_menu,
                 ])
                 .into()
             } else if self.show_subtitle_menu {
-                let subtitle_menu = self.subtitle_menu_overlay();
+                let subtitle_menu =
+                    self.subtitle_menu_overlay(native_root_drag);
                 iced::widget::Stack::with_children(vec![
                     player_with_settings,
                     subtitle_menu,
@@ -362,19 +422,21 @@ impl PlayerDomainState {
     fn video_view<'a>(
         &self,
         player: Element<'a, PlayerMessage>,
+        press: PlayerMessage,
     ) -> Element<'a, PlayerMessage> {
         // Presentation redraw cadence is backend-owned. Player state arrives
         // through copied event signals or the bounded legacy snapshot timer,
         // never through a decoded-frame callback.
-        iced::widget::mouse_area(player)
-            .on_press(PlayerMessage::VideoClicked)
-            .into()
+        iced::widget::mouse_area(player).on_press(press).into()
     }
 
     /// Build the controls overlay
-    fn controls_overlay(&self) -> iced::Element<'_, PlayerMessage, Theme> {
+    fn controls_overlay(
+        &self,
+        shield_native_drag: bool,
+    ) -> iced::Element<'_, PlayerMessage, Theme> {
         // Delegate to controls.rs for the full implementation
-        self.build_controls()
+        self.build_controls(shield_native_drag)
     }
 
     /// Build the track notification overlay
@@ -408,12 +470,16 @@ impl PlayerDomainState {
     /// Build the quality menu overlay
     fn quality_menu_overlay(
         &self,
+        shield_native_drag: bool,
     ) -> iced::Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> {
         // Position the menu near the quality button (bottom right)
         container(row![
             Space::new().width(Length::Fill),
-            container(self.build_quality_menu())
-                .style(theme::container_subtitle_menu_wrapper),
+            container(shield_native_root_drag(
+                self.build_quality_menu(),
+                shield_native_drag,
+            ))
+            .style(theme::container_subtitle_menu_wrapper),
             Space::new().width(Length::Fixed(200.0)), // Offset from right edge
         ])
         .width(Length::Fill)
@@ -430,12 +496,16 @@ impl PlayerDomainState {
 
     fn subtitle_menu_overlay(
         &self,
+        shield_native_drag: bool,
     ) -> iced::Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> {
         // Position the menu near the subtitle button (bottom right)
         container(row![
             Space::new().width(Length::Fill),
-            container(self.build_subtitle_menu())
-                .style(theme::container_subtitle_menu_wrapper),
+            container(shield_native_root_drag(
+                self.build_subtitle_menu(),
+                shield_native_drag,
+            ))
+            .style(theme::container_subtitle_menu_wrapper),
             Space::new().width(Length::Fixed(100.0)), // Offset from right edge
         ])
         .width(Length::Fill)
@@ -594,5 +664,30 @@ mod tests {
                 "Unsupported codec".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn native_root_drag_replaces_video_click_only_for_integrated_macos_host() {
+        assert!(native_root_drag_policy(
+            Some(PlaybackTarget::MPV_INTEGRATED),
+            true,
+            true,
+        ));
+        assert!(!native_root_drag_policy(
+            Some(PlaybackTarget::MPV_INTEGRATED),
+            false,
+            true,
+        ));
+        assert!(!native_root_drag_policy(
+            Some(PlaybackTarget::MPV_NATIVE_WINDOW),
+            true,
+            true,
+        ));
+        assert!(!native_root_drag_policy(
+            Some(PlaybackTarget::MPV_INTEGRATED),
+            true,
+            false,
+        ));
+        assert!(!native_root_drag_policy(None, true, true));
     }
 }

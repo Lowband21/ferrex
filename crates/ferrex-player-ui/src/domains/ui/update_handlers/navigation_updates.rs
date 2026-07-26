@@ -782,12 +782,12 @@ pub fn handle_navigate_home(state: &mut State) -> Task<UiMessage> {
     profiling::function
 )]
 pub fn handle_exit_fullscreen(state: &mut State) -> Task<UiMessage> {
-    // Only exit fullscreen if we're actually in fullscreen
+    // Route through the player reducer instead of mutating an arbitrary Iced
+    // window. Native mpv playback translates this existing toggle path into
+    // an mpv fullscreen command; the non-mpv fallback emits a shell
+    // SetWindowMode event that is explicitly scoped to the main window.
     if state.domains.player.state.is_fullscreen {
-        state.domains.player.state.is_fullscreen = false;
-        let mode = iced::window::Mode::Windowed;
-        iced::window::latest()
-            .and_then(move |id| iced::window::set_mode(id, mode))
+        Task::done(UiShellMessage::ToggleFullscreen.into())
     } else {
         Task::none()
     }
@@ -858,5 +858,47 @@ fn save_current_scroll_state(state: &mut State) {
             // We need to save scroll state for detail views, settings, etc.
             log::debug!("No scroll state to save for view: {:?}", current_view);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::ui::windows::WindowKind;
+    use iced_runtime::{Action, futures::futures::StreamExt, task};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn exit_fullscreen_uses_player_route_with_overlay_registered_last() {
+        let mut state = State::default();
+        let main = iced::window::Id::unique();
+        let overlay = iced::window::Id::unique();
+        state.windows.set(WindowKind::Main, main);
+        state.windows.set(WindowKind::PlayerOverlay, overlay);
+        assert!(state.windows.record_focus(overlay));
+        state.domains.player.state.is_fullscreen = true;
+
+        let mut actions = task::into_stream(handle_exit_fullscreen(&mut state))
+            .expect("fullscreen exit should emit a player-route message");
+
+        assert!(matches!(
+            actions.next().await,
+            Some(Action::Output(UiMessage::Shell(
+                UiShellMessage::ToggleFullscreen
+            )))
+        ));
+        assert!(actions.next().await.is_none());
+        // The player reducer owns confirmed fullscreen state. This handler
+        // must not optimistically change it before mpv acknowledges the
+        // command.
+        assert!(state.domains.player.state.is_fullscreen);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn exit_fullscreen_is_idle_when_player_is_windowed() {
+        let mut state = State::default();
+
+        assert!(
+            task::into_stream(handle_exit_fullscreen(&mut state)).is_none()
+        );
     }
 }

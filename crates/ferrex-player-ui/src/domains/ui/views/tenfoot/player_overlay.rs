@@ -11,6 +11,7 @@ use crate::{
     common::{
         controller_input::{
             ControllerButton, ControllerEvent, ControllerInputMapper,
+            native_controller_subscription,
         },
         focus::{
             FocusLayoutRect, FocusMargins, SpatialAction, SpatialDirection,
@@ -31,7 +32,10 @@ use crate::{
 };
 use ferrex_player_playback::{
     contract::{BackendKind, PlaybackSnapshot, PlaybackState},
-    view::{playback_status_overlay, playback_surface_status},
+    view::{
+        central_surface_press_message, native_root_drag_surface_enabled,
+        playback_status_overlay, playback_surface_status,
+    },
 };
 use iced::{
     Alignment, Background, Border, Color, Element, Length, Padding, Shadow,
@@ -475,6 +479,62 @@ pub fn keyboard_subscription(state: &State) -> Subscription<DomainMessage> {
     })
 }
 
+/// Player-view physical-controller subscription for 10-foot mode.
+///
+/// The native backend emits normalized buttons only. State-sensitive routing
+/// stays here beside keyboard routing so both inputs use the same focus,
+/// visibility, and canonical player message path.
+pub fn controller_subscription(state: &State) -> Subscription<DomainMessage> {
+    if !controller_input_is_active(state) {
+        return Subscription::none();
+    }
+
+    native_controller_subscription().map(|button| {
+        DomainMessage::Ui(UiShellMessage::PlayerControllerInput(button).into())
+    })
+}
+
+fn controller_input_is_active(state: &State) -> bool {
+    state.interface_mode.is_tenfoot()
+        && matches!(
+            state.domains.ui.state.view,
+            crate::domains::ui::types::ViewState::Player
+        )
+        && state.windows.is_player_surface_focused()
+        && (!state.domains.search.state.presentation.is_open()
+            || state.domains.search.state.presentation.is_overlay())
+}
+
+/// Revalidate a process-global controller event against current application
+/// state before translating it into canonical player or shell messages.
+pub(crate) fn controller_message_from_state(
+    state: &State,
+    button: ControllerButton,
+) -> DomainMessage {
+    if !controller_input_is_active(state) {
+        return DomainMessage::NoOp;
+    }
+
+    if state.domains.search.state.presentation.is_overlay() {
+        return crate::domains::ui::messages::subscriptions::tenfoot_search_controller_message(
+            button,
+            state.domains.search.state.tenfoot_keyboard.is_open(),
+        )
+        .unwrap_or(DomainMessage::NoOp);
+    }
+
+    controller_message(TenFootPlayerInputSnapshot::from_state(state), button)
+}
+
+fn controller_message(
+    snapshot: TenFootPlayerInputSnapshot,
+    button: ControllerButton,
+) -> DomainMessage {
+    let action = ControllerInputMapper::new()
+        .handle_event(ControllerEvent::ButtonPressed(button));
+    snapshot.handle_action(action)
+}
+
 /// Build the 10-foot player view while preserving the existing video widget.
 pub fn view_player(
     state: &State,
@@ -489,15 +549,21 @@ pub fn view_player(
         return external_player_view(snapshot);
     }
 
+    let native_root_drag = native_root_drag_surface_enabled(
+        player.playback_snapshot(),
+        native_host_window,
+    );
+    let central_press = central_surface_press_message(
+        player.playback_snapshot(),
+        native_host_window,
+    );
     if let Some(video) = player.playback_widget(native_host_window) {
         let video_surface: Element<
             '_,
             PlayerMessage,
             Theme,
             iced_wgpu::Renderer,
-        > = mouse_area(video)
-            .on_press(PlayerMessage::VideoClicked)
-            .into();
+        > = mouse_area(video).on_press(central_press).into();
 
         let mut layers: Vec<
             Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer>,
@@ -507,7 +573,7 @@ pub fn view_player(
             layers.push(playback_status_overlay(status));
         }
         if overlay_controls_visible(player) {
-            layers.push(overlay(state));
+            layers.push(overlay(state, native_root_drag));
         }
 
         if let Some(notification) = &player.track_notification {
@@ -550,6 +616,7 @@ pub fn view_loading_status(
 
 fn overlay(
     state: &State,
+    shield_native_drag: bool,
 ) -> Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> {
     let player = &state.domains.player.state;
     let viewport = player_viewport_size(state);
@@ -573,23 +640,26 @@ fn overlay(
         "--:--".to_string()
     };
 
-    let top_bar = container(
-        row![
-            column![
-                text(status).size(14).color(MediaServerTheme::ACCENT),
-                text(title).size(28).color(Color::WHITE),
+    let top_bar: Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> =
+        container(
+            row![
+                column![
+                    text(status).size(14).color(MediaServerTheme::ACCENT),
+                    text(title).size(28).color(Color::WHITE),
+                ]
+                .spacing(2),
+                Space::new().width(Length::Fill),
+                text("10-foot player")
+                    .size(18)
+                    .color(MediaServerTheme::TEXT_SECONDARY),
             ]
-            .spacing(2),
-            Space::new().width(Length::Fill),
-            text("10-foot player")
-                .size(18)
-                .color(MediaServerTheme::TEXT_SECONDARY),
-        ]
-        .align_y(Alignment::Center),
-    )
-    .width(Length::Fill)
-    .padding(PlayerOverlayLayout::top_bar_padding())
-    .style(top_gradient_style);
+            .align_y(Alignment::Center),
+        )
+        .width(Length::Fill)
+        .padding(PlayerOverlayLayout::top_bar_padding())
+        .style(top_gradient_style)
+        .into();
+    let top_bar = shield_native_root_drag(top_bar, shield_native_drag);
 
     let progress_layout =
         PlayerOverlayLayout::progress_rect(viewport.width, viewport.height);
@@ -681,49 +751,55 @@ fn overlay(
     .spacing(PlayerOverlayLayout::COMMAND_GAP)
     .align_y(Alignment::Center);
 
-    let bottom_panel = container(
-        column![
-            row![
-                container(text(elapsed_time).size(24).color(Color::WHITE))
-                    .width(Length::Fixed(PlayerOverlayLayout::TIME_LABEL_W))
-                    .align_x(iced::alignment::Horizontal::Right),
-                seek,
-                container(text(remaining_time).size(24).color(Color::WHITE))
+    let bottom_panel: Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> =
+        container(
+            column![
+                row![
+                    container(text(elapsed_time).size(24).color(Color::WHITE))
+                        .width(Length::Fixed(PlayerOverlayLayout::TIME_LABEL_W))
+                        .align_x(iced::alignment::Horizontal::Right),
+                    seek,
+                    container(
+                        text(remaining_time).size(24).color(Color::WHITE)
+                    )
                     .width(Length::Fixed(PlayerOverlayLayout::TIME_LABEL_W))
                     .align_x(iced::alignment::Horizontal::Left),
-            ]
-            .spacing(PlayerOverlayLayout::PROGRESS_ROW_GAP)
-            .align_y(Alignment::Center)
-            .height(Length::Fixed(PlayerOverlayLayout::PROGRESS_ROW_H)),
-            row![
-                container(
-                    column![
-                        text(action_label(&focused_id))
-                            .size(22)
-                            .color(MediaServerTheme::ACCENT),
-                        text("Esc hides • Enter selects • / or S searches")
-                            .size(15)
-                            .color(MediaServerTheme::TEXT_SECONDARY),
-                    ]
-                    .spacing(2),
-                )
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Left),
-                container(transport).width(Length::Shrink),
-                container(command_row)
+                ]
+                .spacing(PlayerOverlayLayout::PROGRESS_ROW_GAP)
+                .align_y(Alignment::Center)
+                .height(Length::Fixed(PlayerOverlayLayout::PROGRESS_ROW_H)),
+                row![
+                    container(
+                        column![
+                            text(action_label(&focused_id))
+                                .size(22)
+                                .color(MediaServerTheme::ACCENT),
+                            text("Esc hides • Enter selects • / or S searches")
+                                .size(15)
+                                .color(MediaServerTheme::TEXT_SECONDARY),
+                        ]
+                        .spacing(2),
+                    )
                     .width(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Right),
+                    .align_x(iced::alignment::Horizontal::Left),
+                    container(transport).width(Length::Shrink),
+                    container(command_row)
+                        .width(Length::Fill)
+                        .align_x(iced::alignment::Horizontal::Right),
+                ]
+                .spacing(PlayerOverlayLayout::CONTROL_ROW_GAP)
+                .align_y(Alignment::Center)
+                .height(Length::Fixed(PlayerOverlayLayout::CONTROL_ROW_H)),
             ]
-            .spacing(PlayerOverlayLayout::CONTROL_ROW_GAP)
-            .align_y(Alignment::Center)
-            .height(Length::Fixed(PlayerOverlayLayout::CONTROL_ROW_H)),
-        ]
-        .spacing(PlayerOverlayLayout::PANEL_COLUMN_GAP),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(PlayerOverlayLayout::PANEL_H))
-    .padding(PlayerOverlayLayout::panel_padding())
-    .style(panel_style);
+            .spacing(PlayerOverlayLayout::PANEL_COLUMN_GAP),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(PlayerOverlayLayout::PANEL_H))
+        .padding(PlayerOverlayLayout::panel_padding())
+        .style(panel_style)
+        .into();
+    let bottom_panel =
+        shield_native_root_drag(bottom_panel, shield_native_drag);
 
     container(column![
         top_bar,
@@ -733,6 +809,19 @@ fn overlay(
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
+}
+
+fn shield_native_root_drag<'a>(
+    surface: Element<'a, PlayerMessage, Theme, iced_wgpu::Renderer>,
+    enabled: bool,
+) -> Element<'a, PlayerMessage, Theme, iced_wgpu::Renderer> {
+    if enabled {
+        mouse_area(surface)
+            .on_press(PlayerMessage::ShowControls)
+            .into()
+    } else {
+        surface
+    }
 }
 
 fn player_status_label(player: &PlayerDomainState) -> &'static str {
@@ -1536,6 +1625,103 @@ mod tests {
         assert!(matches!(
             player_message_for_focus(EXIT_ID),
             PlayerMessage::NavigateBack
+        ));
+    }
+
+    #[test]
+    fn normalized_controller_buttons_use_canonical_player_messages() {
+        let snapshot = TenFootPlayerInputSnapshot {
+            has_internal_video: false,
+            external_active: false,
+            overlay_visible: false,
+            viewport_width_bits: 1920.0_f32.to_bits(),
+            viewport_height_bits: 1080.0_f32.to_bits(),
+        };
+
+        assert!(matches!(
+            controller_message(snapshot, ControllerButton::East),
+            DomainMessage::Player(PlayerMessage::NavigateBack)
+        ));
+        assert!(matches!(
+            controller_message(snapshot, ControllerButton::Select),
+            DomainMessage::Ui(_)
+        ));
+        assert!(matches!(
+            controller_message(snapshot, ControllerButton::South),
+            DomainMessage::NoOp
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn physical_controller_requires_confirmed_current_player_focus() {
+        let mut state = State::default();
+        state.interface_mode = crate::state::InterfaceMode::TenFoot;
+        state.domains.ui.state.view =
+            crate::domains::ui::types::ViewState::Player;
+
+        let main = iced::window::Id::unique();
+        let overlay = iced::window::Id::unique();
+        let request =
+            ferrex_player_playback::messages::PlaybackRequestId::new(1);
+        state
+            .windows
+            .set(crate::domains::ui::windows::WindowKind::Main, main);
+        state.windows.set(
+            crate::domains::ui::windows::WindowKind::PlayerOverlay,
+            overlay,
+        );
+        assert!(state.windows.record_focus(main));
+        assert!(matches!(
+            controller_message_from_state(&state, ControllerButton::East),
+            DomainMessage::Player(PlayerMessage::NavigateBack)
+        ));
+
+        assert!(state.windows.begin_player_overlay_launch(request));
+        assert!(state.windows.activate_player_overlay(request));
+        assert!(state.windows.finish_player_overlay_activation(request));
+
+        assert!(matches!(
+            controller_message_from_state(&state, ControllerButton::East),
+            DomainMessage::NoOp
+        ));
+
+        assert!(state.windows.record_focus(overlay));
+        assert!(matches!(
+            controller_message_from_state(&state, ControllerButton::East),
+            DomainMessage::Player(PlayerMessage::NavigateBack)
+        ));
+
+        state.domains.search.state.presentation =
+            crate::domains::search::types::SearchPresentation::Overlay;
+        state.domains.search.state.tenfoot_keyboard.open();
+        assert!(matches!(
+            controller_message_from_state(
+                &state,
+                ControllerButton::DPadLeft
+            ),
+            DomainMessage::Search(
+                crate::domains::search::messages::SearchMessage::TenFootKeyboardMove(
+                    crate::domains::search::keyboard::TenFootKeyboardDirection::Left
+                )
+            )
+        ));
+        assert!(matches!(
+            controller_message_from_state(&state, ControllerButton::South),
+            DomainMessage::Search(
+                crate::domains::search::messages::SearchMessage::TenFootKeyboardActivate
+            )
+        ));
+        assert!(matches!(
+            controller_message_from_state(&state, ControllerButton::East),
+            DomainMessage::Search(
+                crate::domains::search::messages::SearchMessage::HandleEscape
+            )
+        ));
+
+        assert!(state.windows.record_unfocus(overlay));
+        assert!(matches!(
+            controller_message_from_state(&state, ControllerButton::East),
+            DomainMessage::NoOp
         ));
     }
 }

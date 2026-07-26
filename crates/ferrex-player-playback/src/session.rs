@@ -42,6 +42,40 @@ pub struct PlaybackSession {
     backend: BackendSession,
 }
 
+/// Completion gate for playback-root teardown that must finish before another
+/// top-level application window may be revealed.
+pub(crate) struct PlaybackShutdownBarrier {
+    completion: tokio::sync::oneshot::Receiver<Result<(), String>>,
+}
+
+impl std::fmt::Debug for PlaybackShutdownBarrier {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PlaybackShutdownBarrier")
+            .finish_non_exhaustive()
+    }
+}
+
+impl PlaybackShutdownBarrier {
+    pub(crate) fn new(
+        completion: tokio::sync::oneshot::Receiver<Result<(), String>>,
+    ) -> Self {
+        Self { completion }
+    }
+
+    pub(crate) fn failed(message: String) -> Self {
+        let (sender, completion) = tokio::sync::oneshot::channel();
+        let _ = sender.send(Err(message));
+        Self { completion }
+    }
+
+    pub(crate) async fn wait(self) -> Result<(), String> {
+        self.completion.await.unwrap_or_else(|_| {
+            Err("playback-root teardown completion was lost".to_string())
+        })
+    }
+}
+
 enum BackendSession {
     Subwave(Box<SubwavePlaybackAdapter>),
     #[cfg(feature = "mpv")]
@@ -76,6 +110,38 @@ struct MpvBackendSession {
         any(target_os = "windows", target_os = "macos")
     ))]
     presentation: Option<NativePresentation>,
+    #[cfg(all(feature = "ui", target_os = "macos"))]
+    native_window_fallback_pending: bool,
+}
+
+#[cfg(any(
+    all(test, feature = "mpv"),
+    all(
+        feature = "mpv",
+        feature = "ui",
+        any(target_os = "windows", target_os = "macos")
+    )
+))]
+const fn native_presenter_refresh_required(
+    presentation_available: bool,
+    native_window_fallback_pending: bool,
+) -> bool {
+    presentation_available || native_window_fallback_pending
+}
+
+#[cfg(any(
+    all(test, feature = "mpv"),
+    all(feature = "mpv", feature = "ui", target_os = "macos")
+))]
+fn complete_verified_native_window_fallback(
+    pending: &mut bool,
+    verified: bool,
+) -> bool {
+    if !*pending || !verified {
+        return false;
+    }
+    *pending = false;
+    true
 }
 
 #[cfg(feature = "mpv")]
@@ -132,18 +198,57 @@ impl MpvBackendSession {
                 any(target_os = "windows", target_os = "macos")
             ))]
             presentation,
+            #[cfg(all(feature = "ui", target_os = "macos"))]
+            native_window_fallback_pending: false,
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn begin_shutdown_barrier(
+        &mut self,
+    ) -> Result<Option<PlaybackShutdownBarrier>, PlaybackError> {
+        // Drain a just-arrived window identity, detach the in-root controls,
+        // and then begin owner teardown. The returned completion is the only
+        // proof that a root whose identity arrived late can no longer appear.
+        self.adapter.poll_events();
+        #[cfg(feature = "ui")]
+        if let Some(presentation) = self.presentation.as_ref() {
+            presentation.detach();
+        }
+        self.adapter.begin_shutdown_barrier()
     }
 
     fn apply_command(
         &mut self,
         command: PlaybackCommand,
     ) -> Result<(), PlaybackError> {
+        #[cfg(all(feature = "ui", target_os = "macos"))]
+        if self.native_window_fallback_pending
+            && matches!(
+                &command,
+                PlaybackCommand::Load(_)
+                    | PlaybackCommand::Stop
+                    | PlaybackCommand::Shutdown
+            )
+        {
+            // A pending proof belongs only to the still-live failed presenter
+            // session. A stop, replacement, or shutdown cannot be credited by
+            // a later unrelated mpv root.
+            self.native_window_fallback_pending = false;
+        }
+
         #[cfg(all(
             feature = "ui",
             any(target_os = "windows", target_os = "macos")
         ))]
         {
+            if matches!(&command, PlaybackCommand::Shutdown) {
+                // Drain a just-arrived native window-id before deciding
+                // whether an AppKit root must be withdrawn.
+                self.adapter.poll_events();
+                #[cfg(target_os = "macos")]
+                self.adapter.withdraw_native_root_for_shutdown()?;
+            }
             if let PlaybackCommand::SetFullscreen(fullscreen) = &command
                 && self.presentation.is_some()
                 && self.adapter.snapshot().target
@@ -198,11 +303,46 @@ impl MpvBackendSession {
         self.drain_presenter_state()
     }
 
+    #[cfg(all(feature = "ui", target_os = "macos"))]
+    fn confirm_native_window_fallback_if_live(&mut self) {
+        if !self.native_window_fallback_pending
+            || !self.adapter.vo_configured()
+            || !self.adapter.native_video_output_started()
+        {
+            return;
+        }
+        let Some(native_window_id) = self.adapter.native_window_id() else {
+            return;
+        };
+        match crate::macos_presenter::verify_mpv_native_fallback_window(
+            native_window_id,
+        ) {
+            Ok(verified) => {
+                complete_verified_native_window_fallback(
+                    &mut self.native_window_fallback_pending,
+                    verified,
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                log::debug!(
+                    "mpv native fallback root is not yet verifiable: {error}"
+                );
+            }
+        }
+    }
+
     #[cfg(all(
         feature = "ui",
         any(target_os = "windows", target_os = "macos")
     ))]
     fn drain_presenter_state(&mut self) -> Result<(), PlaybackError> {
+        // Verification can legitimately lag the failure event by one or more
+        // AppKit turns. Keep retrying the pending native root even after the
+        // failed integrated presentation has been retired.
+        #[cfg(target_os = "macos")]
+        self.confirm_native_window_fallback_if_live();
+
         let Some(presentation) = self.presentation.as_ref() else {
             return Ok(());
         };
@@ -214,6 +354,8 @@ impl MpvBackendSession {
 
         let events = presentation.drain_events();
         let mut fallback = false;
+        #[cfg(target_os = "macos")]
+        let mut native_window_fallback = false;
         for event in events {
             let fallback_reason = match &event {
                 PresenterEvent::FallbackRequested(reason) => {
@@ -225,7 +367,11 @@ impl MpvBackendSession {
                 .record_event(crate::contract::PlaybackEvent::Presenter(event));
             if let Some(reason) = fallback_reason {
                 if reason.to == PlaybackTarget::MPV_NATIVE_WINDOW {
-                    self.adapter.commit_native_window_fallback(reason);
+                    self.adapter.begin_native_window_fallback(reason);
+                    #[cfg(target_os = "macos")]
+                    {
+                        native_window_fallback = true;
+                    }
                 } else {
                     self.adapter.record_event(
                         crate::contract::PlaybackEvent::Fallback(reason),
@@ -236,8 +382,23 @@ impl MpvBackendSession {
         }
         if fallback {
             presentation.detach();
+            // Detach after failure is a terminal lifecycle transition. Drain
+            // it before dropping the presentation so the normal playback
+            // projection and macOS runtime evidence both record a fully
+            // retired integrated presenter.
+            for event in presentation.drain_events() {
+                self.adapter.record_event(
+                    crate::contract::PlaybackEvent::Presenter(event),
+                );
+            }
             self.presentation = None;
+            #[cfg(target_os = "macos")]
+            if native_window_fallback {
+                self.native_window_fallback_pending = true;
+            }
         }
+        #[cfg(target_os = "macos")]
+        self.confirm_native_window_fallback_if_live();
         Ok(())
     }
 
@@ -418,6 +579,26 @@ impl PlaybackSession {
             BackendSession::Subwave(adapter) => adapter.apply_command(command),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(adapter) => adapter.apply_command(command),
+        }
+    }
+
+    /// Begin backend shutdown and return a completion gate when native AppKit
+    /// teardown must yield to the main run loop.
+    pub(crate) fn begin_shutdown_barrier(
+        &mut self,
+    ) -> Result<Option<PlaybackShutdownBarrier>, PlaybackError> {
+        match &mut self.backend {
+            BackendSession::Subwave(adapter) => {
+                adapter.apply_command(PlaybackCommand::Shutdown)?;
+                Ok(None)
+            }
+            #[cfg(all(feature = "mpv", target_os = "macos"))]
+            BackendSession::Mpv(adapter) => adapter.begin_shutdown_barrier(),
+            #[cfg(all(feature = "mpv", not(target_os = "macos")))]
+            BackendSession::Mpv(adapter) => {
+                adapter.apply_command(PlaybackCommand::Shutdown)?;
+                Ok(None)
+            }
         }
     }
 
@@ -686,6 +867,58 @@ impl PlaybackSession {
         }
     }
 
+    /// Whether the UI must keep the native-presenter refresh clock alive.
+    ///
+    /// A verified native-window fallback can take one or more AppKit turns to
+    /// become visible. The pending proof therefore keeps the clock alive after
+    /// the integrated presentation itself has been retired.
+    pub fn native_presenter_refresh_required(&self) -> bool {
+        #[cfg(all(
+            feature = "mpv",
+            feature = "ui",
+            any(target_os = "windows", target_os = "macos")
+        ))]
+        if let BackendSession::Mpv(adapter) = &self.backend {
+            #[cfg(target_os = "macos")]
+            let fallback_pending = adapter.native_window_fallback_pending;
+            #[cfg(target_os = "windows")]
+            let fallback_pending = false;
+            return native_presenter_refresh_required(
+                adapter.presentation.is_some(),
+                fallback_pending,
+            );
+        }
+
+        false
+    }
+
+    /// Begin an AppKit-managed drag on the active integrated mpv root.
+    ///
+    /// The operation is synchronous because AppKit requires the current
+    /// mouse-down event. Missing, fallback, or not-yet-attached presenters are
+    /// benign no-ops.
+    pub fn begin_native_root_drag(&mut self) -> bool {
+        #[cfg(all(feature = "mpv", feature = "ui", target_os = "macos"))]
+        if let BackendSession::Mpv(adapter) = &mut self.backend
+            && adapter.snapshot().target
+                == crate::contract::PlaybackTarget::MPV_INTEGRATED
+            && !adapter.snapshot().fullscreen
+            && let Some(presentation) = adapter.presentation.as_ref()
+        {
+            return match presentation.begin_native_root_drag() {
+                Ok(started) => started,
+                Err(error) => {
+                    log::warn!(
+                        "Could not begin native mpv root window drag: {error}"
+                    );
+                    false
+                }
+            };
+        }
+
+        false
+    }
+
     /// Complete the shell-controlled visibility handoff for an integrated
     /// native presenter. The presenter attaches while hidden; the shell calls
     /// this only after its retained main window has been hidden.
@@ -801,5 +1034,21 @@ mod tests {
             fallback.code,
             crate::contract::FallbackReasonCode::UnsupportedPlatform
         );
+    }
+
+    #[test]
+    fn transient_native_fallback_observation_keeps_refresh_alive() {
+        let mut pending = true;
+        assert!(native_presenter_refresh_required(false, pending));
+        assert!(!complete_verified_native_window_fallback(
+            &mut pending,
+            false
+        ));
+        assert!(pending);
+        assert!(native_presenter_refresh_required(false, pending));
+
+        assert!(complete_verified_native_window_fallback(&mut pending, true));
+        assert!(!pending);
+        assert!(!native_presenter_refresh_required(false, pending));
     }
 }

@@ -189,7 +189,10 @@ pub fn update_player(
 
     let api_service: Arc<dyn ApiService> = Arc::clone(&state.api_service);
     let server_url = state.server_url.clone();
-    let window_size = state.window_size;
+    let window_size = state
+        .windows
+        .player_overlay_size()
+        .unwrap_or(state.window_size);
     let window_position = state.window_position;
 
     let result = {
@@ -223,17 +226,64 @@ pub fn update_player(
             PlaybackWindowEvent::RestoreWindow(fullscreen) => {
                 CrossDomainEvent::RestoreWindow(fullscreen)
             }
-            PlaybackWindowEvent::NativePresenterAttached => {
-                CrossDomainEvent::NativePresenterAttached
+            PlaybackWindowEvent::BeginIntegratedPlayback { request } => {
+                CrossDomainEvent::BeginIntegratedPlayback { request }
             }
-            PlaybackWindowEvent::NativePresenterUnavailable => {
-                CrossDomainEvent::NativePresenterUnavailable
+            PlaybackWindowEvent::BeginExternalPlayback { request } => {
+                CrossDomainEvent::BeginExternalPlayback { request }
             }
-            PlaybackWindowEvent::PlaybackExited => {
-                CrossDomainEvent::PlaybackExited
+            PlaybackWindowEvent::ExternalPlaybackLaunchFailed { request } => {
+                CrossDomainEvent::ExternalPlaybackLaunchFailed { request }
+            }
+            PlaybackWindowEvent::NativePresenterAttached { request } => {
+                CrossDomainEvent::NativePresenterAttached { request }
+            }
+            PlaybackWindowEvent::NativePresenterUnavailable {
+                request,
+                effective_target,
+            } => CrossDomainEvent::NativePresenterUnavailable {
+                request,
+                effective_target,
+            },
+            PlaybackWindowEvent::PlaybackExited { request } => {
+                CrossDomainEvent::PlaybackExited { request }
             }
         })
         .collect();
 
     DomainUpdateResult::with_events(result.task, events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::ui::windows::WindowKind;
+    use ferrex_player_playback::constants::player_controls;
+    use iced::{Point, Size, window};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mouse_seek_uses_live_overlay_viewport_after_native_resize() {
+        let mut state = State::default();
+        let retained_shell_size = state.window_size;
+        let overlay = window::Id::unique();
+        let overlay_size = Size::new(1_920.0, 1_080.0);
+
+        state.windows.set(WindowKind::PlayerOverlay, overlay);
+        assert!(state.windows.set_player_overlay_size(overlay, overlay_size));
+        state.domains.player.state.source_duration = Some(200.0);
+
+        let seek_bar_center_y =
+            overlay_size.height - player_controls::SEEK_BAR_CENTER_FROM_BOTTOM;
+        drop(update_player(
+            &mut state,
+            PlayerMessage::MouseMoved(Point::new(
+                overlay_size.width / 2.0,
+                seek_bar_center_y,
+            )),
+        ));
+
+        assert!(state.domains.player.state.seek_bar_hovered);
+        assert_eq!(state.domains.player.state.last_seek_position, Some(100.0));
+        assert_eq!(state.window_size, retained_shell_size);
+    }
 }

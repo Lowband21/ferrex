@@ -67,9 +67,15 @@ pub enum UiShellMessage {
     PlayerOverlayOpened(window::Id),
     PlayerOverlayResized(window::Id, iced::Size),
     ActivatePlayerOverlay,
-    PlayerOverlayHandoffReady,
+    PlayerOverlayHandoffReady {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+    },
     PlayerOverlayFocused,
-    ClosePlayerOverlay,
+    PlayerOverlayUnfocused,
+    PlayerControllerInput(crate::common::controller_input::ControllerButton),
+    ClosePlayerOverlay {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+    },
 
     // Search surface and query management
     UpdateSearchQuery(String),
@@ -119,9 +125,13 @@ impl UiShellMessage {
             Self::PlayerOverlayOpened(_) => "UI::PlayerOverlayOpened",
             Self::PlayerOverlayResized(_, _) => "UI::PlayerOverlayResized",
             Self::ActivatePlayerOverlay => "UI::ActivatePlayerOverlay",
-            Self::PlayerOverlayHandoffReady => "UI::PlayerOverlayHandoffReady",
+            Self::PlayerOverlayHandoffReady { .. } => {
+                "UI::PlayerOverlayHandoffReady"
+            }
             Self::PlayerOverlayFocused => "UI::PlayerOverlayFocused",
-            Self::ClosePlayerOverlay => "UI::ClosePlayerOverlay",
+            Self::PlayerOverlayUnfocused => "UI::PlayerOverlayUnfocused",
+            Self::PlayerControllerInput(_) => "UI::PlayerControllerInput",
+            Self::ClosePlayerOverlay { .. } => "UI::ClosePlayerOverlay",
 
             // Search surface and query management
             Self::UpdateSearchQuery(_) => "UI::UpdateSearchQuery",
@@ -190,14 +200,20 @@ impl std::fmt::Debug for UiShellMessage {
             UiShellMessage::ActivatePlayerOverlay => {
                 write!(f, "UI::ActivatePlayerOverlay")
             }
-            UiShellMessage::PlayerOverlayHandoffReady => {
-                write!(f, "UI::PlayerOverlayHandoffReady")
+            UiShellMessage::PlayerOverlayHandoffReady { request } => {
+                write!(f, "UI::PlayerOverlayHandoffReady({request:?})")
             }
             UiShellMessage::PlayerOverlayFocused => {
                 write!(f, "UI::PlayerOverlayFocused")
             }
-            UiShellMessage::ClosePlayerOverlay => {
-                write!(f, "UI::ClosePlayerOverlay")
+            UiShellMessage::PlayerOverlayUnfocused => {
+                write!(f, "UI::PlayerOverlayUnfocused")
+            }
+            UiShellMessage::PlayerControllerInput(button) => {
+                write!(f, "UI::PlayerControllerInput({button:?})")
+            }
+            UiShellMessage::ClosePlayerOverlay { request } => {
+                write!(f, "UI::ClosePlayerOverlay({request:?})")
             }
             UiShellMessage::UpdateSearchQuery(_) => {
                 write!(f, "UI::UpdateSearchQuery")

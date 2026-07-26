@@ -18,6 +18,8 @@ use ferrex_player_mpv::{
 };
 use zeroize::Zeroizing;
 
+#[cfg(target_os = "macos")]
+use crate::session::PlaybackShutdownBarrier;
 use crate::{
     contract::{
         AudioTrack, BackendKind, BackendRequest, BufferState, Chapter,
@@ -207,6 +209,8 @@ pub(crate) struct MpvPlaybackAdapter {
     native_output_epoch: u64,
     native_window_observation_revision: u64,
     native_window_id_refresh: Option<MpvRequestId>,
+    #[cfg(target_os = "macos")]
+    native_root_withdrawn: bool,
 }
 
 impl std::fmt::Debug for MpvPlaybackAdapter {
@@ -350,6 +354,8 @@ impl MpvPlaybackAdapter {
             native_output_epoch: 0,
             native_window_observation_revision: 0,
             native_window_id_refresh: None,
+            #[cfg(target_os = "macos")]
+            native_root_withdrawn: false,
         };
         adapter.register_observations()?;
         adapter.submit_load(source, start)?;
@@ -480,7 +486,7 @@ impl MpvPlaybackAdapter {
         feature = "ui",
         any(target_os = "windows", target_os = "macos")
     ))]
-    pub(crate) fn commit_native_window_fallback(
+    pub(crate) fn begin_native_window_fallback(
         &mut self,
         reason: crate::contract::FallbackReason,
     ) {
@@ -1213,26 +1219,23 @@ impl MpvPlaybackAdapter {
     }
 
     fn shutdown(&mut self) -> Result<(), PlaybackError> {
-        self.absolute_seeks.clear();
-        let Some(worker) = self.worker.take() else {
-            return Ok(());
-        };
-
-        // mpv's macOS VO synchronously dispatches parts of teardown to the
-        // AppKit main queue. PlaybackSession::shutdown is called from Iced's
-        // AppKit callback, so waiting for the owner here can deadlock both
-        // threads. Move the worker to a named reaper and return immediately;
-        // the event loop can then service the native teardown dispatch.
         #[cfg(target_os = "macos")]
         {
-            let result = reap_macos_worker(worker);
-            self.mapper.terminal = true;
-            self.record(PlaybackEvent::StateChanged(PlaybackState::Terminated));
-            return result;
+            // Callers that can reveal another application window retain this
+            // completion through `PlaybackSession::begin_shutdown_barrier`.
+            // Drop-only paths still start the same ordered teardown but have
+            // no visibility transition to gate.
+            let _ = self.begin_shutdown_barrier()?;
+            return Ok(());
         }
 
         #[cfg(not(target_os = "macos"))]
         {
+            self.absolute_seeks.clear();
+            let Some(worker) = self.worker.take() else {
+                return Ok(());
+            };
+
             let mut worker = worker;
             let report = worker.shutdown().map_err(|error| {
                 worker_error(
@@ -1251,6 +1254,56 @@ impl MpvPlaybackAdapter {
             self.record(PlaybackEvent::StateChanged(PlaybackState::Terminated));
             Ok(())
         }
+    }
+
+    /// Begin AppKit-safe owner teardown and return the positive completion
+    /// barrier required before a retained shell or replacement root is shown.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn begin_shutdown_barrier(
+        &mut self,
+    ) -> Result<Option<PlaybackShutdownBarrier>, PlaybackError> {
+        self.absolute_seeks.clear();
+        self.poll_events();
+        if let Err(error) = self.withdraw_native_root_for_shutdown() {
+            // Teardown completion remains authoritative even when the
+            // best-effort early orderOut barrier fails.
+            log::warn!(
+                "mpv native root could not be withdrawn before owner teardown: {error}"
+            );
+        }
+        let Some(worker) = self.worker.take() else {
+            return Ok(None);
+        };
+
+        // mpv's macOS VO synchronously dispatches parts of teardown to the
+        // AppKit main queue. The reaper owns the blocking wait while the
+        // returned receiver keeps shell restoration fail-closed until the
+        // native owner reports completion.
+        let barrier = reap_macos_worker(worker)?;
+        self.mapper.terminal = true;
+        self.record(PlaybackEvent::StateChanged(PlaybackState::Terminated));
+        Ok(Some(barrier))
+    }
+
+    /// Establish a synchronous no-longer-visible barrier for mpv's AppKit
+    /// native root while leaving actual libmpv destruction to the reaper.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn withdraw_native_root_for_shutdown(
+        &mut self,
+    ) -> Result<(), PlaybackError> {
+        if self.native_root_withdrawn {
+            return Ok(());
+        }
+        let Some(native_window_id) = self.mapper.native_window_id else {
+            // No native root was ever observed, so none can overlap a shell
+            // restore or replacement root at this observation. Do not mark
+            // the barrier complete: apply_command/shutdown drains again so a
+            // just-arrived ID still gets withdrawn before worker handoff.
+            return Ok(());
+        };
+        crate::macos_presenter::withdraw_mpv_root_window(native_window_id)?;
+        self.native_root_withdrawn = true;
+        Ok(())
     }
 
     fn begin_startup_diagnostics(&mut self) -> Result<(), PlaybackError> {
@@ -1327,7 +1380,11 @@ impl MpvPlaybackAdapter {
 /// closure on the caller, so capturing the worker directly would invoke its
 /// blocking `Drop` exactly where it is unsafe.
 #[cfg(target_os = "macos")]
-fn reap_macos_worker(worker: MpvWorker) -> Result<(), PlaybackError> {
+fn reap_macos_worker(
+    worker: MpvWorker,
+) -> Result<PlaybackShutdownBarrier, PlaybackError> {
+    let (completion_sender, completion_receiver) =
+        tokio::sync::oneshot::channel();
     let worker = Arc::new(Mutex::new(Some(worker)));
     let reaper_worker = Arc::clone(&worker);
     let spawn = std::thread::Builder::new()
@@ -1338,21 +1395,27 @@ fn reap_macos_worker(worker: MpvWorker) -> Result<(), PlaybackError> {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take()
                 .expect("macOS mpv reaper owns one worker");
-            match worker.shutdown() {
+            let completion = match worker.shutdown() {
                 Ok(report) if report.timed_out => {
                     log::warn!(
                         "libmpv macOS stop drain reached its shutdown deadline"
                     );
+                    Ok(())
                 }
                 Ok(_) => {
                     log::debug!("libmpv macOS reaper completed native teardown");
+                    Ok(())
                 }
                 Err(error) => {
                     log::error!(
                         "libmpv macOS reaper could not complete ordered shutdown: {error}"
                     );
+                    Err(format!(
+                        "native playback teardown did not complete: {error}"
+                    ))
                 }
-            }
+            };
+            let _ = completion_sender.send(completion);
         });
 
     if let Err(error) = spawn {
@@ -1380,7 +1443,7 @@ fn reap_macos_worker(worker: MpvWorker) -> Result<(), PlaybackError> {
         return Err(mpv_error(PlaybackErrorKind::Shutdown, detail, true));
     }
 
-    Ok(())
+    Ok(PlaybackShutdownBarrier::new(completion_receiver))
 }
 
 impl Drop for MpvPlaybackAdapter {

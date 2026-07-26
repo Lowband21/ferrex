@@ -240,11 +240,29 @@ pub enum CrossDomainEvent {
     HideWindow, // Hide the application window (e.g., for external MPV)
     RestoreWindow(bool), // Restore window with fullscreen state
     SetWindowMode(iced::window::Mode), // Set specific window mode
-    NativePresenterAttached,
-    NativePresenterUnavailable,
+    /// Hide the retained main window, then continue opening the already
+    /// resolved integrated playback source.
+    BeginIntegratedPlayback {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+    },
+    BeginExternalPlayback {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+    },
+    ExternalPlaybackLaunchFailed {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+    },
+    NativePresenterAttached {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+    },
+    NativePresenterUnavailable {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+        effective_target: ferrex_player_playback::contract::PlaybackTarget,
+    },
     /// Playback teardown completed; dismiss any dedicated native-player host
     /// and restore the retained main window.
-    PlaybackExited,
+    PlaybackExited {
+        request: Option<ferrex_player_playback::messages::PlaybackRequestId>,
+    },
 
     WindowResized(iced::Size),
     DatabaseCleared, // Database was cleared, refresh needed

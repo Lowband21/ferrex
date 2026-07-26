@@ -36,8 +36,11 @@ fn play_media_with_position(
                 .filter(|duration| *duration > 0.0)
                 .unwrap_or(0.0);
 
-            state.domains.player.state.last_valid_position = position as f64;
-            state.domains.player.state.last_valid_duration = duration_hint;
+            if !state.domains.player.state.has_observable_playback_root() {
+                state.domains.player.state.last_valid_position =
+                    position as f64;
+                state.domains.player.state.last_valid_duration = duration_hint;
+            }
             state.domains.media.state.pending_resume_position = Some(position);
             state.domains.player.state.pending_resume_position = Some(position);
 
@@ -99,26 +102,27 @@ fn play_media_with_mpv_mode(
         .filter(|duration| *duration > 0.0);
     let duration_hint = watch_duration_hint.or(metadata_duration_hint);
 
-    state.domains.player.state.last_valid_position =
-        resume_opt.map(|position| position as f64).unwrap_or(0.0);
-    state.domains.player.state.last_valid_duration =
-        duration_hint.unwrap_or(0.0);
+    if !state.domains.player.state.has_observable_playback_root() {
+        state.domains.player.state.last_valid_position =
+            resume_opt.map(|position| position as f64).unwrap_or(0.0);
+        state.domains.player.state.last_valid_duration =
+            duration_hint.unwrap_or(0.0);
+    }
     state.domains.media.state.pending_resume_position = resume_opt;
     state.domains.player.state.pending_resume_position = resume_opt;
 
-    let play = Task::done(DomainMessage::Player(
-        crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
-            media_file, media_id,
-        ),
-    ));
     if external_process {
-        DomainUpdateResult::task(Task::batch(vec![
-            play,
-            Task::done(DomainMessage::Player(
-                crate::domains::player::messages::PlayerMessage::PlayExternal,
-            )),
-        ]))
+        DomainUpdateResult::task(Task::done(DomainMessage::Player(
+            crate::domains::player::messages::PlayerMessage::PlayMediaWithIdExternally(
+                media_file, media_id,
+            ),
+        )))
     } else if in_process_mpv_target() == PlaybackTarget::MPV_INTEGRATED {
+        let play = Task::done(DomainMessage::Player(
+            crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
+                media_file, media_id,
+            ),
+        ));
         // Allocate the transparent controls host before playback attachment.
         // It remains invisible until the presenter reports `Attached`.
         DomainUpdateResult::task(
@@ -128,7 +132,11 @@ fn play_media_with_mpv_mode(
             .chain(play),
         )
     } else {
-        DomainUpdateResult::task(play)
+        DomainUpdateResult::task(Task::done(DomainMessage::Player(
+            crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
+                media_file, media_id,
+            ),
+        )))
     }
 }
 
