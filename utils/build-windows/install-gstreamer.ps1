@@ -20,7 +20,20 @@ $pkgConfig = Join-Path $Destination 'lib\pkgconfig\gstreamer-1.0.pc'
 
 if (-not (Test-Path $pkgConfig -PathType Leaf)) {
     $url = "https://gstreamer.freedesktop.org/pkg/windows/$version/$abi/$installerName"
-    Invoke-WebRequest -Uri $url -OutFile $installer
+    $downloadAttempts = 3
+    for ($attempt = 1; $attempt -le $downloadAttempts; $attempt++) {
+        Remove-Item $installer -Force -ErrorAction SilentlyContinue
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $installer
+            break
+        } catch {
+            if ($attempt -eq $downloadAttempts) {
+                throw
+            }
+            Write-Warning "GStreamer download attempt $attempt failed; retrying"
+            Start-Sleep -Seconds (5 * $attempt)
+        }
+    }
 
     $actualSha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualSha256 -ne $expectedSha256) {
