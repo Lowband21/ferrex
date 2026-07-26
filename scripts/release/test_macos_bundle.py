@@ -302,6 +302,10 @@ class MacOSBundlePolicyTests(unittest.TestCase):
             app = Path(temporary) / "Ferrex Player.app"
             resources = app / "Contents/Resources"
             resources.mkdir(parents=True)
+            target = macos_bundle.stage_presenter_build_mode("enabled", resources)
+            self.assertEqual(target.read_text(encoding="utf-8"), "enabled\n")
+            self.assertEqual(macos_bundle.load_presenter_build_mode(app), "enabled")
+
             target = macos_bundle.stage_presenter_build_mode("spike", resources)
             self.assertEqual(target.read_text(encoding="utf-8"), "spike\n")
             self.assertEqual(macos_bundle.load_presenter_build_mode(app), "spike")

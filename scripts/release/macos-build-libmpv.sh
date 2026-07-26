@@ -6,7 +6,7 @@ set -euo pipefail
 : "${MACOSX_DEPLOYMENT_TARGET:=15.0}"
 export MACOSX_DEPLOYMENT_TARGET
 if [[ "$MACOSX_DEPLOYMENT_TARGET" != "15.0" ]]; then
-    echo "Ferrex handoff packages target macOS 15.0, not $MACOSX_DEPLOYMENT_TARGET" >&2
+    echo "The validated Ferrex macOS build profile targets macOS 15.0, not $MACOSX_DEPLOYMENT_TARGET" >&2
     exit 2
 fi
 

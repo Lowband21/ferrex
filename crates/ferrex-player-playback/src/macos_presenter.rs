@@ -2078,6 +2078,11 @@ mod tests {
 
     #[test]
     fn build_mode_defaults_enabled_and_window_id_fails_closed() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            MacOsPresenterBuildMode::compiled(),
+            MacOsPresenterBuildMode::Enabled
+        );
         assert_eq!(
             MacOsPresenterBuildMode::parse(None).unwrap(),
             MacOsPresenterBuildMode::Enabled

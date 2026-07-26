@@ -115,7 +115,7 @@ fn configure_bundle_tls(path: &Path) {
     let backend = unsafe { g_tls_backend_get_default() };
     if database.is_null() || backend.is_null() {
         eprintln!(
-            "bundled CA database initialization failed; trusted GStreamer HTTPS is unavailable"
+            "bundled CA database initialization failed; bundled GStreamer HTTPS runtime is unavailable"
         );
         return;
     }
@@ -140,7 +140,7 @@ fn preload_bundled_libsoup(path: &Path) {
         let _ = HANDLE.set(handle as usize);
     } else {
         eprintln!(
-            "bundled libsoup preload failed; GStreamer network fallback is unavailable"
+            "bundled libsoup preload failed; bundled GStreamer network runtime is unavailable"
         );
     }
 }

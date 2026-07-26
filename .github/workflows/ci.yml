@@ -156,7 +156,6 @@ jobs:
           echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
           echo "LIBRARY_PATH=$prefix/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$prefix/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-          echo "FERREX_MPV_MACOS_PRESENTER=spike" >> "$GITHUB_ENV"
 
       - name: Test macOS bundle policy parser
         if: runner.os == 'macOS'
@@ -364,7 +363,7 @@ jobs:
             --architecture arm64 \
             --version "$version" \
             --minimum-macos "$MACOSX_DEPLOYMENT_TARGET" \
-            --presenter-mode spike \
+            --presenter-mode enabled \
             "${search_roots[@]}" \
             --resource "$prefix/share/ferrex/native-mpv" \
             --extra-library "$molten_vk_prefix/lib/libMoltenVK.dylib" \
@@ -381,18 +380,18 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo test -p ferrex-player-playback --features mpv --target ${{ matrix.target }} --lib macos_presenter::tests -- --test-threads=1
 
-      - name: Smoke bundled GStreamer fallback factories (macOS)
+      - name: Smoke bundled GStreamer runtime closure (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           app="${RUNNER_TEMP}/Ferrex Player.app"
-          plugins="$app/Contents/PlugIns/gstreamer-1.0"
+          plugins="$app/Contents/Resources/gstreamer-1.0"
           export GST_PLUGIN_SYSTEM_PATH_1_0="$plugins"
           export GST_PLUGIN_PATH_1_0="$plugins"
           export GST_PLUGIN_SCANNER_1_0="$app/Contents/Helpers/gst-plugin-scanner"
           export GST_PLUGIN_SCANNER="$GST_PLUGIN_SCANNER_1_0"
           export GST_REGISTRY_1_0="${RUNNER_TEMP}/ferrex-gstreamer-registry.bin"
-          export GIO_EXTRA_MODULES="$app/Contents/PlugIns/gio/modules"
+          export GIO_EXTRA_MODULES="$app/Contents/Resources/gio/modules"
           unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
           fixture_dir="${RUNNER_TEMP}/ferrex-gstreamer-hls"
           mkdir -p "$fixture_dir"

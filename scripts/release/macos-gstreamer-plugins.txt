@@ -1,4 +1,4 @@
-# Reviewed macOS GStreamer fallback surface. Homebrew's current monolithic
+# Reviewed macOS GStreamer runtime surface. Homebrew's current monolithic
 # formula also ships GPL/codec plugins and a libav plugin that conflicts with
 # the pinned FFmpeg SONAME closure; release packaging stages only this set.
 libgstcoreelements.dylib

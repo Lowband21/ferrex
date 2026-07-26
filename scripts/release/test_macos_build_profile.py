@@ -15,13 +15,25 @@ PLUGINS = (ROOT / "scripts/release/macos-gstreamer-plugins.txt").read_text(
 SMOKE = (ROOT / "scripts/release/macos_gstreamer_bundle_smoke.c").read_text(
     encoding="utf-8"
 )
-WORKFLOWS = "\n".join(
-    (ROOT / path).read_text(encoding="utf-8")
-    for path in (".github/workflows/ci.yml", ".github/workflows/macos-dist.yml")
+WORKFLOW = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+RELEASE_WORKFLOW = (ROOT / ".github/workflows/release.yml").read_text(
+    encoding="utf-8"
 )
+DIST_WORKSPACE = (ROOT / "dist-workspace.toml").read_text(encoding="utf-8")
 
 
 class MacOSBuildProfileTests(unittest.TestCase):
+    def test_ci_uses_default_apple_silicon_presenter_without_distribution(
+        self,
+    ) -> None:
+        self.assertIn("target: aarch64-apple-darwin", WORKFLOW)
+        self.assertNotIn("x86_64-apple-darwin", WORKFLOW)
+        self.assertNotIn("FERREX_MPV_MACOS_PRESENTER", WORKFLOW)
+        self.assertIn("--presenter-mode enabled", WORKFLOW)
+        self.assertFalse((ROOT / ".github/workflows/macos-dist.yml").exists())
+        self.assertNotIn("apple-darwin", RELEASE_WORKFLOW)
+        self.assertNotIn("apple-darwin", DIST_WORKSPACE)
+
     def test_sources_and_revisions_are_pinned(self) -> None:
         for expected in (
             'MPV_VERSION="0.41.0"',
@@ -114,11 +126,15 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "gst-plugin-scanner",
             "GST_REGISTRY_1_0",
             "GIO_EXTRA_MODULES",
+            "Contents/Resources/gstreamer-1.0",
+            "Contents/Resources/gio/modules",
             "libgiognutls",
             "https_test_server.py",
         ):
-            self.assertIn(expected, WORKFLOWS)
-        self.assertNotIn("export DYLD_LIBRARY_PATH", WORKFLOWS)
+            self.assertIn(expected, WORKFLOW)
+        self.assertNotIn("export DYLD_LIBRARY_PATH", WORKFLOW)
+        self.assertNotIn("Contents/PlugIns/gstreamer-1.0", WORKFLOW)
+        self.assertNotIn("Contents/PlugIns/gio/modules", WORKFLOW)
         for expected in ("avdec_h264", "atdec", "g_tls_file_database_new"):
             self.assertIn(expected, SMOKE)
 
@@ -126,8 +142,8 @@ class MacOSBuildProfileTests(unittest.TestCase):
         immutable_path = "share/ca-certificates/cacert.pem"
         merged_path = "etc/ca-certificates/cert.pem"
         self.assertIn(immutable_path, BUILD)
-        self.assertIn(immutable_path, WORKFLOWS)
-        self.assertNotIn(merged_path, WORKFLOWS)
+        self.assertIn(immutable_path, WORKFLOW)
+        self.assertNotIn(merged_path, WORKFLOW)
         for field in (
             "ca_certificates_version",
             "ca_certificates_source",
@@ -136,29 +152,12 @@ class MacOSBuildProfileTests(unittest.TestCase):
         ):
             self.assertIn(field, BUILD)
 
-    def test_tag_build_is_disabled_and_engineering_artifact_only(self) -> None:
-        distribution = (ROOT / ".github/workflows/macos-dist.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("presenter_mode:", distribution)
-        self.assertIn("|| 'disabled'", distribution)
-        self.assertIn("contents: read", distribution)
-        self.assertIn("actions/upload-artifact", distribution)
-        self.assertNotIn("ncipollo/release-action", distribution)
-        self.assertNotIn("Attach app to GitHub release", distribution)
-        self.assertIn("_${PRESENTER_MODE}.zip", distribution)
-        self.assertIn('--presenter-mode "$PRESENTER_MODE"', distribution)
-        self.assertIn(
-            "presenter-build-mode.txt",
-            (ROOT / "scripts/release/macos_bundle.py").read_text(encoding="utf-8"),
-        )
-
     def test_gstreamer_version_and_allowlist_are_exact(self) -> None:
         self.assertIn('GSTREAMER_VERSION="1.28.5"', BUILD)
         self.assertIn("pkg-config --exact-version=", BUILD)
         self.assertIn("gstreamer_plugins_sha256", BUILD)
         self.assertIn('MACOSX_DEPLOYMENT_TARGET:=15.0', BUILD)
-        self.assertIn('MACOSX_DEPLOYMENT_TARGET: "15.0"', WORKFLOWS)
+        self.assertIn('MACOSX_DEPLOYMENT_TARGET="15.0"', WORKFLOW)
 
 
 if __name__ == "__main__":

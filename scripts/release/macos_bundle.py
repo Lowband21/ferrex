@@ -27,7 +27,9 @@ from typing import Iterable, Sequence
 APP_RPATH = "@executable_path/../Frameworks"
 GSTREAMER_PLUGIN_RPATH = "@loader_path/../../Frameworks"
 GIO_MODULE_RPATH = "@loader_path/../../../Frameworks"
-PRESENTER_BUILD_MODES = frozenset({"disabled", "spike"})
+# `spike` remains accepted for older artifacts, but new validation
+# records the native presenter by its durable state.
+PRESENTER_BUILD_MODES = frozenset({"disabled", "enabled", "spike"})
 FORBIDDEN_RUNTIME_PREFIXES = (
     "/opt/homebrew/",
     "/usr/local/",
