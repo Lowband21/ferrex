@@ -26,5 +26,5 @@ libgstflac.dylib
 libgstmpg123.dylib
 libgstopus.dylib
 libgstvorbis.dylib
-libgstdav1d.dylib
+libgstaom.dylib
 libgstvpx.dylib

@@ -87,6 +87,7 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "libgstapplemedia.dylib",
             "libgstosxaudio.dylib",
             "libgstaudiofx.dylib",
+            "libgstaom.dylib",
         ):
             self.assertIn(required, PLUGINS)
         for forbidden in (
@@ -97,6 +98,7 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "libgstscaletempo.dylib",
         ):
             self.assertNotIn(forbidden, PLUGINS)
+        self.assertNotIn("libgstdav1d.dylib", PLUGINS)
 
     def test_workflows_stage_moltenvk_and_clean_gstreamer_runtime(self) -> None:
         for expected in (

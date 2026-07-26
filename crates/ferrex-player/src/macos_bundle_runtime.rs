@@ -31,9 +31,9 @@ fn bundle_runtime_paths(executable: &Path) -> Option<BundleRuntimePaths> {
         return None;
     }
 
-    let gstreamer_plugins = contents.join("PlugIns/gstreamer-1.0");
+    let gstreamer_plugins = contents.join("Resources/gstreamer-1.0");
     let gstreamer_scanner = contents.join("Helpers/gst-plugin-scanner");
-    let gio_modules = contents.join("PlugIns/gio/modules");
+    let gio_modules = contents.join("Resources/gio/modules");
     let libsoup = contents.join("Frameworks/libsoup-3.0.0.dylib");
     let ca_bundle = contents.join("Resources/tls/cacert.pem");
     if !gstreamer_plugins.is_dir()
@@ -190,9 +190,9 @@ mod tests {
 
         assert_eq!(bundle_runtime_paths(&executable), None);
 
-        let plugins = contents.join("PlugIns/gstreamer-1.0");
+        let plugins = contents.join("Resources/gstreamer-1.0");
         let scanner = contents.join("Helpers/gst-plugin-scanner");
-        let gio_modules = contents.join("PlugIns/gio/modules");
+        let gio_modules = contents.join("Resources/gio/modules");
         let libsoup = contents.join("Frameworks/libsoup-3.0.0.dylib");
         let ca_bundle = contents.join("Resources/tls/cacert.pem");
         let icd = contents.join("Resources/vulkan/icd.d/MoltenVK_icd.json");

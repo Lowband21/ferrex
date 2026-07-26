@@ -288,6 +288,12 @@ class DependencyResolver:
             raise BundleError(
                 f"cannot resolve {install_name!r} required by {loader}"
             )
+        if len(candidates) != 1:
+            choices = ", ".join(str(candidate) for candidate in candidates)
+            raise BundleError(
+                f"ambiguous dependency {install_name!r} required by {loader}: "
+                f"{choices}"
+            )
         return candidates[0]
 
     def _require_declared_source(
@@ -328,6 +334,30 @@ class DependencyResolver:
             self._basename_index = index
             self._allowed_sources = allowed_sources
         return self._basename_index
+
+
+def dependency_destination_name(
+    preferred_name: str,
+    source: Path,
+    occupied: dict[str, Path],
+) -> str:
+    """Return a deterministic non-colliding name for an exact dependency."""
+    resolved = source.resolve()
+    previous = occupied.get(preferred_name)
+    if previous is None or previous == resolved:
+        return preferred_name
+
+    digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    suffix = Path(preferred_name).suffix
+    stem = preferred_name[: -len(suffix)] if suffix else preferred_name
+    for length in range(12, len(digest) + 1, 4):
+        candidate = f"{stem}-{digest[:length]}{suffix}"
+        previous = occupied.get(candidate)
+        if previous is None or previous == resolved:
+            return candidate
+    raise BundleError(
+        f"could not allocate a unique bundle name for {preferred_name}: {resolved}"
+    )
 
 
 def copy_dependency_closure(
@@ -393,11 +423,13 @@ def copy_dependency_closure(
             existing_target = staged_by_source.get(resolved)
             if existing_target is not None:
                 basename = existing_target.name
-            previous_source = source_by_basename.get(basename)
-            if previous_source is not None and previous_source != resolved:
-                raise BundleError(
-                    "dependency closure contains two different libraries named "
-                    f"{basename}: {previous_source} and {resolved}"
+            else:
+                # Nix closures can legitimately contain ABI-distinct libraries
+                # with the same SONAME. Their load commands identify exact store
+                # paths, so give colliding transitive files deterministic names
+                # and rewrite each caller to the corresponding bundled target.
+                basename = dependency_destination_name(
+                    basename, resolved, source_by_basename
                 )
             source_by_basename[basename] = resolved
             target = frameworks / basename
@@ -449,11 +481,11 @@ def rewrite_install_names(records: Iterable[StagedMachO]) -> None:
         required_rpath = None
         if staged.record.executable:
             required_rpath = APP_RPATH
-        elif "Contents/PlugIns/gstreamer-1.0" in staged.staged.as_posix():
+        elif "Contents/Resources/gstreamer-1.0" in staged.staged.as_posix():
             # GStreamer's soup loader opens libsoup by leaf name rather than a
             # Mach-O import. Give dyld a bundle-local search path for that load.
             required_rpath = GSTREAMER_PLUGIN_RPATH
-        elif "Contents/PlugIns/gio/modules" in staged.staged.as_posix():
+        elif "Contents/Resources/gio/modules" in staged.staged.as_posix():
             required_rpath = GIO_MODULE_RPATH
         if required_rpath is not None:
             current = macho_record(staged.staged, executable=staged.record.executable)
@@ -550,7 +582,7 @@ def stage_gstreamer_runtime(
 
     seeds: list[tuple[Path, Path, bool, bool]] = []
     exclusions = set(excluded_plugins)
-    plugin_target = contents / "PlugIns/gstreamer-1.0"
+    plugin_target = contents / "Resources/gstreamer-1.0"
     seen_names: dict[str, Path] = {}
     candidates = list(files)
     for directory in directories:
@@ -653,7 +685,7 @@ def stage_gio_modules(
     modules: Iterable[Path], contents: Path
 ) -> list[tuple[Path, Path, bool, bool]]:
     seeds: list[tuple[Path, Path, bool, bool]] = []
-    destination = contents / "PlugIns/gio/modules"
+    destination = contents / "Resources/gio/modules"
     for module in modules:
         seeds.append(
             copy_macho_seed(
@@ -746,7 +778,7 @@ def audit_records(
 
 
 def audit_gstreamer_runtime(app: Path, records: Iterable[MachORecord]) -> None:
-    plugins = app / "Contents/PlugIns/gstreamer-1.0"
+    plugins = app / "Contents/Resources/gstreamer-1.0"
     if not plugins.is_dir():
         return
     actual_names = {path.name for path in plugins.glob("*.dylib") if path.is_file()}
@@ -804,7 +836,7 @@ def load_bundle_records(app: Path) -> tuple[list[MachORecord], str, str]:
     frameworks = app / "Contents/Frameworks"
     records = [macho_record(executable, executable=True)]
     records.extend(macho_record(path) for path in sorted(frameworks.rglob("*")) if path.is_file())
-    plugins = app / "Contents/PlugIns/gstreamer-1.0"
+    plugins = app / "Contents/Resources/gstreamer-1.0"
     if plugins.is_dir():
         records.extend(
             macho_record(path) for path in sorted(plugins.rglob("*.dylib")) if path.is_file()
@@ -812,7 +844,7 @@ def load_bundle_records(app: Path) -> tuple[list[MachORecord], str, str]:
     scanner = app / "Contents/Helpers/gst-plugin-scanner"
     if scanner.is_file():
         records.append(macho_record(scanner, executable=True))
-    gio_modules = app / "Contents/PlugIns/gio/modules"
+    gio_modules = app / "Contents/Resources/gio/modules"
     if gio_modules.is_dir():
         records.extend(
             macho_record(path, install_id_required=False)
@@ -845,13 +877,13 @@ def verify_bundle(
     if missing:
         raise BundleError(f"required bundled libraries are missing: {', '.join(missing)}")
     if require_gstreamer_runtime:
-        plugins = app / "Contents/PlugIns/gstreamer-1.0"
+        plugins = app / "Contents/Resources/gstreamer-1.0"
         scanner = app / "Contents/Helpers/gst-plugin-scanner"
         if not plugins.is_dir() or not any(plugins.glob("*.dylib")):
             raise BundleError("required bundled GStreamer plugins are missing")
         if not scanner.is_file() or not os.access(scanner, os.X_OK):
             raise BundleError("required bundled GStreamer plugin scanner is missing")
-        gio_modules = app / "Contents/PlugIns/gio/modules"
+        gio_modules = app / "Contents/Resources/gio/modules"
         if not gio_modules.is_dir() or not any(gio_modules.iterdir()):
             raise BundleError("required bundled GIO TLS modules are missing")
         for record in records:

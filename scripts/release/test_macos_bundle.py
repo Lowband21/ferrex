@@ -208,11 +208,54 @@ class MacOSBundlePolicyTests(unittest.TestCase):
             executable = root / "ferrex-player"
             executable.touch()
             resolver = macos_bundle.DependencyResolver([declared], executable)
-            self.assertEqual(resolver.resolve(str(allowed), executable), allowed)
+            self.assertEqual(
+                resolver.resolve(str(allowed), executable),
+                allowed.resolve(),
+            )
             with self.assertRaisesRegex(
                 macos_bundle.BundleError, "outside declared search roots"
             ):
                 resolver.resolve(str(outside), executable)
+
+    def test_bare_dependency_rejects_duplicate_search_root_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first_root = root / "first"
+            second_root = root / "second"
+            first_root.mkdir()
+            second_root.mkdir()
+            (first_root / "libduplicate.dylib").touch()
+            (second_root / "libduplicate.dylib").touch()
+            executable = root / "ferrex-player"
+            executable.touch()
+            resolver = macos_bundle.DependencyResolver(
+                [first_root, second_root], executable
+            )
+            with self.assertRaisesRegex(
+                macos_bundle.BundleError, "ambiguous dependency"
+            ):
+                resolver.resolve("libduplicate.dylib", executable)
+
+    def test_exact_dependency_collisions_get_content_derived_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "first.dylib"
+            second = root / "second.dylib"
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+            occupied = {"libiconv.2.dylib": first.resolve()}
+
+            name = macos_bundle.dependency_destination_name(
+                "libiconv.2.dylib", second, occupied
+            )
+
+            self.assertRegex(name, r"^libiconv\.2-[0-9a-f]{12}\.dylib$")
+            self.assertEqual(
+                name,
+                macos_bundle.dependency_destination_name(
+                    "libiconv.2.dylib", second, occupied
+                ),
+            )
 
     def test_normalizes_prerelease_bundle_version(self) -> None:
         self.assertEqual(macos_bundle.apple_bundle_version("0.1.2-alpha.1"), "0.1.2")
@@ -281,10 +324,10 @@ class MacOSBundlePolicyTests(unittest.TestCase):
     def test_rejects_forbidden_gstreamer_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             app = Path(temporary) / "Ferrex Player.app"
-            plugins = app / "Contents/PlugIns/gstreamer-1.0"
+            plugins = app / "Contents/Resources/gstreamer-1.0"
             resources = app / "Contents/Resources"
             plugins.mkdir(parents=True)
-            resources.mkdir(parents=True)
+            resources.mkdir(parents=True, exist_ok=True)
             plugin = plugins / "libgstplayback.dylib"
             plugin.touch()
             (resources / "gstreamer-plugin-manifest.txt").write_text(
@@ -299,6 +342,32 @@ class MacOSBundlePolicyTests(unittest.TestCase):
                 macos_bundle.BundleError, "forbidden dependency"
             ):
                 macos_bundle.audit_gstreamer_runtime(app, [record])
+
+    def test_raw_runtime_modules_avoid_reserved_plugins_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            contents = root / "Ferrex Player.app/Contents"
+            plugin = root / "libgstcoreelements.dylib"
+            scanner = root / "gst-plugin-scanner"
+            gio_module = root / "libgiognutls.dylib"
+            for source in (plugin, scanner, gio_module):
+                source.write_bytes(b"Mach-O fixture")
+
+            gstreamer = macos_bundle.stage_gstreamer_runtime(
+                [], [plugin], scanner, contents
+            )
+            gio = macos_bundle.stage_gio_modules([gio_module], contents)
+            targets = [target for _source, target, _executable, _id in gstreamer + gio]
+
+            self.assertIn(
+                contents / "Resources/gstreamer-1.0/libgstcoreelements.dylib",
+                targets,
+            )
+            self.assertIn(
+                contents / "Resources/gio/modules/libgiognutls.dylib",
+                targets,
+            )
+            self.assertFalse((contents / "PlugIns").exists())
 
     def test_system_library_policy_is_narrow(self) -> None:
         self.assertTrue(macos_bundle.is_system_library("/usr/lib/libSystem.B.dylib"))
