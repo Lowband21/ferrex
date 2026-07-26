@@ -353,6 +353,7 @@ iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" 
 iced_core = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_core" }
 iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_widget" }
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_wgpu" }
+winit = { path = "third-party/winit-0.30.13-ferrex" }
 
 [patch."https://github.com/iced-rs/iced.git"]
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }
