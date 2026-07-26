@@ -127,10 +127,20 @@ pub struct PlaybackUpdateContext<'a> {
 }
 
 fn integrated_playback_requested(state: &PlayerDomainState) -> bool {
-    state.backend_request
-        == BackendRequest::Exact(
-            crate::contract::PlaybackTarget::MPV_INTEGRATED,
-        )
+    backend_request_uses_integrated_presenter(
+        state.backend_request,
+        cfg!(target_os = "macos"),
+    )
+}
+
+const fn backend_request_uses_integrated_presenter(
+    request: BackendRequest,
+    macos_auto_is_integrated: bool,
+) -> bool {
+    matches!(
+        request,
+        BackendRequest::Exact(crate::contract::PlaybackTarget::MPV_INTEGRATED)
+    ) || (macos_auto_is_integrated && matches!(request, BackendRequest::Auto))
 }
 
 /// Move a live external process into its kill-and-wait reaper and latch all
@@ -3140,6 +3150,30 @@ mod tests {
     static RECORDS: Mutex<Vec<RecordedMessage>> = Mutex::new(Vec::new());
     static RECORDING_TEST: Mutex<()> = Mutex::new(());
 
+    #[test]
+    fn macos_auto_uses_the_integrated_shell_handoff() {
+        assert!(backend_request_uses_integrated_presenter(
+            BackendRequest::Auto,
+            true,
+        ));
+        assert!(!backend_request_uses_integrated_presenter(
+            BackendRequest::Auto,
+            false,
+        ));
+        assert!(backend_request_uses_integrated_presenter(
+            BackendRequest::Exact(
+                crate::contract::PlaybackTarget::MPV_INTEGRATED,
+            ),
+            false,
+        ));
+        assert!(!backend_request_uses_integrated_presenter(
+            BackendRequest::Exact(
+                crate::contract::PlaybackTarget::MPV_NATIVE_WINDOW,
+            ),
+            true,
+        ));
+    }
+
     fn recording_test_guard() -> std::sync::MutexGuard<'static, ()> {
         RECORDING_TEST
             .lock()
@@ -3442,6 +3476,32 @@ mod tests {
             result.events.as_slice(),
             [PlaybackWindowEvent::BeginIntegratedPlayback { request }]
                 if *request == context.playback.active_playback_request.unwrap()
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn resolved_macos_auto_source_defers_backend_open_to_shell_handoff() {
+        let _serial = recording_test_guard();
+        let mut playback = PlayerDomainState::default();
+        let mut ui = TestUi::default();
+        let source = PlaybackSource::new(
+            url::Url::parse("https://ferrex.example/api/v1/stream/media")
+                .unwrap(),
+        );
+
+        let result = reduce_test_message(
+            &mut playback,
+            &mut ui,
+            PlayerMessage::SetStreamSource(source),
+        );
+
+        assert_eq!(playback.backend_request, BackendRequest::Auto);
+        assert!(playback.video_opt.is_none());
+        assert!(matches!(
+            result.events.as_slice(),
+            [PlaybackWindowEvent::BeginIntegratedPlayback { request }]
+                if *request == playback.active_playback_request.unwrap()
         ));
     }
 
