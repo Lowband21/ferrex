@@ -20,25 +20,28 @@ use crate::{
     },
 };
 
-/// Build-time switch used to compile the developer AppKit presenter path.
+/// Build-time override for the AppKit presenter path.
 pub const MACOS_PRESENTER_BUILD_ENV: &str = "FERREX_MPV_MACOS_PRESENTER";
 
-/// Release-safe build mode for the native-root presenter.
+/// Build mode for the native-root presenter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MacOsPresenterBuildMode {
-    /// Integrated presentation is unavailable and selection falls back.
-    #[default]
+    /// Explicit diagnostic mode that forces native-window fallback.
     Disabled,
-    /// Explicit developer/hardware-validation path; never selected by Auto.
-    Spike,
+    /// Validated Apple Silicon presenter and the normal macOS default.
+    #[default]
+    Enabled,
 }
 
 impl MacOsPresenterBuildMode {
-    /// Parse the build environment. Unknown values fail closed.
+    /// Parse the build override. `spike` remains an accepted compatibility
+    /// spelling for existing local and CI invocations.
     pub fn parse(value: Option<&str>) -> Result<Self, MacOsPresenterError> {
         match value.map(str::trim) {
-            None | Some("") | Some("disabled") => Ok(Self::Disabled),
-            Some("spike") => Ok(Self::Spike),
+            None | Some("") | Some("enabled") | Some("spike") => {
+                Ok(Self::Enabled)
+            }
+            Some("disabled") => Ok(Self::Disabled),
             Some(value) => {
                 Err(MacOsPresenterError::InvalidBuildMode(value.to_owned()))
             }
@@ -47,7 +50,7 @@ impl MacOsPresenterBuildMode {
 
     /// Whether this build may attach the AppKit in-root presenter.
     pub const fn enabled(self) -> bool {
-        matches!(self, Self::Spike)
+        matches!(self, Self::Enabled)
     }
 
     /// Mode compiled into a macOS target.
@@ -58,7 +61,7 @@ impl MacOsPresenterBuildMode {
     }
 }
 
-/// Native relationship under evaluation for macOS integration.
+/// Native relationship used for macOS integration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MacOsPresenterStrategy {
     /// mpv owns the root `NSWindow`; a transparent Iced view lives within it.
@@ -102,7 +105,7 @@ impl MacOsPresenterBlocker {
     }
 }
 
-/// Evidence collected by the macOS AppKit spike/integration harness.
+/// Evidence collected by the macOS AppKit integration harness.
 ///
 /// This deliberately stores no raw `NSWindow`, `NSView`, or `window-id` value;
 /// diagnostics can report availability without leaking or retaining pointers.
@@ -123,9 +126,7 @@ pub struct MacOsPresenterEvidence {
 }
 
 impl MacOsPresenterEvidence {
-    /// Evidence fixture representing a completed non-HDR integration spike.
-    /// Production code must populate equivalent facts from the platform gate;
-    /// this constructor does not itself enable any backend selector.
+    /// Evidence fixture representing completed non-HDR integration coverage.
     #[cfg(test)]
     const fn verified() -> Self {
         Self {
@@ -250,10 +251,10 @@ impl MacOsPresenterDecision {
     }
 }
 
-/// Capabilities of the developer AppKit presenter path.
+/// Capabilities of the AppKit presenter path.
 ///
-/// The spike remains conservative and does not advertise HDR until the native
-/// Apple Silicon and Intel matrix proves real HDR/EDR behavior.
+/// The presenter remains conservative and does not advertise HDR until native
+/// runtime evidence proves real HDR/EDR behavior.
 pub fn macos_presenter_capabilities(
     build_mode: MacOsPresenterBuildMode,
 ) -> PresenterCapabilities {
@@ -2023,7 +2024,7 @@ mod tests {
         let selected = select_backend(
             BackendRequest::Exact(PlaybackTarget::MPV_INTEGRATED),
             PlaybackRequirements::default(),
-            &FallbackPolicy::migration_default(),
+            &FallbackPolicy::macos_default(),
             &candidates,
         )
         .unwrap();
@@ -2076,17 +2077,21 @@ mod tests {
     }
 
     #[test]
-    fn build_mode_and_mpv_window_id_fail_closed() {
+    fn build_mode_defaults_enabled_and_window_id_fails_closed() {
         assert_eq!(
             MacOsPresenterBuildMode::parse(None).unwrap(),
-            MacOsPresenterBuildMode::Disabled
+            MacOsPresenterBuildMode::Enabled
         );
         assert_eq!(
             MacOsPresenterBuildMode::parse(Some("spike")).unwrap(),
-            MacOsPresenterBuildMode::Spike
+            MacOsPresenterBuildMode::Enabled
         );
         assert!(!MacOsPresenterBuildMode::Disabled.enabled());
-        assert!(MacOsPresenterBuildMode::Spike.enabled());
+        assert!(MacOsPresenterBuildMode::Enabled.enabled());
+        assert_eq!(
+            MacOsPresenterBuildMode::parse(Some("enabled")).unwrap(),
+            MacOsPresenterBuildMode::Enabled
+        );
         assert!(MacOsPresenterBuildMode::parse(Some("production")).is_err());
         assert!(MacOsWindow::from_mpv_window_id(0).is_err());
         assert_eq!(MacOsWindow::from_mpv_window_id(42).unwrap().get(), 42);
@@ -2113,7 +2118,7 @@ mod tests {
                 Ok(())
             },
             video,
-            MacOsPresenterBuildMode::Spike,
+            MacOsPresenterBuildMode::Enabled,
         );
         let id = identity(1);
 
@@ -2230,7 +2235,7 @@ mod tests {
             appkit,
             |_| Ok(()),
             video,
-            MacOsPresenterBuildMode::Spike,
+            MacOsPresenterBuildMode::Enabled,
         );
         let id = identity(11);
         presenter
@@ -2288,7 +2293,7 @@ mod tests {
             appkit,
             |_| Ok(()),
             video,
-            MacOsPresenterBuildMode::Spike,
+            MacOsPresenterBuildMode::Enabled,
         );
         let id = identity(12);
         presenter
@@ -2342,7 +2347,7 @@ mod tests {
             appkit,
             |_| Ok(()),
             video,
-            MacOsPresenterBuildMode::Spike,
+            MacOsPresenterBuildMode::Enabled,
         );
         let id = identity(21);
 
@@ -2444,7 +2449,7 @@ mod tests {
             appkit,
             |_| Ok(()),
             video,
-            MacOsPresenterBuildMode::Spike,
+            MacOsPresenterBuildMode::Enabled,
         );
         let id = identity(2);
         presenter
@@ -2504,7 +2509,7 @@ mod tests {
             appkit,
             |_| Ok(()),
             video,
-            MacOsPresenterBuildMode::Spike,
+            MacOsPresenterBuildMode::Enabled,
         );
 
         let error = presenter
@@ -2554,7 +2559,7 @@ mod tests {
             appkit,
             |_| Ok(()),
             video,
-            MacOsPresenterBuildMode::Spike,
+            MacOsPresenterBuildMode::Enabled,
         );
         let id = identity(5);
         presenter
@@ -2610,7 +2615,7 @@ mod tests {
                 Ok(())
             },
             video,
-            MacOsPresenterBuildMode::Spike,
+            MacOsPresenterBuildMode::Enabled,
         );
 
         for cycle in 1..=100 {

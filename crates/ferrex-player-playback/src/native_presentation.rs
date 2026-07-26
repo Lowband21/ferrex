@@ -453,9 +453,8 @@ impl NativePresentation {
         ))
     }
 
-    /// Conservative macOS gate. Enabled candidates still require the external
-    /// representative Spaces/fullscreen/scale/HDR/teardown matrix before their
-    /// exact archives may be promoted.
+    /// Create the default macOS in-root presenter. An explicit disabled build
+    /// override retains the native-window compatibility path for diagnostics.
     #[cfg(target_os = "macos")]
     pub(crate) fn try_new(
         generation: SessionGeneration,

@@ -61,7 +61,7 @@ pub struct FallbackPolicy {
 }
 
 impl FallbackPolicy {
-    /// Current migration policy: keep GStreamer ahead of every mpv mode.
+    /// Cross-platform policy used outside macOS during the migration.
     pub fn migration_default() -> Self {
         Self {
             auto_order: vec![
@@ -75,6 +75,31 @@ impl FallbackPolicy {
                 PlaybackTarget::EXTERNAL_MPV,
             ],
             allow_explicit_fallback: true,
+        }
+    }
+
+    /// macOS golden-path policy: integrated mpv, then mpv's native window.
+    ///
+    /// GStreamer is intentionally absent because its macOS path is currently
+    /// unsupported. External mpv remains an explicit process boundary rather
+    /// than an automatic fallback.
+    pub fn macos_default() -> Self {
+        Self {
+            auto_order: vec![
+                PlaybackTarget::MPV_INTEGRATED,
+                PlaybackTarget::MPV_NATIVE_WINDOW,
+            ],
+            fallback_order: vec![PlaybackTarget::MPV_NATIVE_WINDOW],
+            allow_explicit_fallback: true,
+        }
+    }
+
+    /// Runtime policy for the current target platform.
+    pub fn platform_default() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::macos_default()
+        } else {
+            Self::migration_default()
         }
     }
 
@@ -216,6 +241,46 @@ mod tests {
             decision.fallback.unwrap().from,
             Some(PlaybackTarget::GSTREAMER_INTEGRATED)
         );
+    }
+
+    #[test]
+    fn macos_auto_selects_integrated_mpv_without_gstreamer_fallback() {
+        let policy = FallbackPolicy::macos_default();
+        assert_eq!(
+            policy.auto_order,
+            vec![
+                PlaybackTarget::MPV_INTEGRATED,
+                PlaybackTarget::MPV_NATIVE_WINDOW,
+            ]
+        );
+        assert_eq!(
+            policy.fallback_order,
+            vec![PlaybackTarget::MPV_NATIVE_WINDOW]
+        );
+        assert!(policy.auto_order.iter().chain(&policy.fallback_order).all(
+            |target| target.backend != super::super::BackendKind::GStreamer
+        ));
+
+        let candidates = [
+            BackendCandidate::available(PlaybackTarget::MPV_INTEGRATED, true),
+            BackendCandidate::available(
+                PlaybackTarget::MPV_NATIVE_WINDOW,
+                true,
+            ),
+            BackendCandidate::available(
+                PlaybackTarget::GSTREAMER_EMBEDDED,
+                false,
+            ),
+        ];
+        let decision = select_backend(
+            BackendRequest::Auto,
+            PlaybackRequirements::default(),
+            &policy,
+            &candidates,
+        )
+        .unwrap();
+        assert_eq!(decision.selected, PlaybackTarget::MPV_INTEGRATED);
+        assert!(decision.fallback.is_none());
     }
 
     #[test]

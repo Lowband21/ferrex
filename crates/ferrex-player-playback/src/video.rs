@@ -3,20 +3,20 @@
 //! This module coordinates the unified video backend, stream URL redaction,
 //! loading flags, and playback state transitions around media file playback.
 
+#[cfg(feature = "mpv")]
+use crate::mpv_adapter::MpvPlaybackAdapter;
 use crate::{
     PlayerMessage,
     contract::{
         BackendKind, BackendRequest, FallbackReason, FallbackReasonCode,
-        PlaybackCommand, PlaybackContentFit, PlaybackError, PlaybackSource,
-        SessionGeneration,
+        PlaybackCommand, PlaybackContentFit, PlaybackError, PlaybackErrorKind,
+        PlaybackSource, PlaybackTarget, SessionGeneration,
     },
     session::{PlaybackSession, PlaybackShutdownBarrier},
     state::PlayerDomainState,
     subwave_adapter::SubwavePlaybackAdapter,
     update::{PlaybackUiShell, PlaybackUpdatePort},
 };
-#[cfg(feature = "mpv")]
-use crate::{contract::PlaybackErrorKind, mpv_adapter::MpvPlaybackAdapter};
 
 use iced::Task;
 use std::time::Duration;
@@ -217,8 +217,8 @@ where
     let start = Duration::try_from_secs_f64(res_pos).unwrap_or_default();
 
     // Create the selected adapter synchronously and update state immediately.
-    // Auto deliberately remains Subwave during the staged rollout; only an
-    // exact mpv request enters the in-process native-window path.
+    // macOS Auto uses the integrated mpv presenter; other platforms retain
+    // their existing policy until independently changed.
     match open_playback_session(
         &source,
         start,
@@ -286,26 +286,31 @@ where
 ///
 /// Callers must keep authentication in [`PlaybackSource`] headers or cookies.
 /// Exact backend requests still follow Ferrex's deterministic fallback policy,
-/// which is reflected by the returned session snapshot and diagnostics.
+/// which is reflected by the returned session snapshot and diagnostics. On
+/// macOS, Auto selects integrated mpv and GStreamer is unavailable.
 pub fn open_playback_session(
     source: &PlaybackSource,
     start: Duration,
     generation: SessionGeneration,
     request: BackendRequest,
 ) -> Result<PlaybackSession, PlaybackError> {
-    let requested_mpv_target = match request {
-        BackendRequest::Exact(target) if target.backend == BackendKind::Mpv => {
-            Some(target)
-        }
-        BackendRequest::Auto | BackendRequest::Exact(_) => None,
-    };
+    let requested_mpv_target =
+        requested_mpv_target(request, cfg!(target_os = "macos"));
+    if cfg!(target_os = "macos") && requested_mpv_target.is_none() {
+        return Err(macos_gstreamer_unavailable());
+    }
     let mut fallback = None;
 
     #[cfg(feature = "mpv")]
     if let Some(requested_target) = requested_mpv_target {
+        let unavailable_target = if cfg!(target_os = "macos") {
+            "unavailable"
+        } else {
+            "gstreamer-auto"
+        };
         if let Some(detail) = packaged_mpv_platform_unavailability() {
             log::warn!(
-                "playback_fallback code=unsupported_platform from={} to=gstreamer-auto detail={detail}",
+                "playback_fallback code=unsupported_platform from={} to={unavailable_target} detail={detail}",
                 playback_target_label(requested_target),
             );
             fallback = Some((
@@ -349,7 +354,7 @@ pub fn open_playback_session(
                 Err(error) => {
                     let code = mpv_initialization_fallback_code(&error);
                     log::warn!(
-                        "playback_fallback code={} from={} to=gstreamer-auto detail={error}",
+                        "playback_fallback code={} from={} to={unavailable_target} detail={error}",
                         fallback_reason_code_label(code),
                         playback_target_label(requested_target),
                     );
@@ -362,11 +367,37 @@ pub fn open_playback_session(
     #[cfg(not(feature = "mpv"))]
     if let Some(requested_target) = requested_mpv_target {
         let detail = "in-process mpv support is disabled in this build";
+        let unavailable_target = if cfg!(target_os = "macos") {
+            "unavailable"
+        } else {
+            "gstreamer-auto"
+        };
         log::warn!(
-            "playback_fallback code=backend_disabled from={} to=gstreamer-auto detail={detail}",
+            "playback_fallback code=backend_disabled from={} to={unavailable_target} detail={detail}",
             playback_target_label(requested_target),
         );
         fallback = Some((FallbackReasonCode::BackendDisabled, detail.into()));
+    }
+
+    if cfg!(target_os = "macos") {
+        let (code, detail) = fallback.unwrap_or((
+            FallbackReasonCode::RequestedUnavailable,
+            "the macOS mpv backend is unavailable".to_string(),
+        ));
+        let mut error = PlaybackError::new(
+            match code {
+                FallbackReasonCode::BackendDisabled
+                | FallbackReasonCode::RuntimeIncompatible
+                | FallbackReasonCode::UnsupportedPlatform => {
+                    PlaybackErrorKind::BackendUnavailable
+                }
+                _ => PlaybackErrorKind::BackendInitialization,
+            },
+            detail,
+        );
+        error.backend = Some(BackendKind::Mpv);
+        error.recoverable = true;
+        return Err(error);
     }
 
     let mut adapter = SubwavePlaybackAdapter::open(source, start, generation)?;
@@ -379,6 +410,31 @@ pub fn open_playback_session(
         });
     }
     Ok(PlaybackSession::from_subwave(adapter, request))
+}
+
+fn requested_mpv_target(
+    request: BackendRequest,
+    macos_default: bool,
+) -> Option<PlaybackTarget> {
+    match request {
+        BackendRequest::Exact(target) if target.backend == BackendKind::Mpv => {
+            Some(target)
+        }
+        BackendRequest::Auto if macos_default => {
+            Some(PlaybackTarget::MPV_INTEGRATED)
+        }
+        BackendRequest::Auto | BackendRequest::Exact(_) => None,
+    }
+}
+
+fn macos_gstreamer_unavailable() -> PlaybackError {
+    let mut error = PlaybackError::new(
+        PlaybackErrorKind::BackendUnavailable,
+        "GStreamer playback is unavailable on macOS; use the in-process mpv backend",
+    );
+    error.backend = Some(BackendKind::GStreamer);
+    error.recoverable = false;
+    error
 }
 
 #[cfg(all(feature = "mpv", target_os = "linux"))]
@@ -502,6 +558,38 @@ pub(crate) fn media_file_metadata_indicates_hdr(
     metadata.bit_depth.is_some_and(|depth| depth > 8)
         || transfer_is_hdr
         || primaries_are_wide
+}
+
+#[cfg(test)]
+mod platform_policy_tests {
+    use super::{macos_gstreamer_unavailable, requested_mpv_target};
+    use crate::contract::{BackendKind, BackendRequest, PlaybackTarget};
+
+    #[test]
+    fn macos_auto_uses_integrated_mpv() {
+        assert_eq!(
+            requested_mpv_target(BackendRequest::Auto, true),
+            Some(PlaybackTarget::MPV_INTEGRATED)
+        );
+        assert_eq!(requested_mpv_target(BackendRequest::Auto, false), None);
+    }
+
+    #[test]
+    fn macos_gstreamer_unavailability_is_explicit() {
+        for target in [
+            PlaybackTarget::GSTREAMER_INTEGRATED,
+            PlaybackTarget::GSTREAMER_EMBEDDED,
+        ] {
+            assert_eq!(
+                requested_mpv_target(BackendRequest::Exact(target), true),
+                None
+            );
+        }
+        let error = macos_gstreamer_unavailable();
+        assert_eq!(error.backend, Some(BackendKind::GStreamer));
+        assert!(!error.recoverable);
+        assert!(error.message.contains("unavailable on macOS"));
+    }
 }
 
 #[cfg(all(test, feature = "mpv", target_os = "linux"))]

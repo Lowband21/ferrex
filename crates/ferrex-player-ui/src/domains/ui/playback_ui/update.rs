@@ -44,11 +44,12 @@ fn play_media_with_position(
             state.domains.media.state.pending_resume_position = Some(position);
             state.domains.player.state.pending_resume_position = Some(position);
 
-            DomainUpdateResult::task(Task::done(DomainMessage::Player(
+            let play = Task::done(DomainMessage::Player(
                 crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
                     media_file, media_id,
                 ),
-            )))
+            ));
+            DomainUpdateResult::task(prepare_macos_player_overlay(play))
         }
         Err(_) => {
             log::error!("Failed to get media with id {}", media_id);
@@ -148,6 +149,17 @@ const fn in_process_mpv_target() -> PlaybackTarget {
     }
 }
 
+fn prepare_macos_player_overlay(
+    play: Task<DomainMessage>,
+) -> Task<DomainMessage> {
+    if cfg!(target_os = "macos") {
+        Task::done(DomainMessage::Ui(UiShellMessage::OpenPlayerOverlay.into()))
+            .chain(play)
+    } else {
+        play
+    }
+}
+
 pub fn update_playback_ui(
     state: &mut State,
     message: PlaybackMessage,
@@ -186,8 +198,8 @@ pub fn update_playback_ui(
             play_media_with_position(state, media_id, 0.0)
         }
         PlaybackMessage::PlayMediaWithIdInMpv(media_id) => {
-            // Explicit opt-in to in-process libmpv native-window mode. Auto
-            // remains Subwave, and initialization failures fall back there.
+            // Explicit mpv selection on non-macOS platforms. macOS Auto uses
+            // the same in-process presenter by default.
             play_media_with_mpv_mode(state, media_id, false)
         }
         PlaybackMessage::PlayMediaWithIdExternally(media_id) => {
