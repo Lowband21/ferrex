@@ -161,6 +161,10 @@ class MacOSBuildProfileTests(unittest.TestCase):
         self.assertIn('MACOSX_DEPLOYMENT_TARGET:=15.0', BUILD)
         self.assertIn('MACOSX_DEPLOYMENT_TARGET="15.0"', WORKFLOW)
 
+    def test_ci_pins_the_apple_silicon_runner_to_the_deployment_target(self) -> None:
+        self.assertIn("os: [ubuntu-latest, macos-15, windows-latest]", WORKFLOW)
+        self.assertNotIn("macos-latest", WORKFLOW)
+
 
 if __name__ == "__main__":
     unittest.main()
