@@ -3883,7 +3883,9 @@ mod tests {
                 request: Some(owner)
             }] if *owner == retired
         ));
-        assert!(playback.video_opt.is_some());
+        assert!(!playback.root_shutdown_in_progress);
+        assert_eq!(playback.root_shutdown_retired_request, None);
+        assert!(ui.player);
     }
 
     #[test]
