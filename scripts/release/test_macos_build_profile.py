@@ -136,13 +136,20 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "libgio-2.0.0.dylib",
             "libgobject-2.0.0.dylib",
             "libglib-2.0.0.dylib",
+            "-x objective-c",
+            "-framework AppKit",
         ):
             self.assertIn(expected, WORKFLOW)
         self.assertNotIn("pkg-config --libs-only-l", WORKFLOW)
         self.assertNotIn("export DYLD_LIBRARY_PATH", WORKFLOW)
         self.assertNotIn("Contents/PlugIns/gstreamer-1.0", WORKFLOW)
         self.assertNotIn("Contents/PlugIns/gio/modules", WORKFLOW)
-        for expected in ("avdec_h264", "atdec", "g_tls_file_database_new"):
+        for expected in (
+            "avdec_h264",
+            "atdec",
+            "g_tls_file_database_new",
+            "[NSApplication sharedApplication]",
+        ):
             self.assertIn(expected, SMOKE)
 
     def test_ca_bundle_is_immutable_and_provenance_recorded(self) -> None:

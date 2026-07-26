@@ -2,6 +2,7 @@
 
 #include <gst/gst.h>
 #include <gio/gio.h>
+#import <AppKit/AppKit.h>
 #include <dlfcn.h>
 #include <stdio.h>
 
@@ -51,6 +52,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: macos_gstreamer_bundle_smoke URL LIBSOUP CA_PEM\n");
         return 2;
     }
+    [NSApplication sharedApplication];
     if (dlopen(argv[2], RTLD_LAZY | RTLD_GLOBAL) == NULL) {
         fprintf(stderr, "could not preload bundled libsoup: %s\n", dlerror());
         return 1;
