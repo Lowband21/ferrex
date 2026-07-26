@@ -61,7 +61,7 @@ those markers are textual status labels and must not be treated as completed.
 | P3 | mpv control plane and native-window vertical slice | P1, P2 | In progress | End-to-end playback without render API |
 | P4 | Native presenter and Iced surface lifecycle | P1, P3 | In progress | Fake presenter and host lifecycle are stable |
 | P5 | Windows presenter and X11 platform decision | P4 | Handoff ready; hardware gate open | Compile-gated owned-overlay spike plus deterministic fallback |
-| P6 | macOS integrated presenter | P4 | Handoff ready; hardware gate open | Compile-gated AppKit child-window spike plus deterministic fallback |
+| P6 | macOS integrated presenter | P4 | Handoff ready; hardware gate open | Compile-gated AppKit in-root-view spike plus deterministic fallback |
 | P7 | Wayland protocol bridge | P3, P4 | Complete (HYBRID) | GStreamer integrated; mpv native-window until a safe bridge exists |
 | P8 | Playback feature parity | P3, platform presenter | In progress | Current player controls and tracks work through mpv |
 | P9 | Hardening, performance, and release packaging | P5–P8 | In progress | Platform acceptance matrix passes |
@@ -402,7 +402,10 @@ native window before attempting embedding.
 - [x] Implement ordered stop and termination.
 - [~] AppKit presenter work is main-thread-token-gated, detaches before
   shutdown, and hands the blocking `MpvWorker` drain to a named off-main
-  reaper; a real macOS load/quit/fullscreen stress run remains required.
+  reaper. Retained-shell restoration and replacement native launch remain
+  closed behind the reaper's positive completion signal, and a failed teardown
+  latches native launch closed for the rest of the process; a real macOS
+  load/quit/fullscreen stress run remains required.
 
 The first P3 control-plane tranche lives entirely in `ferrex-player-mpv`.
 `MpvSession` is a thread-affine serialized owner; `MpvWorker` creates it on a
@@ -600,7 +603,7 @@ a decoded-frame callback for player-state updates: native backends wake through
 the copied-event signal, while the legacy adapter synchronizes only on the
 bounded controls timer and the existing low-rate progress heartbeat.
 
-### Dedicated playback overlay window
+### Dedicated playback controls host
 
 - [x] Add a player/overlay `WindowKind` to the existing daemon window manager.
 - [x] Create transparent overlays hidden before native attachment.
@@ -610,14 +613,16 @@ bounded controls timer and the existing low-rate progress heartbeat.
 - [x] Restore geometry/focus after playback.
 - [ ] Ensure one visible player/taskbar identity at a time.
 
-The daemon window manager now owns a deterministic
-`Closed -> Hidden -> Active -> Closing` player-overlay lifecycle. Allocation is
-transparent, undecorated, and invisible. Native attachment/positioning occurs
-while hidden; an explicit post-attachment task hides the still-live main
-window before a follow-up marks the presenter host visible and focuses it.
-That follow-up never reapplies stale main-window geometry. The window manager
-also retains a separate live overlay viewport for controls/focus/hit testing,
-leaving main geometry untouched for restoration. User close detaches every
+The daemon window manager owns a deterministic
+`Closed -> Hidden -> Active -> Closing` player-controls lifecycle. Its Iced
+staging viewport is transparent, undecorated, permanently unordered, and never
+becomes a visible controls `NSWindow` on macOS. Native attachment occurs while
+hidden; an explicit post-attachment task hides the still-live main window
+before a follow-up reveals and focuses the reparented controls `NSView` inside
+mpv's root. That follow-up never focuses the staging window or reapplies stale
+main-window geometry. The window manager retains the staging viewport only to
+drive the canonical controls/message path, leaving main geometry untouched for
+restoration. User close detaches every
 registered native slot and
 releases the event-loop-local raw-host lease before queuing native destruction,
 then restores the retained main geometry, fullscreen mode, and focus. A
@@ -744,9 +749,10 @@ HYBRID decision does not change this target.
 
 - [x] Confirm mpv 0.41 returns its live `NSWindow` pointer through the
   read-only `window-id` property; no unsupported macOS `wid` input is used.
-- [x] Resolve and retain the mpv `NSWindow` and Iced host `NSView`/`NSWindow`
+- [x] Resolve and retain the mpv `NSWindow` and Iced host `NSView`/staging owner
   only with an AppKit main-thread marker.
-- [x] Implement a transparent Iced child `NSWindow` above mpv's content view.
+- [x] Reparent the transparent Iced controls `NSView` inside mpv's content
+  hierarchy without creating an AppKit child window.
 - [~] Movement, resize, backing-scale, focus, occlusion, close, and app
   visibility synchronization are implemented and fake-tested; target
   observation remains open.
@@ -756,29 +762,39 @@ HYBRID decision does not change this target.
   representative Spaces matrix remains open.
 - [~] Apple Silicon and Intel build/package jobs are defined; representative
   hardware execution remains open.
-- [~] Child-window composition is the selected handoff strategy; retain the
+- [~] In-root view composition is the selected spike strategy; retain the
   native-window fallback until representative testing proves it sufficient.
 
-### Production presenter
+### In-root presenter
 
-- [x] Implement the child-window relationship behind the presenter contract.
+- [x] Implement the in-root `NSView` relationship behind the presenter
+  contract, with no child-window or screen-positioning operations.
 - [x] Keep all AppKit object access behind the non-`Send` main-thread window
   system.
-- [x] Synchronize the root content-view screen rectangle rather than the outer
-  frame.
+- [~] Pin a narrow winit 0.30.13 AppKit compatibility patch that retains the
+  renderer `WinitView` independently, preserves its logical `WindowId`, follows
+  the actual host for scale/focus/cursor/IME/metrics, and removes foreign-root
+  observers on every detach/close edge; native compilation and the transition
+  matrix remain hardware gates.
+- [x] Size the controls view from the root content view's local bounds rather
+  than an outer-frame or screen-coordinate projection.
 - [x] Detach the AppKit relationship first, then move blocking libmpv shutdown
-  to a named reaper so the main run loop remains serviceable.
+  to a named reaper so the main run loop remains serviceable. A single durable
+  player-domain arbiter defers replacement launch, retained-shell restoration,
+  navigation, and queued exit until positive reaper completion; teardown
+  failure blocks later native launches rather than permitting overlap.
 - [~] VideoToolbox diagnostics are exposed; representative hardware decoding
   evidence remains open.
-- [~] HDR/EDR overlay-visible/hidden validation remains open on a capable
-  display, and native HDR capability stays false meanwhile.
-- [~] The macOS child-window-specific 100-cycle playback/fullscreen/teardown
-  run remains open.
+- [~] HDR/EDR overlay-visible/hidden validation remains open on capable Apple
+  Silicon and Intel displays, so the spike does not advertise native HDR.
+- [~] A display-free 100-cycle in-root attach/synchronize/fullscreen/detach
+  contract passes; the Apple Silicon/Intel hardware matrix remains open.
 
 ### Exit decision
 
-- [~] Integrated capability is enabled only in an explicit compile-time spike
-  for representative-system handoff; Auto/production remains closed.
+- [~] Integrated capability remains behind the explicit compile-time `spike`
+  mode. Auto and production packaging remain closed until the full native
+  matrix passes.
 - [x] Any preflight or attachment failure selects mpv native-window mode and
   dismisses the hidden Iced host.
 - [-] Do not substitute a deprecated OpenGL render path solely to claim
@@ -1388,7 +1404,7 @@ cookie, local path, or configuration path enters the summary.
 | R1 | mpv cannot be safely proxied onto Iced's Wayland connection | Blocks integrated mpv on Wayland | D-022 selects GStreamer integration plus mpv native-window rather than a framework/environment hack; reopen only for a maintainable per-session path | Mitigated by HYBRID; research deferred |
 | R2 | Proxy misses evolving Wayland protocols used by mpv/driver | Playback/HDR failures by compositor or version | Retain the pinned trace fixture and W1–W5 re-entry matrix; no bridge ships under D-022 | Deferred under HYBRID |
 | R3 | Transparent overlay breaks HDR, independent flip, or latency | Quality/performance regression | Measure overlay shown/hidden; native-window fallback; per-platform rollout | Open |
-| R4 | macOS child window fails fullscreen/Spaces behavior | No integrated macOS controls | P6 spike; retain native-window mode; do not force OpenGL | Open |
+| R4 | macOS foreign Iced view fails fullscreen/Spaces/scale behavior | No integrated macOS controls | P6 spike; retain native-window mode; do not force OpenGL | Open |
 | R5 | libmpv/AppKit/event-loop threading deadlocks | Application hang on load/exit | Serialized owner, callback rules, lifecycle stress, main-loop-aware teardown | Open |
 | R6 | Native resource teardown races host window destruction | Crashes/leaks | Explicit generations, close ordering, 100-cycle tests | Open |
 | R7 | Packaging differs from developer environment | Backend absent in releases | P2 packaging workstream and clean-machine smoke tests | Open |
@@ -1414,7 +1430,7 @@ cookie, local path, or configuration path enters the summary.
 | D-007 | Wayland Iced root plus proxied mpv subsurface | Deferred | 2026-07-12 | D-022 selects HYBRID. Retain this architecture only as re-entry criteria if a safe connection bootstrap becomes available. |
 | D-008 | Wayland-only mpv connection redirection mechanism | Deferred | 2026-07-12 | W0 confirms stable libmpv has no per-context Wayland endpoint and delayed helper connections make temporary environment overrides unsafe. A process-lifetime startup proxy is the only race-free candidate found, but routing Iced too conflicts with the private mpv-only socket requirement. D-022 selects HYBRID until a better path exists. |
 | D-009 | Retain external mpv as an explicit process-isolated compatibility handoff through the rollback window | Accepted | 2026-07-13 | In-process native-window mpv now has control/track/progress parity for the supported matrix, but the external process still supplies crash isolation and the D-023 X11 handoff without linking GPL-only X11 VO code into Ferrex. D-017 sends its credential-bearing source through private IPC rather than argv; D-019 projects copied state into `PlaybackSnapshot`, and the capability-UX tranche adds the same redacted diagnostic summary. Pure tests cover lifecycle/progress/episode/diagnostic behavior; the ignored real-mpv smoke verifies IPC load, observation, private socket cleanup, and `/proc/<pid>/cmdline` non-disclosure. Fallback impact: external mpv remains explicit and is never selected by Auto; GStreamer and in-process native-window selection are unchanged. Revisit removal only in P11 after the rollback window and an approved X11 alternative. |
-| D-010 | Optional Iced foreign-parent proposal | Deferred | 2026-07-11 | Discuss only after working external implementation |
+| D-010 | Optional upstream foreign-AppKit-view proposal | Deferred | 2026-07-24 | Ferrex now carries a pinned, generic winit 0.30.13 compatibility patch for a retained `WinitView` hosted by an external `NSWindow`; it does not add mpv-specific Iced API. An upstream proposal remains deferred until native Apple Silicon/Intel evidence proves the contract and the API can be stated independently of Ferrex. |
 | D-011 | Keep the neutral contract in `ferrex-player-playback::contract` | Accepted | 2026-07-11 | `dev` already extracted the playback crate; contract/reducer/channel/fallback and adapter tests live there, with no second crate until another client needs it. Evidence: playback and UI unit suites plus workspace all-target check in the initial implementation change |
 | D-012 | Serialize libmpv through a thread-affine `MpvSession`, with an optional owner-thread `MpvWorker` | Accepted | 2026-07-11 | The wakeup callback performs only atomic coalescing and `Thread::unpark`; native pointers stay on the owner, and event payloads are bounded/copied before the next wait. Fake ABI tests cover nodes, replies, cancellation, hooks, logs, wake storms, and 50 teardown cycles; linked tests cover a real property reply and ordered stop. macOS can use the local owner until its AppKit model is proven. Fallback impact: none when the `mpv` feature is disabled. |
 | D-013 | Route the existing explicit “Play in MPV” action to in-process native-window libmpv when the `mpv` feature is enabled | Accepted | 2026-07-11 | `mpv_adapter.rs`, `video::open_requested_session`, and a coalesced copied-event readiness subscription provide the vertical slice without frame uploads or periodic event polling. Auto remains Subwave; async mpv load failure resumes through Auto/Subwave, the separate external-process handoff remains available, and backend-disabled builds retain the historical external action. Unit tests cover source/log redaction, property/event/track mapping, close-versus-EOF terminal policy, version/VO/GPU/hwdec/frame diagnostic serialization, and load/seek/EOF stop order; the expanded local real-VO smoke test passes with mpv 0.41.0 and verifies public runtime diagnostics, confirmed fullscreen enter/exit, stop/reload, and native close/quit, while the earlier authenticated HTTP range variant separately proves header/cookie/query-ticket transport. |
@@ -1422,14 +1438,14 @@ cookie, local path, or configuration path enters the summary.
 | D-015 | Acquire Iced native hosts with a `window::run` handshake and event-loop-local lease | Accepted | 2026-07-11 | The pinned Iced API does not expose a window through widget `Shell`. `native_video_slot.rs` therefore requests capture once, returns only a pointer-free result through `Task`, and keeps copied raw handles in a thread-local borrow registry used by generation-scoped presenter callbacks. `Tree::State` revisions geometry only on redraw and detaches on replacement/drop/close. Unit tests cover host capture, clipping/scale revisions, capture deferral, and teardown. Fallback impact: none; no integrated presenter or Auto selection is enabled. |
 | D-016 | Decouple player snapshot updates from decoded-frame callbacks | Accepted | 2026-07-12 | Desktop and 10-foot views construct the backend presentation widget without `on_new_frame`. Native mpv wakes Iced only through its coalesced copied-event signal; legacy Subwave synchronization reuses the bounded controls timer, and progress persistence keeps its existing ten-second heartbeat. The player/UI feature suite and backend-disabled check pass. Fallback impact: Subwave remains fully available, but its UI position refresh is intentionally bounded instead of frame-rate-driven. |
 | D-017 | Carry in-process playback tickets in typed source headers | Accepted | 2026-07-13 | `resolve_playback_stream_source`, `PlayerDomainState::current_source`, and `SetStreamSource` keep direct Ferrex stream URIs credential-free and store the playback-scoped token in a redacted, zeroizing `Authorization` header. The formerly string-only streaming/HLS service now returns a typed `StreamingPlaybackSource` with the same constraints and projects it into `PlaybackSource`; embedded query/userinfo credentials and header injection fail closed. Subwave and libmpv pass source headers in process; the legacy external path creates a temporary zeroizing query URL only at its compatibility boundary and sends it through private mpv IPC rather than the child argument vector. Unit tests verify direct and streaming-service header transport, injection rejection, redacted source/state/error diagnostics, fail-closed ticket errors, legacy conversion, and `0700` IPC-directory cleanup. Real native-mpv smokes pass against a bearer-header range server, a real Ferrex router direct stream, and a router-backed HLS manifest whose four segments require the same ticket; the separate external-mpv smoke verifies query-ticket IPC load plus `/proc/<pid>/cmdline` non-disclosure. Fallback impact: in-process mpv-to-Subwave fallback retains the same authenticated source; only the explicit external compatibility handoff reconstructs a query ticket. |
-| D-018 | Allocate the dedicated Iced player overlay hidden and reveal it only after explicit native attachment | Accepted | 2026-07-12 | `WindowKind::PlayerOverlay`, the daemon window controller, player-only root view routing, and the explicit transparent theme implement a generation-independent host window shell without platform objects. Attachment and presenter positioning occur while hidden; an explicit `Activating` state covers the serialized retained-main hide, and `Active` is recorded only after the presenter synchronously reveals the host. Pointer-free transition logs then confirm the delivered overlay-focus event. No stale main resize/move is applied after attachment. A separate live overlay viewport drives controls/focus/hit testing while retained main geometry remains restoration state. Close handling calls `prepare_iced_native_host_close` before `window::close`, detaching all registered slot generations before releasing the raw-host lease; the retained main window is restored after activating/active-overlay teardown. Manager, settings, theme, viewport, and native-slot tests cover hidden/activating/active/closing order and detach-before-release. P5/P6 still own native root relationship, z-order, and taskbar identity validation. Fallback impact: the overlay is dormant until an attachment confirmation explicitly activates it, and presenter fallback can dismiss it without stopping playback; current Subwave, mpv native-window, and external modes are unchanged. |
+| D-018 | Allocate a dedicated Iced player host hidden and activate its presented surface only after explicit native attachment | Accepted, amended for macOS | 2026-07-24 | `WindowKind::PlayerOverlay`, the daemon window controller, player-only root view routing, and the explicit transparent theme implement a generation-independent staging shell without platform objects. Attachment occurs while hidden; an explicit `Activating` state covers the serialized retained-main hide, and `Active` is recorded only after the presenter synchronously reveals the native-hosted surface. On macOS the Iced `NSWindow` remains unordered and the presenter makes only its reparented `NSView` first responder in mpv's root; no Iced focus command can activate the staging owner. No stale main resize/move is applied after attachment. Close handling calls `prepare_iced_native_host_close` before `window::close`, detaching all registered slot generations before releasing the raw-host lease; the retained main window is restored after activating/active-host teardown. Manager, settings, theme, viewport, and native-slot tests cover hidden/activating/active/closing order and detach-before-release. P5/P6 still own native root relationship, z-order, and taskbar identity validation. Fallback impact: the host is dormant until an attachment confirmation explicitly activates it, and presenter fallback can dismiss it without stopping playback; current Subwave, mpv native-window, and external modes are unchanged. |
 | D-019 | Project retained external-mpv process observations into the backend-neutral snapshot | Accepted | 2026-07-12 | `PlayerDomainState::external_mpv_snapshot` is reduced from copied private-IPC observations while `ExternalMpvHandle` owns only process resources. Desktop/10-foot views, progress heartbeat, navigation, and episode start-mode policy now consume the same snapshot/progress projection as in-process backends; only process polling and external seek remain explicit compatibility branches. Final observations are captured before handle drop, and tests prove terminal episode advancement and progress persistence without a surviving handle. Fallback impact: external process mode remains available and D-009 remains pending; Subwave and in-process mpv selection are unchanged. |
 | D-020 | Keep mpv user config and scripts disabled unless trusted-code policy is explicit | Accepted | 2026-07-12 | `ferrex-player-mpv::MpvConfigPolicy` defaults to Ferrex's deterministic native-window profile. `FERREX_MPV_CONFIG_POLICY=trusted-user` is the developer-only opt-in for standard mpv config, `input.conf`, and scripts; invalid values fail closed and are not logged. Diagnostic schema v4 reports policy and effective high-level switches. Fake session tests verify pre-initialization config/script options and retained external-resolver disablement; playback parser/diagnostic tests and backend-disabled compilation pass. Fallback impact: none—Auto remains Subwave, exact mpv selection is unchanged, and builds without mpv do not read the policy. |
 | D-021 | Expose local video extensions as capability-gated Ferrex commands | Accepted | 2026-07-12 | `PlaybackCommand`/`PlaybackSession` model external sidecar subtitle loading, named profile application, ordered local shader replacement, and explicit-path screenshots without exposing the mpv owner. `PlaybackFilePath` and `VideoProfileName` redact debug output; adapter validation and copied-log filtering never echo values. mpv uses argument-separated standard commands, while Subwave returns structured `UnsupportedOperation`; user profiles are available only under D-020's trusted policy. Diagnostic schema v5 adds the four support booleans and only an observed shader count. Pure mapping/redaction/policy tests pass; display-backed mpv 0.41 native-VO smokes passed with a real external SRT track, identity shader, and non-empty screenshot on 2026-07-12. Fallback impact: unsupported backends remain selected and report the unavailable operation rather than changing backend or silently doing nothing. |
 | D-022 | Use a HYBRID Wayland backend until a safe integrated mpv connection path exists | Accepted | 2026-07-12 | W0 traces on SDR, HDR10/PQ, and HLG prove ordinary mpv 0.41 `gpu-next`/Vulkan native VO and identify one shell candidate, but stable libmpv cannot direct a session to the private bridge without a process-global race; the only race-free startup proxy candidate would also proxy Iced and violates the current boundary. Wayland therefore keeps GStreamer/Subwave for integrated presentation and offers mpv in native-window mode. Windows P5 and macOS P6 remain fully integrated native-VO targets. Fallback impact: no Wayland Auto change, no CPU/wgpu mpv frame path, and no change to Windows/macOS rollout gates. |
 | D-023 | Keep X11 on integrated GStreamer under the LGPL release profile | Accepted | 2026-07-12 | mpv 0.41's Meson graph requires `gpl=true` for the X11 VO and therefore for native-window/overlay/`wid` presentation. The reviewed D-005 profile cannot ship that code. The Flatpak build asserts `gpl=false` and `x11=disabled`, retains Wayland Vulkan/dmabuf/VA-API, and its built/installed bundle resolves the pinned libmpv/FFmpeg/libplacebo closure from `/app`; Nix uses the same mpv license option. Both package builds compile `FERREX_MPV_X11=disabled`; `open_requested_session` preflights an X11-only environment into a structured `UnsupportedPlatform` fallback before creating libmpv, with a pure display/profile matrix test. Re-entry requires compatibly licensed upstream X11 support or an explicit distribution-policy/specification amendment, followed by the retained P5 matrix. Fallback impact: X11 Auto remains integrated GStreamer, in-process mpv is reported unavailable, and the separate external mpv process may remain an explicit handoff; Windows/macOS gates are unchanged. |
 | D-024 | Use mpv's Win32 HWND as the video root and an owned, taskbar-suppressed Iced HWND as the controls overlay | Accepted for handoff | 2026-07-13 | The compile-time `FERREX_MPV_WINDOWS_PRESENTER=spike` path observes the full pointer-width `window-id`, validates both HWNDs, synchronizes client geometry/DPI/minimize/visibility at an independent native-root cadence, delegates fullscreen to mpv, and restores owner/style state on detach. Display-free presenter tests, pinned LGPL libmpv SDK/import-library tooling, exhaustive provenance for the staged runtime DLL closure, and a reviewed GStreamer PE/GIO/TLS closure with HLS/HTTPS smoke are defined; floating Rust/MSYS2 build tools remain identified in workflow logs rather than covered by that runtime-closure claim. Fallback impact: any preflight/attach failure dismisses the hidden overlay and selects mpv native-window; Auto, native HDR, and production capability remain closed until the Windows hardware/package/100-cycle matrix passes. |
-| D-025 | Use mpv's AppKit NSWindow as the video root and an AppKit child Iced NSWindow as the controls overlay | Accepted for handoff | 2026-07-13 | The compile-time `FERREX_MPV_MACOS_PRESENTER=spike` path treats `window-id` only as mpv's read-only NSWindow observation, retains and manipulates AppKit objects behind a non-Send main-thread marker, follows the content layout/active Space/occlusion/scale state, and detaches before handing blocking libmpv termination to an off-main reaper. Display-free presenter tests, pinned core LGPL sources, version/hash-recorded Homebrew inputs, and a strict macOS 15+ bundle closure/HLS audit are defined; the first target artifact run remains open. Fallback impact: any preflight/attach failure dismisses the hidden overlay and selects mpv native-window; Auto, EDR/HDR, VideoToolbox, and production capability remain closed until Apple Silicon/Intel package/fullscreen/Spaces/100-cycle evidence passes. |
+| D-025 | Use mpv's AppKit `NSWindow` as the sole visible root and reparent the Iced controls `NSView` into its content hierarchy | Accepted for spike | 2026-07-25 | The compile-time `FERREX_MPV_MACOS_PRESENTER=spike` path treats `window-id` only as mpv's read-only `NSWindow` observation, retains the Iced view and its permanently unordered staging owner behind a non-`Send` main-thread marker, uses root-local content bounds and autoresizing, and never creates, orders, positions, or focuses a controls `NSWindow`. A pinned winit 0.30.13 AppKit patch retains the renderer view directly, preserves donor `WindowId` event routing, follows the actual host for scale/focus/cursor/IME, suppresses donor lifecycle mutations while hosted, and removes foreign-root observers before restoration or close. Detach restores the view before native leases are released, and the player-domain arbiter withholds shell restoration, navigation, and replacement launch until teardown completes. Display-free hierarchy, rollback, and lifecycle tests are present; native mixed-scale input, fullscreen/Spaces, generic third-party window-manager behavior, VideoToolbox, HDR/EDR, and clean-host execution remain hardware gates. Fallback impact: any preflight or attachment failure dismisses the hidden staging host and selects mpv native-window; Auto and production packaging remain closed until the native matrix passes. |
 
 When resolving a pending/proposed decision, add the implementation reference,
 test evidence, and fallback impact to its Notes field.

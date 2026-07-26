@@ -2,7 +2,7 @@
 
 - **Status:** Accepted; implementation in progress
 - **Scope:** `ferrex-player` desktop playback
-- **Last updated:** 2026-07-12
+- **Last updated:** 2026-07-24
 - **Tracking plan:** [Native mpv Playback Migration Plan](../plans/native-mpv-playback-migration.md)
 
 ## 1. Purpose
@@ -168,7 +168,7 @@ The initial migration does not attempt to:
   use its native input/OSC behavior.
 - **Surface slot:** an axis-aligned logical rectangle reserved by Iced for
   native video. It is not an Iced texture.
-- **Host:** the Iced window or native overlay window participating in the
+- **Host:** the Iced view/window or native overlay surface participating in the
   presenter relationship.
 
 ## 7. Architectural Invariants
@@ -194,6 +194,10 @@ The following invariants apply across all platforms:
 9. The native presenter MUST be detached before its host window is destroyed.
 10. Backend selection and every fallback transition MUST be logged with a
     machine-readable reason.
+11. A retained shell MUST NOT be restored and a replacement native session
+    MUST NOT launch until prior native teardown has reported positive
+    completion. Teardown failure MUST keep later native launches closed for the
+    remainder of that process.
 
 ## 8. Target Component Model
 
@@ -645,19 +649,33 @@ bundle.
 
 ### 12.4 macOS
 
-The modern mpv Cocoa/Swift path should own its native NSWindow and video layer.
-The presenter obtains the native mpv window when available and attaches a
-transparent Iced child window or native overlay view above the content area.
-It synchronizes backing scale, content bounds, focus, Spaces/fullscreen
-transitions, occlusion, and teardown on the AppKit main thread.
+The modern mpv Cocoa/Swift path owns its native `NSWindow` and video layer. The
+presenter obtains the native mpv window when available and attaches the
+transparent Iced controls `NSView` inside mpv's content hierarchy. The Iced
+staging window remains unordered and is never a visible controls overlay. The
+presenter synchronizes backing scale, content bounds, focus,
+Spaces/fullscreen transitions, occlusion, and teardown on the AppKit main
+thread.
+
+The pinned winit 0.30.13 implementation is not natively reparent-safe: upstream
+recovers its renderer view by casting the staging window's current content
+view and resolves host-sensitive state through that staging window. Ferrex
+therefore carries a narrow AppKit compatibility patch that retains the exact
+`WinitView`, preserves its original logical `WindowId`, follows `[view window]`
+for metrics/input state, observes an external root without replacing mpv's
+delegate, suppresses donor lifecycle/fullscreen mutations while hosted, and
+removes those observations before detach or close. This is a generic
+foreign-view correction, not an mpv-specific Iced API. Native Apple
+Silicon/Intel evidence remains mandatory before the patch is production
+qualified or proposed upstream.
 
 Ferrex MUST NOT make macOS depend on `wid`. Although generic libmpv header text
 still mentions macOS, current mpv source does not consume `WinID` in the modern
 macOS window backend. Native-root composition and ordinary native-window mode
 are the supported strategies.
 
-Child-window behavior across native fullscreen and Spaces must be proven in the
-platform spike. If a transparent Iced child window cannot be made reliable,
+In-root view behavior across native fullscreen and Spaces must be proven in the
+platform spike. If the foreign-view relationship cannot be made reliable,
 normal mpv native-window mode remains the release fallback; an OpenGL render
 path is not promoted merely to emulate embedding.
 
@@ -666,6 +684,13 @@ path is not promoted merely to emulate embedding.
 Integrated mode routes keyboard, pointer, touch, and controller gestures
 through Iced. Player actions produce `PlaybackCommand`s or raw mpv input
 commands. Ferrex remains responsible for its current shortcuts and controls.
+
+On macOS native-root playback, a background press is routed through the
+canonical player message path to `performWindowDragWithEvent:` on mpv's root
+window. Actual control and menu surfaces consume the press first; titlebar and
+resize-frame behavior remains AppKit-owned. The hidden staging window MUST NOT
+be the target of an Iced window-drag, focus, mode, minimize, maximize, or
+fullscreen action.
 
 The integration SHOULD expose a mapping layer for mpv key names so scripts and
 bindings can be invoked intentionally. It does not need to forward every host

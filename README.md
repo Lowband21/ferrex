@@ -147,7 +147,7 @@ See `ferrexctl --help` for all packaging options.
 | Linux (Wayland) | GStreamer 1.28 subsurface | In-process native window or external process | HYBRID. GStreamer HDR/zero-copy and mpv `gpu-next`/hwdec have platform evidence; integrated mpv is deferred. |
 | Linux (X11) | Integrated GStreamer | External process only in the reviewed package | HYBRID. mpv 0.41 X11 VO is excluded from the LGPL-only in-process build. |
 | Windows | GStreamer rollback | Compile-gated Win32 owned-overlay presenter; native-window/external fallback | Representative-system handoff ready; Auto, HDR, hwdec, taskbar/focus/fullscreen, and stress gates remain open. |
-| macOS | GStreamer rollback | Compile-gated AppKit child-window presenter; native-window/external fallback | Representative-system handoff ready; Auto, HDR/EDR, VideoToolbox, Spaces/fullscreen, and stress gates remain open. |
+| macOS | GStreamer rollback | Compile-gated AppKit in-root `NSView` presenter; native-window/external fallback | Representative-system handoff ready; Auto, HDR/EDR, VideoToolbox, Spaces/fullscreen, and stress gates remain open. |
 
 See [Desktop playback backends](https://ferrexmedia.org/developer/desktop-playback-backends/)
 for build selection, deterministic fallback order, diagnostics, platform

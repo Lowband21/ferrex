@@ -296,13 +296,12 @@ job does not replace the Windows HWND or macOS AppKit presenter-specific
 
 ## Windows and macOS integrated-presenter handoff
 
-The Windows and macOS implementations have an explicit `spike` build gate so
-they can be exercised on representative systems without changing the Auto
-backend policy. In a spike build, **Play in MPV** requests
-`mpv-integrated`: mpv owns the native video window and Iced attaches a hidden,
-transparent controls window after both native handles are ready. A failed
-preflight or attachment records a structured reason and returns to
-`mpv-native-window` while GStreamer remains available for rollback.
+Windows and macOS retain explicit `spike` build gates so the presenters can be
+exercised on representative systems without changing the Auto backend policy.
+**Play in MPV** requests `mpv-integrated`: mpv owns the native video window and
+Iced attaches its transparent controls surface after both native identities
+are ready. A failed preflight or attachment records a structured reason and
+returns to `mpv-native-window` while GStreamer remains available for rollback.
 
 "Handoff ready" here means the target code, deterministic fallback, source
 builders, package staging, and display-free tests are present. It does **not**
@@ -456,131 +455,26 @@ Do not substitute a locally installed default mpv build for release evidence.
 
 ### macOS test build
 
-The canonical, provenance-recorded path is the `macOS App Bundle` workflow,
-which builds both Apple Silicon and Intel artifacts. mpv, FFmpeg, libplacebo,
-libass, and Lua 5.2 sources are pinned; Homebrew build/runtime inputs are
-version/hash recorded and rejected if their expected GStreamer profile drifts.
-The workflow rewrites the complete dylib/GIO/trust closure to bundle-relative
-paths, signs nested code, and performs strict clean-bundle HTTP/HTTPS HLS
-playback. This engineering handoff artifact explicitly requires macOS 15 or
-newer. Use the uploaded app—not a raw Cargo binary—for clean-bundle, Dock,
-fullscreen, GStreamer rollback, and runtime-path evidence:
+The canonical platform test path is the `macOS App Bundle` workflow. Dispatch
+the same revision once with `presenter_mode=spike` and once with
+`presenter_mode=disabled`, then run the architecture-matched artifacts on Apple
+Silicon and Intel macOS 15+ systems. The workflow builds the pinned LGPL mpv
+profile, stages the reviewed dylib/GStreamer/GIO/trust closure, signs the app,
+and verifies the bundle before upload. Tag builds keep the presenter disabled;
+production signing, notarization, and release promotion remain separate
+packaging work.
 
-```bash
-ref='<branch-or-tag-containing-tested-revision>'
-expected_sha="$(git rev-parse "$ref")"
-gh workflow run macos-dist.yml --ref "$ref" -f presenter_mode=spike
-gh run list --workflow macos-dist.yml --event workflow_dispatch \
-  --commit "$expected_sha" --limit 5
-# Select the spike run dispatched above and use arm64 or x86_64 for this Mac.
-run='<run-id>'
-arch="$(uname -m)"
-actual_sha="$(gh run view "$run" --json headSha --jq .headSha)"
-test "$actual_sha" = "$expected_sha"
-gh run watch "$run" --exit-status
-spike_dir="target/macos-handoff/$run"
-test ! -e "$spike_dir" || {
-  echo "refusing to reuse handoff directory: $spike_dir" >&2
-  exit 1
-}
-mkdir -p "$spike_dir"
-gh run download "$run" --name "ferrex-player-macos-$arch-spike" \
-  --dir "$spike_dir"
-(cd "$spike_dir" && shasum -a 256 --check ./*.sha256)
-archive_count="$(find "$spike_dir" -maxdepth 1 -type f -name '*.zip' |
-  wc -l | tr -d '[:space:]')"
-test "$archive_count" -eq 1 || {
-  echo "expected exactly one zip in $spike_dir, found $archive_count" >&2
-  exit 1
-}
-archive="$(find "$spike_dir" -maxdepth 1 -type f -name '*.zip' -print)"
-ditto -x -k "$archive" "$spike_dir/app"
-registry="$HOME/Library/Caches/io.github.lowband21.FerrexPlayer/gstreamer-registry-1.0.bin"
-test ! -e "$registry" || {
-  echo "clean-user prerequisite failed; archive or remove $registry first" >&2
-  exit 1
-}
-open "$spike_dir/app/Ferrex Player.app"
-```
+Use a clean macOS account or host without external GStreamer or mpv paths in
+the environment. Preserve the workflow revision and archive checksum with the
+result, and use the same generic window-manager configuration throughout each
+declared run.
 
-Use a clean macOS user with Homebrew library paths, `DYLD_*`, `GST_*`, and
-`VK_*` overrides unset. At least one representative run must use a host or VM
-without Homebrew installed, rather than relying only on a clean account on the
-build host. The app must obtain libmpv, MoltenVK, the GStreamer
-plugins/scanner, GIO TLS module, CA trust database, and their closure from
-`Contents` only. An unsigned workflow run is ad-hoc signed for engineering
-handoff rather than notarized for public distribution; preserve the verified
-archive hash, run ID, `headSha`, signing output, and closure/HLS audit output.
-
-Complete the spike cases below and quit the app before continuing. Dispatch
-`presenter_mode=disabled` at the same `ref` for the fallback control, verify
-that run's `headSha`, and download `ferrex-player-macos-$arch-disabled`.
-Tag-triggered artifacts force the disabled mode but remain Actions artifacts;
-this engineering workflow never attaches macOS artifacts to a GitHub Release.
-Public distribution requires a separate Developer ID signing and notarization
-workflow. Verify and launch the disabled artifact from its own directory:
-
-```bash
-gh workflow run macos-dist.yml --ref "$ref" -f presenter_mode=disabled
-gh run list --workflow macos-dist.yml --event workflow_dispatch \
-  --commit "$expected_sha" --limit 5
-# Select the disabled run dispatched above.
-disabled_run='<disabled-run-id>'
-disabled_sha="$(gh run view "$disabled_run" --json headSha --jq .headSha)"
-test "$disabled_sha" = "$expected_sha"
-gh run watch "$disabled_run" --exit-status
-disabled_dir="target/macos-disabled-handoff/$disabled_run"
-test ! -e "$disabled_dir" || {
-  echo "refusing to reuse handoff directory: $disabled_dir" >&2
-  exit 1
-}
-mkdir -p "$disabled_dir"
-gh run download "$disabled_run" \
-  --name "ferrex-player-macos-$arch-disabled" --dir "$disabled_dir"
-(cd "$disabled_dir" && shasum -a 256 --check ./*.sha256)
-disabled_archive_count="$(find "$disabled_dir" -maxdepth 1 -type f \
-  -name '*.zip' | wc -l | tr -d '[:space:]')"
-test "$disabled_archive_count" -eq 1 || {
-  echo "expected exactly one zip in $disabled_dir, found $disabled_archive_count" >&2
-  exit 1
-}
-disabled_archive="$(find "$disabled_dir" -maxdepth 1 -type f \
-  -name '*.zip' -print)"
-ditto -x -k "$disabled_archive" "$disabled_dir/app"
-test "$(cat "$disabled_dir/app/Ferrex Player.app/Contents/Resources/presenter-build-mode.txt")" = disabled
-if test -e "$registry"; then
-  mkdir -p "$disabled_dir/evidence"
-  mv "$registry" "$disabled_dir/evidence/registry-after-spike.bin"
-fi
-test ! -e "$registry"
-open "$disabled_dir/app/Ferrex Player.app"
-```
-
-Run the same fallback and Auto cases against this copy. The commands refuse
-stale directories, require one archive, and archive the spike registry before
-the disabled launch. A separate clean user is also acceptable; never reuse the
-spike bundle or registry evidence.
-
-For a local development run, install the native build prerequisites listed in
-that workflow and choose a new empty prefix:
-
-```bash
-prefix="$PWD/target/ferrex-libmpv-macos"
-export MACOSX_DEPLOYMENT_TARGET=15.0
-bash scripts/release/macos-build-libmpv.sh "$prefix"
-
-export PKG_CONFIG_PATH="$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-export DYLD_FALLBACK_LIBRARY_PATH="$prefix/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
-export FERREX_MPV_MACOS_PRESENTER=spike
-cargo run -p ferrex-player --features mpv
-```
-
-The prefix builder refuses to install over a non-empty directory. The
-presenter build value is compile-time state, so rebuild after changing it.
 Normal AppKit object access stays on the Iced/AppKit main thread; blocking
-libmpv teardown is handed to the named background reaper only after the child
-window has detached.
+libmpv teardown is handed to the named background reaper only after the
+in-root view has detached. Retained-shell restoration, navigation, and
+replacement native launch wait for a positive completion signal from that
+reaper. A failed teardown keeps later native launches closed for the rest of
+the process instead of allowing a second native owner to overlap the first.
 
 ### Representative-system procedure
 
@@ -592,7 +486,7 @@ display with the OS HDR state recorded.
 
 For every run:
 
-1. Start Ferrex with the spike compiled in and use **Play in MPV**. Confirm
+1. Start Ferrex from the `spike` artifact and use **Play in MPV**. Confirm
    diagnostics report requested/selected `mpv-integrated`, then
    `presenter_state=attached`, with no fallback reason. Retain the pointer-free
    `native player overlay handoff:` debug transition log plus a native-window
@@ -634,7 +528,8 @@ For every run:
 9. Validate fallback with a build whose presenter gate is `disabled`, and
    capture the structured transition to `mpv-native-window`. Playback must
    remain controllable and the hidden Iced overlay must be dismissed. From the
-   same spike and disabled artifacts, select Auto and actually play the direct
+   same qualification candidate and disabled control artifacts, select Auto
+   and actually play the direct
    Ferrex SDR stream and `h264-sdr-8bit.mkv` through EOF with seek, pause,
    audio, and stop working. Then select a non-original quality profile so the
    local Ferrex server generates its protected HLS rendition; wait for the job
@@ -670,9 +565,10 @@ a final 30-second quiescence. Do not restart the process between samples.
 - GPU process memory must return to no more than baseline +64 MiB after final
   quiescence, with no live decoder, swapchain, or video texture from a stopped
   generation.
-- Native player/overlay window count and ownership/child relationships must
-  return exactly to baseline after every stop. Any orphan window, second
-  taskbar/Dock identity, or stale native relationship fails immediately.
+- Native player window count and presenter view ancestry must return exactly
+  to baseline after every stop. Any orphan view/window, child controls window,
+  second taskbar/Dock identity, or stale native relationship fails
+  immediately.
 - The final 20 quiescent samples must not be monotonically non-decreasing with
   a net increase of at least 1 MiB, one handle/FD, or one native/GPU object.
   Any limit breach, crash, hang, fallback, or diagnostics from a stale
@@ -695,8 +591,8 @@ $p = Get-Process ferrex-player -ErrorAction Stop
 ```
 
 On macOS, record RSS/VSZ and open descriptors at the same cadence, and use
-Activity Monitor plus Instruments/Quartz Debug (or an equivalent reviewed
-tool) for GPU and AppKit child-window evidence:
+Activity Monitor plus Instruments/Quartz Debug (or equivalent reviewed tools)
+for GPU and in-root `NSView` ancestry evidence:
 
 ```bash
 pid="$(pgrep -n ferrex-player)"
