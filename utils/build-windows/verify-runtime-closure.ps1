@@ -409,13 +409,22 @@ function Invoke-GstBufferProbe {
     }
     $stdout = $stdoutTask.GetAwaiter().GetResult()
     $stderr = $stderrTask.GetAwaiter().GetResult()
-
-    if (($exited -and $process.ExitCode -ne 0) -or $stderr -match '(?m)^ERROR:') {
-        throw "Bundled GStreamer $Label probe failed: $stderr"
+    $probeOutput = $stdout + [Environment]::NewLine + $stderr
+    $diagnostic = if ($probeOutput.Length -gt 4096) {
+        $probeOutput.Substring(0, 4096)
+    } else {
+        $probeOutput
     }
-    $bufferCount = [regex]::Matches($stdout, '(?m)^00000000 ').Count
+
+    if (-not $exited) {
+        throw "Bundled GStreamer $Label probe timed out: $diagnostic"
+    }
+    if ($process.ExitCode -ne 0 -or $stderr -match '(?m)^ERROR:') {
+        throw "Bundled GStreamer $Label probe failed: $diagnostic"
+    }
+    $bufferCount = [regex]::Matches($probeOutput, '(?m)^\s*00000000\b').Count
     if ($bufferCount -lt $ExpectedBuffers) {
-        throw "Bundled GStreamer $Label probe produced $bufferCount of $ExpectedBuffers decoded buffers"
+        throw "Bundled GStreamer $Label probe produced $bufferCount of $ExpectedBuffers decoded buffers: $diagnostic"
     }
 }
 
@@ -498,9 +507,10 @@ try {
     # then require one decoded audio buffer and one decoded video buffer.
     Invoke-GstBufferProbe -Label 'HLS playback' -ExpectedBuffers 2 -Arguments @(
         '-q', 'uridecodebin3', "uri=$playlistUri", 'name=decoder',
-        'decoder.', '!', 'queue', '!', 'audioconvert', '!', 'audioresample', '!',
+        'decoder.', '!', 'audio/x-raw', '!', 'queue', '!',
+        'audioconvert', '!', 'audioresample', '!',
         'fakesink', 'dump=true', 'sync=false', 'num-buffers=1',
-        'decoder.', '!', 'queue', '!', 'videoconvertscale', '!',
+        'decoder.', '!', 'video/x-raw', '!', 'queue', '!', 'videoconvertscale', '!',
         'fakesink', 'dump=true', 'sync=false', 'num-buffers=1'
     )
 
