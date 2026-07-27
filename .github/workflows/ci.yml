@@ -101,6 +101,7 @@ jobs:
   build:
     name: Build
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15, windows-latest]
         include:
