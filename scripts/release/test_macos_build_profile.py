@@ -59,6 +59,8 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "-Dvideotoolbox-pl=enabled",
             "-Dvideotoolbox-gl=enabled",
             "-Dgl-cocoa=enabled",
+            "-Dwayland=disabled",
+            "-Dx11=disabled",
             "-Dvulkan=enabled",
             "-Dshaderc=disabled",
             "-Dlua=lua52",
