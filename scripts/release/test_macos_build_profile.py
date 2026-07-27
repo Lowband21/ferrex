@@ -9,12 +9,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = (ROOT / "scripts/release/macos-build-libmpv.sh").read_text(encoding="utf-8")
-PLUGINS = (ROOT / "scripts/release/macos-gstreamer-plugins.txt").read_text(
-    encoding="utf-8"
-)
-SMOKE = (ROOT / "scripts/release/macos_gstreamer_bundle_smoke.c").read_text(
-    encoding="utf-8"
-)
 WORKFLOW = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 RELEASE_WORKFLOW = (ROOT / ".github/workflows/release.yml").read_text(
     encoding="utf-8"
@@ -93,84 +87,29 @@ class MacOSBuildProfileTests(unittest.TestCase):
         self.assertIn("homebrew-allowed-roots.txt", BUILD)
         self.assertNotIn('"$brew_prefix"/*', BUILD)
 
-    def test_curated_plugins_avoid_conflicting_or_gpl_codec_surfaces(self) -> None:
-        for required in (
-            "libgstplayback.dylib",
-            "libgstapp.dylib",
-            "libgstvideoconvertscale.dylib",
-            "libgstapplemedia.dylib",
-            "libgstosxaudio.dylib",
-            "libgstaudiofx.dylib",
-            "libgstaom.dylib",
-        ):
-            self.assertIn(required, PLUGINS)
-        for forbidden in (
-            "libgstlibav.dylib",
-            "libgstassrender.dylib",
-            "libgstx264.dylib",
-            "libgstx265.dylib",
-            "libgstscaletempo.dylib",
-        ):
-            self.assertNotIn(forbidden, PLUGINS)
-        self.assertNotIn("libgstdav1d.dylib", PLUGINS)
-
-    def test_workflows_stage_moltenvk_and_clean_gstreamer_runtime(self) -> None:
+    def test_workflow_stages_mpv_runtime_without_gstreamer_runtime(self) -> None:
         for expected in (
             "molten-vk shaderc vulkan-headers vulkan-loader",
             "--extra-library",
             "libMoltenVK.dylib",
-            "libsoup-3.0.0.dylib",
-            "--ca-bundle",
-            "ca-certificates",
-            "strict HTTPS smoke unexpectedly trusted",
             "MoltenVK_icd.json",
-            "macos-gstreamer-plugins.txt",
-            "gst-plugin-scanner",
-            "GST_REGISTRY_1_0",
-            "GIO_EXTRA_MODULES",
-            "Contents/Resources/gstreamer-1.0",
-            "Contents/Resources/gio/modules",
-            "libgiognutls",
-            "https_test_server.py",
-            "libgstreamer-1.0.0.dylib",
-            "libgio-2.0.0.dylib",
-            "libgobject-2.0.0.dylib",
-            "libglib-2.0.0.dylib",
-            "-x objective-c -c",
-            "ferrex-gstreamer-bundle-smoke.o",
-            "-framework AppKit",
         ):
             self.assertIn(expected, WORKFLOW)
-        self.assertNotIn("pkg-config --libs-only-l", WORKFLOW)
+        for removed_runtime in (
+            "--gstreamer-plugin",
+            "--gstreamer-scanner",
+            "--gio-module",
+            "--ca-bundle",
+            "libsoup-3.0.0.dylib",
+            "Smoke bundled GStreamer runtime closure (macOS)",
+        ):
+            self.assertNotIn(removed_runtime, WORKFLOW)
         self.assertNotIn("export DYLD_LIBRARY_PATH", WORKFLOW)
-        self.assertNotIn("Contents/PlugIns/gstreamer-1.0", WORKFLOW)
-        self.assertNotIn("Contents/PlugIns/gio/modules", WORKFLOW)
-        for expected in (
-            "avdec_h264",
-            "atdec",
-            "g_tls_file_database_new",
-            "[NSApplication sharedApplication]",
-        ):
-            self.assertIn(expected, SMOKE)
 
-    def test_ca_bundle_is_immutable_and_provenance_recorded(self) -> None:
-        immutable_path = "share/ca-certificates/cacert.pem"
-        merged_path = "etc/ca-certificates/cert.pem"
-        self.assertIn(immutable_path, BUILD)
-        self.assertIn(immutable_path, WORKFLOW)
-        self.assertNotIn(merged_path, WORKFLOW)
-        for field in (
-            "ca_certificates_version",
-            "ca_certificates_source",
-            "ca_certificates_source_sha256",
-            "ca_certificates_bundle_sha256",
-        ):
-            self.assertIn(field, BUILD)
-
-    def test_gstreamer_version_and_allowlist_are_exact(self) -> None:
-        self.assertIn('GSTREAMER_VERSION="1.28.5"', BUILD)
-        self.assertIn("pkg-config --exact-version=", BUILD)
-        self.assertIn("gstreamer_plugins_sha256", BUILD)
+    def test_native_profile_is_mpv_only(self) -> None:
+        self.assertNotIn("GSTREAMER_VERSION", BUILD)
+        self.assertNotIn("gstreamer_", BUILD)
+        self.assertNotIn("ca_certificates_", BUILD)
         self.assertIn('MACOSX_DEPLOYMENT_TARGET:=15.0', BUILD)
         self.assertIn('MACOSX_DEPLOYMENT_TARGET="15.0"', WORKFLOW)
 

@@ -20,12 +20,9 @@ readonly LIBASS_COMMIT="bbb3c7f1570a4a021e52683f3fbdf74fe492ae84"
 readonly LUA_VERSION="5.2.4"
 readonly LUA_ARCHIVE_SHA256="b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b"
 readonly LUA_ARCHIVE_URL="https://www.lua.org/ftp/lua-${LUA_VERSION}.tar.gz"
-readonly GSTREAMER_VERSION="1.28.5"
-readonly GSTREAMER_SOURCE_SHA256="c53f71b93aefda6864ea09bc845295d89c57afd4d9335f9f8c9a98c969b7693f"
 readonly FFMPEG_REPOSITORY="https://github.com/FFmpeg/FFmpeg.git"
 readonly LIBPLACEBO_REPOSITORY="https://github.com/haasn/libplacebo.git"
 readonly LIBASS_REPOSITORY="https://github.com/libass/libass.git"
-script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
     echo "usage: $0 OUTPUT_PREFIX [WORK_DIRECTORY]" >&2
@@ -115,11 +112,6 @@ for module in freetype2 fribidi harfbuzz vulkan shaderc; do
         exit 1
     fi
 done
-if ! pkg-config --exact-version="$GSTREAMER_VERSION" gstreamer-1.0; then
-    echo "Ferrex macOS releases require reviewed GStreamer $GSTREAMER_VERSION" >&2
-    exit 1
-fi
-
 ffmpeg_build="$dependency_build_directory/ffmpeg"
 mkdir -p "$ffmpeg_build"
 (
@@ -347,7 +339,6 @@ profile_directory="$prefix/share/ferrex/native-mpv"
 mkdir -p "$profile_directory"
 homebrew_direct_formulae=(
     freetype fribidi harfbuzz molten-vk shaderc vulkan-headers vulkan-loader
-    ca-certificates glib glib-networking gstreamer libsoup openssl@3
 )
 homebrew_formulae="$profile_directory/homebrew-formulae.txt"
 {
@@ -358,33 +349,6 @@ xargs brew list --versions <"$homebrew_formulae" \
     >"$profile_directory/homebrew-build-inputs.txt"
 xargs brew info --json=v2 <"$homebrew_formulae" \
     >"$profile_directory/homebrew-build-inputs.json"
-ca_certificates_bundle="$(brew --prefix ca-certificates)/share/ca-certificates/cacert.pem"
-if [[ ! -f "$ca_certificates_bundle" ]]; then
-    echo "immutable Homebrew Mozilla CA bundle is missing: $ca_certificates_bundle" >&2
-    exit 1
-fi
-ca_certificates_version="$(brew list --versions ca-certificates | awk 'NF >= 2 { print $2; exit }')"
-IFS=$'\t' read -r ca_certificates_source ca_certificates_source_sha256 < <(
-    python3 - "$profile_directory/homebrew-build-inputs.json" <<'PY'
-import json
-import sys
-
-metadata = json.load(open(sys.argv[1], encoding="utf-8"))
-formula = next(
-    item for item in metadata["formulae"] if item["name"] == "ca-certificates"
-)
-stable = formula["urls"]["stable"]
-print(stable["url"], stable["checksum"], sep="\t")
-PY
-)
-ca_certificates_bundle_sha256="$(shasum -a 256 "$ca_certificates_bundle" | awk '{ print $1 }')"
-if [[ -z "$ca_certificates_version" \
-    || -z "$ca_certificates_source" \
-    || -z "$ca_certificates_source_sha256" \
-    || "$ca_certificates_bundle_sha256" != "$ca_certificates_source_sha256" ]]; then
-    echo "Homebrew Mozilla CA bundle does not match its recorded formula source" >&2
-    exit 1
-fi
 {
     printf 'mpv_version=%s\n' "$MPV_VERSION"
     printf 'mpv_client_api=%s\n' "$actual_client_api"
@@ -416,18 +380,8 @@ fi
     printf 'lua_version=%s\n' "$LUA_VERSION"
     printf 'lua_source=%s\n' "$LUA_ARCHIVE_URL"
     printf 'lua_source_sha256=%s\n' "$LUA_ARCHIVE_SHA256"
-    printf 'gstreamer_version=%s\n' "$GSTREAMER_VERSION"
-    printf 'gstreamer_source_sha256=%s\n' "$GSTREAMER_SOURCE_SHA256"
-    printf 'gstreamer_profile=homebrew-bottle-curated-lgpl-runtime\n'
-    printf 'gstreamer_plugins_sha256=%s\n' "$(shasum -a 256 "$script_directory/macos-gstreamer-plugins.txt" | awk '{print $1}')"
-    printf 'ca_certificates_version=%s\n' "$ca_certificates_version"
-    printf 'ca_certificates_source=%s\n' "$ca_certificates_source"
-    printf 'ca_certificates_source_sha256=%s\n' "$ca_certificates_source_sha256"
-    printf 'ca_certificates_bundle_sha256=%s\n' "$ca_certificates_bundle_sha256"
     printf 'macos_deployment_target=%s\n' "$MACOSX_DEPLOYMENT_TARGET"
 } >"$profile_directory/build-profile.txt"
-cp "$script_directory/macos-gstreamer-plugins.txt" \
-    "$profile_directory/gstreamer-plugin-allowlist.txt"
 printf '%s\n' "$ffmpeg_configuration" \
     >"$profile_directory/ffmpeg-build-configuration.txt"
 cp "$source_directory/Copyright" \
