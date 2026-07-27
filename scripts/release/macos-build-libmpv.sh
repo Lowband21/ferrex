@@ -279,6 +279,7 @@ meson setup "$build_directory" "$source_directory" \
     -Dgl-cocoa=enabled \
     -Dwayland=disabled \
     -Dx11=disabled \
+    -Dx11-clipboard=disabled \
     -Dvulkan=enabled \
     -Dshaderc=disabled \
     -Dlcms2=disabled \
@@ -328,6 +329,7 @@ required = {
     "gl-cocoa": "enabled",
     "wayland": "disabled",
     "x11": "disabled",
+    "x11-clipboard": "disabled",
     "vulkan": "enabled",
     "shaderc": "disabled",
     "lua": "lua52",
@@ -366,6 +368,7 @@ xargs brew info --json=v2 <"$homebrew_formulae" \
     printf 'mpv_gl=enabled\n'
     printf 'mpv_wayland=disabled\n'
     printf 'mpv_x11=disabled\n'
+    printf 'mpv_x11_clipboard=disabled\n'
     printf 'mpv_vulkan=enabled\n'
     printf 'mpv_shaderc=disabled\n'
     printf 'mpv_lua=lua52\n'

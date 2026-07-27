@@ -61,6 +61,7 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "-Dgl-cocoa=enabled",
             "-Dwayland=disabled",
             "-Dx11=disabled",
+            "-Dx11-clipboard=disabled",
             "-Dvulkan=enabled",
             "-Dshaderc=disabled",
             "-Dlua=lua52",
