@@ -426,6 +426,13 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled GStreamer HLS fixture generation failed: $generateOutput"
     }
+    if (-not (Test-Path -LiteralPath $segment) -or (Get-Item -LiteralPath $segment).Length -eq 0) {
+        throw "Bundled GStreamer HLS fixture generation produced no segment"
+    }
+    # hlsdemux2's relative file-URI resolution on Windows can preserve a
+    # backslash in 8.3-style runner paths and then report the existing segment
+    # as HTTP 404. Use an explicit normalized file URI in the playlist.
+    $segmentUri = ([System.Uri]::new($segment)).AbsoluteUri.Replace('\', '/')
     $playlist = Join-Path $hlsFixtureDirectory 'stream.m3u8'
     @(
         '#EXTM3U',
@@ -433,10 +440,10 @@ try {
         '#EXT-X-TARGETDURATION:3',
         '#EXT-X-MEDIA-SEQUENCE:0',
         '#EXTINF:2.048,',
-        'segment.ts',
+        $segmentUri,
         '#EXT-X-ENDLIST'
     ) | Set-Content -Encoding ascii $playlist
-    $playlistUri = ([System.Uri]::new($playlist)).AbsoluteUri
+    $playlistUri = ([System.Uri]::new($playlist)).AbsoluteUri.Replace('\', '/')
     $playArgs = @(
         '-q', 'playbin3', "uri=$playlistUri",
         'audio-sink=fakesink', 'video-sink=fakesink'
