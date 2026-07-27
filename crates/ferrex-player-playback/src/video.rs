@@ -382,7 +382,8 @@ pub fn open_playback_session(
         fallback = Some((FallbackReasonCode::BackendDisabled, detail.into()));
     }
 
-    if cfg!(target_os = "macos") {
+    #[cfg(target_os = "macos")]
+    {
         let (code, detail) = fallback.unwrap_or((
             FallbackReasonCode::RequestedUnavailable,
             "the macOS mpv backend is unavailable".to_string(),
