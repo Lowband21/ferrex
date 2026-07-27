@@ -406,8 +406,10 @@ jobs:
             -f lavfi -i sine=frequency=440:sample_rate=48000:duration=2 \
             -c:v libx264 -pix_fmt yuv420p -c:a aac \
             -f hls -hls_time 1 -hls_list_size 0 "$fixture_dir/stream.m3u8"
-          cc -x objective-c scripts/release/macos_gstreamer_bundle_smoke.c \
+          cc -x objective-c -c scripts/release/macos_gstreamer_bundle_smoke.c \
             $(pkg-config --cflags gstreamer-1.0 gio-2.0) \
+            -o "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke.o"
+          cc "${RUNNER_TEMP}/ferrex-gstreamer-bundle-smoke.o" \
             -Wl,-rpath,"$app/Contents/Frameworks" \
             "$app/Contents/Frameworks/libgstreamer-1.0.0.dylib" \
             "$app/Contents/Frameworks/libgio-2.0.0.dylib" \

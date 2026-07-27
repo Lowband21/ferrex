@@ -136,7 +136,8 @@ class MacOSBuildProfileTests(unittest.TestCase):
             "libgio-2.0.0.dylib",
             "libgobject-2.0.0.dylib",
             "libglib-2.0.0.dylib",
-            "-x objective-c",
+            "-x objective-c -c",
+            "ferrex-gstreamer-bundle-smoke.o",
             "-framework AppKit",
         ):
             self.assertIn(expected, WORKFLOW)
