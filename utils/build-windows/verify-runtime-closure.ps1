@@ -447,9 +447,13 @@ try {
         '#EXT-X-ENDLIST'
     ) | Set-Content -Encoding ascii $playlist
     $playlistUri = ([System.Uri]::new($playlist)).AbsoluteUri.Replace('\', '/')
+    # hlsdemux2 does not reliably propagate the one-segment VOD EOS through
+    # playbin3 on Windows. Bound both sinks by decoded buffers instead: their
+    # EOS proves audio and video reached the end of the playback graph.
     $playArgs = @(
         '-q', 'playbin3', "uri=$playlistUri",
-        'audio-sink=fakesink', 'video-sink=fakesink'
+        'audio-sink=fakesink sync=false num-buffers=8',
+        'video-sink=fakesink sync=false num-buffers=8'
     )
     Write-Host 'Playing bundled GStreamer HLS fixture.'
     $playOutput = (& $gstLaunch @playArgs 2>&1) -join [Environment]::NewLine
