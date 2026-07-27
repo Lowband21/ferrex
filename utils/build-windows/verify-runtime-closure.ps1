@@ -48,9 +48,15 @@ if (-not (Test-Path $gstInspect -PathType Leaf)) {
 if (-not (Test-Path $gstLaunch -PathType Leaf)) {
     throw "Bundled GStreamer launch smoke tool is missing: $gstLaunch"
 }
-foreach ($gioModule in @('libgioopenssl.dll', 'libgiolibproxy.dll')) {
-    if (-not (Test-Path (Join-Path $gioModuleDir $gioModule) -PathType Leaf)) {
-        throw "Bundled GIO network module is missing: $gioModule"
+foreach ($gioModuleRoot in @('gioopenssl', 'giolibproxy')) {
+    $matches = @(
+        @(
+            (Join-Path $gioModuleDir "$gioModuleRoot.dll"),
+            (Join-Path $gioModuleDir "lib$gioModuleRoot.dll")
+        ) | Where-Object { Test-Path $_ -PathType Leaf }
+    )
+    if ($matches.Count -ne 1) {
+        throw "Expected exactly one bundled GIO network module for '$gioModuleRoot'; found $($matches.Count)"
     }
 }
 if (-not (Test-Path $certificateBundle -PathType Leaf)) {

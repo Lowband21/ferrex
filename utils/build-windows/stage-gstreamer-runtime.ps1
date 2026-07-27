@@ -97,8 +97,18 @@ if (-not $scanner) {
 }
 Copy-FromGStreamer $scanner (Join-Path $stageLibexec 'gst-plugin-scanner.exe')
 
-foreach ($gioModule in @('libgioopenssl.dll', 'libgiolibproxy.dll')) {
-    Copy-FromGStreamer (Join-Path $sourceGioModules $gioModule) (Join-Path $stageGioModules $gioModule)
+foreach ($gioModuleRoot in @('gioopenssl', 'giolibproxy')) {
+    $matches = @(
+        @(
+            (Join-Path $sourceGioModules "$gioModuleRoot.dll"),
+            (Join-Path $sourceGioModules "lib$gioModuleRoot.dll")
+        ) | Where-Object { Test-Path $_ -PathType Leaf }
+    )
+    if ($matches.Count -ne 1) {
+        throw "Expected exactly one official GIO module for '$gioModuleRoot'; found $($matches.Count)"
+    }
+    $gioModule = [System.IO.Path]::GetFileName($matches[0])
+    Copy-FromGStreamer $matches[0] (Join-Path $stageGioModules $gioModule)
 }
 $gioModuleCache = Join-Path $sourceGioModules 'giomodule.cache'
 if (Test-Path $gioModuleCache -PathType Leaf) {
