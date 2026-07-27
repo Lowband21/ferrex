@@ -412,8 +412,9 @@ try {
     # and playbin selection without depending on a mutable public media URL.
     New-Item -ItemType Directory -Force -Path $hlsFixtureDirectory | Out-Null
     $segment = Join-Path $hlsFixtureDirectory 'segment.ts'
+    $segmentLocation = $segment.Replace('\', '/')
     $generateArgs = @(
-        '-q', 'mpegtsmux', 'name=mux', '!', 'filesink', "location=$segment",
+        '-q', 'mpegtsmux', 'name=mux', '!', 'filesink', "location=$segmentLocation",
         'audiotestsrc', 'wave=sine', 'num-buffers=96', '!',
         'audioconvert', '!', 'audioresample', '!',
         'audio/x-raw,rate=48000,channels=2', '!', 'mfaacenc', '!',
