@@ -423,6 +423,7 @@ try {
         'video/x-raw,width=320,height=180,framerate=24/1', '!',
         'videoconvertscale', '!', 'openh264enc', '!', 'h264parse', '!', 'mux.'
     )
+    Write-Host 'Generating bundled GStreamer HLS fixture.'
     $generateOutput = (& $gstLaunch @generateArgs 2>&1) -join [Environment]::NewLine
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled GStreamer HLS fixture generation failed: $generateOutput"
@@ -440,6 +441,7 @@ try {
         '#EXT-X-VERSION:3',
         '#EXT-X-TARGETDURATION:3',
         '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXT-X-PLAYLIST-TYPE:VOD',
         '#EXTINF:2.048,',
         $segmentUri,
         '#EXT-X-ENDLIST'
@@ -449,6 +451,7 @@ try {
         '-q', 'playbin3', "uri=$playlistUri",
         'audio-sink=fakesink', 'video-sink=fakesink'
     )
+    Write-Host 'Playing bundled GStreamer HLS fixture.'
     $playOutput = (& $gstLaunch @playArgs 2>&1) -join [Environment]::NewLine
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled GStreamer HLS playback smoke failed: $playOutput"
@@ -458,6 +461,7 @@ try {
     # clean stage; factory discovery alone does not prove HTTPS can connect.
     $httpsUrl = 'https://gstreamer.freedesktop.org/data/pkg/windows/1.28.4/msvc/gstreamer-1.0-msvc-x86_64-1.28.4.exe.sha256sum'
     $httpsArgs = @('-q', 'souphttpsrc', "location=$httpsUrl", '!', 'fakesink')
+    Write-Host 'Fetching bundled GStreamer HTTPS fixture.'
     $httpsOutput = (& $gstLaunch @httpsArgs 2>&1) -join [Environment]::NewLine
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled GStreamer HTTPS smoke failed: $httpsOutput"

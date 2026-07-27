@@ -408,6 +408,7 @@ jobs:
 
       - name: Audit staged Windows runtime closure
         if: runner.os == 'Windows'
+        timeout-minutes: 5
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

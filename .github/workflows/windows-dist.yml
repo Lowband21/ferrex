@@ -205,6 +205,7 @@ jobs:
           Copy-Item -Force -Recurse (Join-Path $env:LIBMPV_ROOT 'share\\licenses\\ferrex-libmpv\\*') $notices
 
       - name: Audit staged Windows runtime closure
+        timeout-minutes: 5
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
