@@ -169,7 +169,7 @@ $manifestedNames = [System.Collections.Generic.HashSet[string]]::new(
 )
 foreach ($line in Get-Content $manifest) {
     if ([string]::IsNullOrWhiteSpace($line)) { continue }
-    if ($line -notmatch '^([0-9A-Fa-f]{64})\s+\*?([^\\/]+\.dll)$') {
+    if ($line -notmatch '^([0-9A-Fa-f]{64})\s+\*?(?:\./)?([^\\/]+\.dll)$') {
         throw "Invalid libmpv runtime-DLL manifest entry: $line"
     }
     $expected = $Matches[1]
