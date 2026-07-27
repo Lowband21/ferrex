@@ -452,7 +452,7 @@ try {
 
     # Generate and then play a tiny HLS/AAC fixture using only the stage. This
     # exercises adaptive demux, MPEG-TS, the reviewed system/BSD codec path,
-    # and playbin selection without depending on a mutable public media URL.
+    # and decoded stream output without depending on a public media URL.
     New-Item -ItemType Directory -Force -Path $hlsFixtureDirectory | Out-Null
     $segment = Join-Path $hlsFixtureDirectory 'segment.ts'
     $segmentLocation = $segment.Replace('\', '/')
@@ -491,17 +491,17 @@ try {
     ) | Set-Content -Encoding ascii $playlist
     $playlistUri = ([System.Uri]::new($playlist)).AbsoluteUri.Replace('\', '/')
     Write-Host 'Playing bundled GStreamer HLS fixture.'
-    # hlsdemux2 does not reliably propagate the one-segment VOD EOS through
-    # playbin3 on Windows. Probe each stream independently, verify that a
-    # decoded buffer reached its sink, and stop the process after 15 seconds
-    # if the demuxer keeps waiting after successful playback.
+    # Avoid playbin3's application-managed buffering state for this headless
+    # audit. Decode each HLS stream directly and require a rendered buffer.
     Invoke-GstBufferProbe -Label 'HLS audio playback' -Arguments @(
-        '-q', 'playbin3', "uri=$playlistUri", 'flags=audio',
-        'audio-sink=fakesink dump=true sync=false num-buffers=1'
+        '-q', 'uridecodebin3', "uri=$playlistUri", '!',
+        'audioconvert', '!', 'audioresample', '!',
+        'fakesink', 'dump=true', 'sync=false', 'num-buffers=1'
     )
     Invoke-GstBufferProbe -Label 'HLS video playback' -Arguments @(
-        '-q', 'playbin3', "uri=$playlistUri", 'flags=video',
-        'video-sink=fakesink dump=true sync=false num-buffers=1'
+        '-q', 'uridecodebin3', "uri=$playlistUri", '!',
+        'videoconvertscale', '!',
+        'fakesink', 'dump=true', 'sync=false', 'num-buffers=1'
     )
 
     # Exercise the dynamically loaded GIO TLS backend and CA bundle from the
