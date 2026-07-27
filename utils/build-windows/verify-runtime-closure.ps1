@@ -374,6 +374,49 @@ $oldGioModules = $env:GIO_EXTRA_MODULES
 $oldSslCertFile = $env:SSL_CERT_FILE
 $registry = Join-Path $env:TEMP "ferrex-gst-registry-$PID.bin"
 $hlsFixtureDirectory = Join-Path $env:TEMP "ferrex-gst-hls-$PID"
+
+function Invoke-GstBufferProbe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Label,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $gstLaunch
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw "Bundled GStreamer $Label probe did not start"
+    }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $exited = $process.WaitForExit(15000)
+    if (-not $exited) {
+        if (-not $process.HasExited) {
+            $process.Kill($true)
+        }
+        $process.WaitForExit()
+    }
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+
+    if (($exited -and $process.ExitCode -ne 0) -or $stderr -match '(?m)^ERROR:') {
+        throw "Bundled GStreamer $Label probe failed: $stderr"
+    }
+    if ($stdout -notmatch '(?m)^00000000 ') {
+        throw "Bundled GStreamer $Label probe produced no decoded buffer"
+    }
+}
+
 try {
     # Do not let the installer SDK exported by the build job mask a missing
     # staged dependency. Windows' normal system DLL directories remain in the
@@ -447,19 +490,19 @@ try {
         '#EXT-X-ENDLIST'
     ) | Set-Content -Encoding ascii $playlist
     $playlistUri = ([System.Uri]::new($playlist)).AbsoluteUri.Replace('\', '/')
-    # hlsdemux2 does not reliably propagate the one-segment VOD EOS through
-    # playbin3 on Windows. Bound both sinks by decoded buffers instead: their
-    # EOS proves audio and video reached the end of the playback graph.
-    $playArgs = @(
-        '-q', 'playbin3', "uri=$playlistUri",
-        'audio-sink=fakesink sync=false num-buffers=8',
-        'video-sink=fakesink sync=false num-buffers=8'
-    )
     Write-Host 'Playing bundled GStreamer HLS fixture.'
-    $playOutput = (& $gstLaunch @playArgs 2>&1) -join [Environment]::NewLine
-    if ($LASTEXITCODE -ne 0) {
-        throw "Bundled GStreamer HLS playback smoke failed: $playOutput"
-    }
+    # hlsdemux2 does not reliably propagate the one-segment VOD EOS through
+    # playbin3 on Windows. Probe each stream independently, verify that a
+    # decoded buffer reached its sink, and stop the process after 15 seconds
+    # if the demuxer keeps waiting after successful playback.
+    Invoke-GstBufferProbe -Label 'HLS audio playback' -Arguments @(
+        '-q', 'playbin3', "uri=$playlistUri", 'flags=audio',
+        'audio-sink=fakesink dump=true sync=false num-buffers=1'
+    )
+    Invoke-GstBufferProbe -Label 'HLS video playback' -Arguments @(
+        '-q', 'playbin3', "uri=$playlistUri", 'flags=video',
+        'video-sink=fakesink dump=true sync=false num-buffers=1'
+    )
 
     # Exercise the dynamically loaded GIO TLS backend and CA bundle from the
     # clean stage; factory discovery alone does not prove HTTPS can connect.
