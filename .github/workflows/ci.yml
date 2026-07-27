@@ -289,6 +289,9 @@ jobs:
           targets: ${{ matrix.target }}
           components: clippy,rustfmt
           profile: minimal
+          # The explicit actions/cache step below owns Cargo caching. Avoid
+          # setup-rust's cargo-cache helper and its external binary mirrors.
+          cache: false
 
       - name: Cache Rust/Cargo artifacts
         uses: actions/cache@v4

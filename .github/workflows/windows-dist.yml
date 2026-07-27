@@ -42,6 +42,7 @@ jobs:
           profile: minimal
           targets: ${{ env.TARGET }}
           components: clippy,rustfmt
+          cache: false
 
       - name: Cache pinned GStreamer MSVC SDK
         uses: actions/cache@v4
