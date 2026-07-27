@@ -2538,8 +2538,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "subwave_core",
- "subwave_unified",
  "sysinfo 0.37.2",
  "tempfile",
  "thiserror 2.0.18",

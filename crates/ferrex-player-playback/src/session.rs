@@ -17,6 +17,8 @@ use crate::contract::PresenterEvent;
     any(target_os = "windows", target_os = "macos")
 ))]
 use crate::native_presentation::NativePresentation;
+#[cfg(not(target_os = "macos"))]
+use crate::subwave_adapter::SubwavePlaybackAdapter;
 use crate::{
     contract::{
         BackendRequest, ChapterId, EditionId, PlaybackCommand, PlaybackError,
@@ -24,7 +26,6 @@ use crate::{
         PlaybackSnapshot, TrackCatalog, TrackId, VideoProfileName,
     },
     diagnostics::PlaybackDiagnosticSnapshot,
-    subwave_adapter::SubwavePlaybackAdapter,
 };
 #[cfg(feature = "mpv")]
 use crate::{
@@ -77,6 +78,7 @@ impl PlaybackShutdownBarrier {
 }
 
 enum BackendSession {
+    #[cfg(not(target_os = "macos"))]
     Subwave(Box<SubwavePlaybackAdapter>),
     #[cfg(feature = "mpv")]
     Mpv(Box<MpvBackendSession>),
@@ -522,6 +524,7 @@ impl PlaybackSession {
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn from_subwave(
         adapter: SubwavePlaybackAdapter,
         requested_backend: BackendRequest,
@@ -552,6 +555,7 @@ impl PlaybackSession {
 
     pub fn snapshot(&self) -> &PlaybackSnapshot {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.snapshot(),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(adapter) => adapter.snapshot(),
@@ -561,6 +565,7 @@ impl PlaybackSession {
     /// Redacted backend, lifecycle, version, and native-output observations.
     pub fn diagnostics(&self) -> PlaybackDiagnosticSnapshot {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => {
                 adapter.diagnostics(self.requested_backend)
             }
@@ -576,6 +581,7 @@ impl PlaybackSession {
         command: PlaybackCommand,
     ) -> Result<(), PlaybackError> {
         match &mut self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.apply_command(command),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(adapter) => adapter.apply_command(command),
@@ -588,6 +594,7 @@ impl PlaybackSession {
         &mut self,
     ) -> Result<Option<PlaybackShutdownBarrier>, PlaybackError> {
         match &mut self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => {
                 adapter.apply_command(PlaybackCommand::Shutdown)?;
                 Ok(None)
@@ -604,6 +611,7 @@ impl PlaybackSession {
 
     pub fn synchronize_snapshot(&mut self) {
         match &mut self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => {
                 adapter.synchronize_core_properties();
             }
@@ -614,6 +622,7 @@ impl PlaybackSession {
 
     pub fn refresh_tracks(&mut self) -> TrackCatalog {
         match &mut self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.refresh_tracks(),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(adapter) => adapter.refresh_tracks(),
@@ -664,6 +673,7 @@ impl PlaybackSession {
 
     pub fn set_subtitles_enabled(&mut self, enabled: bool) {
         match &mut self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => {
                 adapter.set_subtitles_enabled(enabled);
             }
@@ -676,6 +686,7 @@ impl PlaybackSession {
 
     pub fn subtitles_enabled(&self) -> bool {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.subtitles_enabled(),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(adapter) => adapter.subtitles_enabled(),
@@ -760,6 +771,7 @@ impl PlaybackSession {
 
     pub fn has_video(&self) -> bool {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.has_video(),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(adapter) => adapter.has_video(),
@@ -770,6 +782,7 @@ impl PlaybackSession {
     /// represent a generic playback capability.
     pub fn is_appsink(&self) -> bool {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.is_appsink(),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(_) => false,
@@ -778,6 +791,7 @@ impl PlaybackSession {
 
     pub fn uses_wayland_surface(&self) -> bool {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.uses_wayland_surface(),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(_) => false,
@@ -786,6 +800,7 @@ impl PlaybackSession {
 
     pub fn toggle_diagnostic_backend(&mut self) -> Result<(), PlaybackError> {
         match &mut self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => {
                 adapter.toggle_diagnostic_backend()
             }
@@ -799,6 +814,7 @@ impl PlaybackSession {
 
     pub fn force_appsink(&mut self) -> Result<(), PlaybackError> {
         match &mut self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.force_appsink(),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(_) => Err(PlaybackError::new(
@@ -811,6 +827,7 @@ impl PlaybackSession {
     /// Backend-neutral readiness signal for copied asynchronous events.
     pub fn event_signal(&self) -> Option<PlaybackEventSignal> {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(_) => None,
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(adapter) => Some(adapter.event_signal()),
@@ -821,6 +838,7 @@ impl PlaybackSession {
     /// migration-only bounded legacy synchronization timer.
     pub fn uses_event_driven_snapshots(&self) -> bool {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(_) => false,
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(_) => true,
@@ -954,6 +972,7 @@ impl PlaybackSession {
         Theme: 'a,
     {
         match &self.backend {
+            #[cfg(not(target_os = "macos"))]
             BackendSession::Subwave(adapter) => adapter.widget(content_fit),
             #[cfg(feature = "mpv")]
             BackendSession::Mpv(adapter) => {

@@ -3,18 +3,21 @@
 //! This module coordinates the unified video backend, stream URL redaction,
 //! loading flags, and playback state transitions around media file playback.
 
+#[cfg(not(target_os = "macos"))]
+use crate::contract::FallbackReason;
 #[cfg(feature = "mpv")]
 use crate::mpv_adapter::MpvPlaybackAdapter;
+#[cfg(not(target_os = "macos"))]
+use crate::subwave_adapter::SubwavePlaybackAdapter;
 use crate::{
     PlayerMessage,
     contract::{
-        BackendKind, BackendRequest, FallbackReason, FallbackReasonCode,
-        PlaybackCommand, PlaybackContentFit, PlaybackError, PlaybackErrorKind,
-        PlaybackSource, PlaybackTarget, SessionGeneration,
+        BackendKind, BackendRequest, FallbackReasonCode, PlaybackCommand,
+        PlaybackContentFit, PlaybackError, PlaybackErrorKind, PlaybackSource,
+        PlaybackTarget, SessionGeneration,
     },
     session::{PlaybackSession, PlaybackShutdownBarrier},
     state::PlayerDomainState,
-    subwave_adapter::SubwavePlaybackAdapter,
     update::{PlaybackUiShell, PlaybackUpdatePort},
 };
 
@@ -400,16 +403,20 @@ pub fn open_playback_session(
         return Err(error);
     }
 
-    let mut adapter = SubwavePlaybackAdapter::open(source, start, generation)?;
-    if let Some((code, detail)) = fallback {
-        adapter.record_fallback(FallbackReason {
-            code,
-            from: requested_mpv_target,
-            to: adapter.snapshot().target,
-            detail,
-        });
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut adapter =
+            SubwavePlaybackAdapter::open(source, start, generation)?;
+        if let Some((code, detail)) = fallback {
+            adapter.record_fallback(FallbackReason {
+                code,
+                from: requested_mpv_target,
+                to: adapter.snapshot().target,
+                detail,
+            });
+        }
+        Ok(PlaybackSession::from_subwave(adapter, request))
     }
-    Ok(PlaybackSession::from_subwave(adapter, request))
 }
 
 fn requested_mpv_target(

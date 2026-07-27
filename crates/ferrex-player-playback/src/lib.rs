@@ -42,6 +42,7 @@ pub mod presenter;
 pub mod session;
 /// Playback state container and notification DTOs.
 pub mod state;
+#[cfg(not(target_os = "macos"))]
 mod subwave_adapter;
 /// Playback UI theme helpers.
 #[cfg(feature = "ui")]
