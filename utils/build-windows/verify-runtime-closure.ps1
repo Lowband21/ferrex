@@ -380,7 +380,8 @@ function Invoke-GstBufferProbe {
         [Parameter(Mandatory = $true)]
         [string]$Label,
         [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [int]$ExpectedBuffers = 1
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -412,8 +413,9 @@ function Invoke-GstBufferProbe {
     if (($exited -and $process.ExitCode -ne 0) -or $stderr -match '(?m)^ERROR:') {
         throw "Bundled GStreamer $Label probe failed: $stderr"
     }
-    if ($stdout -notmatch '(?m)^00000000 ') {
-        throw "Bundled GStreamer $Label probe produced no decoded buffer"
+    $bufferCount = [regex]::Matches($stdout, '(?m)^00000000 ').Count
+    if ($bufferCount -lt $ExpectedBuffers) {
+        throw "Bundled GStreamer $Label probe produced $bufferCount of $ExpectedBuffers decoded buffers"
     }
 }
 
@@ -492,15 +494,13 @@ try {
     $playlistUri = ([System.Uri]::new($playlist)).AbsoluteUri.Replace('\', '/')
     Write-Host 'Playing bundled GStreamer HLS fixture.'
     # Avoid playbin3's application-managed buffering state for this headless
-    # audit. Decode each HLS stream directly and require a rendered buffer.
-    Invoke-GstBufferProbe -Label 'HLS audio playback' -Arguments @(
-        '-q', 'uridecodebin3', "uri=$playlistUri", '!',
-        'audioconvert', '!', 'audioresample', '!',
-        'fakesink', 'dump=true', 'sync=false', 'num-buffers=1'
-    )
-    Invoke-GstBufferProbe -Label 'HLS video playback' -Arguments @(
-        '-q', 'uridecodebin3', "uri=$playlistUri", '!',
-        'videoconvertscale', '!',
+    # audit. Link both adaptive-demux outputs so neither can fail unlinked,
+    # then require one decoded audio buffer and one decoded video buffer.
+    Invoke-GstBufferProbe -Label 'HLS playback' -ExpectedBuffers 2 -Arguments @(
+        '-q', 'uridecodebin3', "uri=$playlistUri", 'name=decoder',
+        'decoder.', '!', 'queue', '!', 'audioconvert', '!', 'audioresample', '!',
+        'fakesink', 'dump=true', 'sync=false', 'num-buffers=1',
+        'decoder.', '!', 'queue', '!', 'videoconvertscale', '!',
         'fakesink', 'dump=true', 'sync=false', 'num-buffers=1'
     )
 
