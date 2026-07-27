@@ -3,14 +3,21 @@ name: Windows Dist
 on:
   workflow_dispatch:
     inputs:
-      gstreamer_version:
-        description: "GStreamer version (MSVC; newest official installer is 1.28.3)"
-        default: "1.28.3"
-        required: true
       profile:
         description: "Cargo profile"
         default: "release"
         required: true
+      presenter_mode:
+        description: "Native presenter build mode"
+        type: choice
+        default: "spike"
+        required: true
+        options:
+          - spike
+          - disabled
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -21,6 +28,10 @@ jobs:
     runs-on: windows-latest
     env:
       TARGET: x86_64-pc-windows-msvc
+      # The handoff procedure builds both the explicit presenter path and its
+      # closure-identical disabled control artifact. Tag builds always use the
+      # disabled release mode until representative hardware approves the spike.
+      FERREX_MPV_WINDOWS_PRESENTER: ${{ github.event_name == 'workflow_dispatch' && inputs.presenter_mode || 'disabled' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -31,14 +42,87 @@ jobs:
           profile: minimal
           targets: ${{ env.TARGET }}
           components: clippy,rustfmt
+          cache: false
 
-      - name: Setup GStreamer (Windows)
-        uses: marcpabst/setup-gstreamer@v.1.5.3
+      - name: Cache pinned GStreamer MSVC SDK
+        uses: actions/cache@v4
         with:
-          # Official MSVC installers currently stop at 1.28.3, so Windows
-          # bundles intentionally trail the 1.28.4 source/Nix/Flatpak pin.
-          version: "${{ github.event.inputs.gstreamer_version || '1.28.3' }}"
-          arch: x86_64
+          path: ${{ runner.temp }}\gstreamer-msvc-x86_64
+          key: windows-gstreamer-msvc-1.28.4-1a745d67225e4339
+
+      - name: Install pinned GStreamer MSVC SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'gstreamer-msvc-x86_64'
+          & .\utils\build-windows\install-gstreamer.ps1 -Destination $root
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG=$root\bin\pkg-config.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path $root 'bin') | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Setup MSYS2 UCRT64 for pinned libmpv
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel
+            autoconf-archive
+            git
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-mako
+            mingw-w64-ucrt-x86_64-python-jinja
+            mingw-w64-ucrt-x86_64-python-glad
+            mingw-w64-ucrt-x86_64-harfbuzz
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-fribidi
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-lcms2
+            mingw-w64-ucrt-x86_64-shaderc
+            mingw-w64-ucrt-x86_64-spirv-cross
+            mingw-w64-ucrt-x86_64-xxhash
+            mingw-w64-ucrt-x86_64-zlib
+
+      - name: Cache pinned LGPL libmpv SDK
+        uses: actions/cache@v4
+        with:
+          path: C:\ferrex-libmpv-sdk
+          key: windows-libmpv-lgpl-${{ hashFiles('utils/build-windows/build-libmpv-lgpl.sh') }}
+
+      - name: Build pinned LGPL libmpv SDK
+        shell: msys2 {0}
+        run: |
+          if [[ ! -f /c/ferrex-libmpv-sdk/share/licenses/ferrex-libmpv/BUILD_PROFILE ]]; then
+            ./utils/build-windows/build-libmpv-lgpl.sh /c/ferrex-libmpv-sdk
+          fi
+
+      - name: Enter MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate MSVC import library and export libmpv paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'C:\ferrex-libmpv-sdk'
+          & .\utils\build-windows\new-libmpv-import-library.ps1 -SdkRoot $root
+          $dll = Get-ChildItem (Join-Path $root 'bin') -File |
+            Where-Object { $_.Name -in @('libmpv-2.dll', 'mpv-2.dll', 'mpv.dll') } |
+            Select-Object -First 1
+          if (-not $dll) { throw "libmpv runtime DLL missing from $root\bin" }
+          "LIBMPV_ROOT=$root" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBMPV_LIB_DIR=$(Join-Path $root 'lib')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBMPV_INCLUDE_DIR=$(Join-Path $root 'include')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBMPV_DLL_DIR=$(Join-Path $root 'bin')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBMPV_DLL=$($dll.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path $root 'bin') | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Show pkg-config
         shell: pwsh
@@ -51,11 +135,15 @@ jobs:
           "gst-app:     $(pkg-config --modversion gstreamer-app-1.0)" | Write-Host
           "gst-video:   $(pkg-config --modversion gstreamer-video-1.0)" | Write-Host
 
+      - name: Check backend-disabled rollback build
+        shell: pwsh
+        run: cargo check -p ferrex-player --no-default-features --target $env:TARGET
+
       - name: Build ferrex-player (release)
         shell: pwsh
         run: |
           $profile = if ('${{ github.event.inputs.profile }}') { '${{ github.event.inputs.profile }}' } else { 'release' }
-          cargo build -p ferrex-player --target $env:TARGET --profile $profile
+          cargo build -p ferrex-player --features mpv --target $env:TARGET --profile $profile
 
       - name: Stage distribution folder
         shell: pwsh
@@ -65,7 +153,8 @@ jobs:
           $stage  = Join-Path $root 'dist-windows'
           $bin    = Join-Path $stage 'bin'
           $libg   = Join-Path $stage 'lib\\gstreamer-1.0'
-          New-Item -ItemType Directory -Force -Path $stage, $bin, $libg | Out-Null
+          $libexec = Join-Path $stage 'libexec\\gstreamer-1.0'
+          New-Item -ItemType Directory -Force -Path $stage, $bin, $libg, $libexec | Out-Null
 
           # Copy launcher scripts and README from repo
           Copy-Item -Force utils\\build-windows\\run-ferrex.bat $stage
@@ -76,20 +165,52 @@ jobs:
           $exe = Join-Path $root "target\\$env:TARGET\\${{ github.event.inputs.profile || 'release' }}\\ferrex-player.exe"
           if (-not (Test-Path $exe)) { throw "Built executable not found: $exe" }
           Copy-Item -Force $exe (Join-Path $stage 'ferrex-player.exe')
+          $buildMetadata = Join-Path $stage 'share\\ferrex-player'
+          New-Item -ItemType Directory -Force -Path $buildMetadata | Out-Null
+          $env:FERREX_MPV_WINDOWS_PRESENTER | Set-Content (Join-Path $buildMetadata 'PRESENTER_BUILD_MODE')
 
-          # Bundle GStreamer runtime and plugins from official SDK installed by the action
+          # Stage the complete hashed libmpv closure first. When an imported
+          # basename is shared, the reviewed libmpv build remains authoritative
+          # and the clean GStreamer registry smoke below proves compatibility.
+          Copy-Item -Force (Join-Path $env:LIBMPV_ROOT 'bin\\*.dll') $bin
+
+          # Bundle only the reviewed GStreamer roots and their recursive PE
+          # import closure. The official installer contains restricted/GPL
+          # components that must never be copied wholesale.
           $gstroot = $env:GSTREAMER_1_0_ROOT_MSVC_X86_64
           if (-not $gstroot) { throw 'GSTREAMER_1_0_ROOT_MSVC_X86_64 not set' }
+          $pluginRoots = Join-Path $root 'utils\\build-windows\\gstreamer-plugin-roots.txt'
+          & .\\utils\\build-windows\\stage-gstreamer-runtime.ps1 -SourceRoot $gstroot -StageRoot $stage -PluginManifest $pluginRoots
 
-          # Core DLLs
-          Copy-Item -Force -Recurse (Join-Path $gstroot 'bin\\*.dll') $bin
-          # Plugins
-          Copy-Item -Force -Recurse (Join-Path $gstroot 'lib\\gstreamer-1.0\\*.dll') $libg
+          $gstLicenseSource = @(
+            (Join-Path $gstroot 'share\\licenses'),
+            (Join-Path $gstroot 'share\\gstreamer-1.0\\licenses')
+          ) | Where-Object { Test-Path $_ -PathType Container } | Select-Object -First 1
+          if (-not $gstLicenseSource) { throw 'GStreamer license directory is missing' }
+          $gstNotices = Join-Path $stage 'share\\licenses\\gstreamer'
+          New-Item -ItemType Directory -Force -Path $gstNotices | Out-Null
+          Copy-Item -Force -Recurse (Join-Path $gstLicenseSource '*') $gstNotices
+          @(
+            'gstreamer=1.28.4',
+            'abi=msvc-x86_64',
+            'installer_sha256=1a745d67225e43394a4a5db929c97397cb56e74b1c38bb77c6ded4b037d3c040',
+            'plugin_policy=explicit-recursive-pe-v1',
+            'codec_policy=openh264-mediafoundation-v1',
+            "plugin_roots_sha256=$((Get-FileHash $pluginRoots -Algorithm SHA256).Hash.ToLowerInvariant())"
+          ) | Set-Content (Join-Path $gstNotices 'FERREX_BUILD_PROFILE')
 
-          # Optional: include inspection tool for debugging
-          if (Test-Path (Join-Path $gstroot 'bin\\gst-inspect-1.0.exe')) {
-            Copy-Item -Force (Join-Path $gstroot 'bin\\gst-inspect-1.0.exe') $bin
-          }
+          # Bundle the complete hashed libmpv DLL closure and corresponding
+          # source/runtime notices from the pinned SDK.
+          $notices = Join-Path $stage 'share\\licenses\\ferrex-libmpv'
+          New-Item -ItemType Directory -Force -Path $notices | Out-Null
+          Copy-Item -Force -Recurse (Join-Path $env:LIBMPV_ROOT 'share\\licenses\\ferrex-libmpv\\*') $notices
+
+      - name: Audit staged Windows runtime closure
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\\utils\\build-windows\\verify-runtime-closure.ps1 -StageRoot .\\dist-windows
 
       - name: Create zip artifact
         shell: pwsh
@@ -97,7 +218,8 @@ jobs:
           $stamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
           $version = (Get-Content -Raw Cargo.toml | Select-String -Pattern 'version\s*=\s*"([0-9A-Za-z\.-]+)"' -AllMatches).Matches | ForEach-Object { $_.Groups[1].Value } | Select-Object -First 1
           if (-not $version) { $version = '0.1.0' }
-          $zip = "ferrex-player_windows_${version}_$stamp.zip"
+          $mode = $env:FERREX_MPV_WINDOWS_PRESENTER
+          $zip = "ferrex-player_windows_${version}_${mode}_$stamp.zip"
           Compress-Archive -Path 'dist-windows/*' -DestinationPath $zip -Force
           "Artifact: $zip" | Write-Host
           (Get-FileHash $zip -Algorithm SHA256).Hash | Write-Host
@@ -106,11 +228,14 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ferrex-player-windows
+          name: ferrex-player-windows-${{ env.FERREX_MPV_WINDOWS_PRESENTER }}
           path: ${{ env.ZIP_FILE }}
 
       - name: Attach artifact to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        # The presenter spike is a retained QA artifact until representative
+        # hardware approval; only the disabled control may become a release
+        # attachment in the meantime.
+        if: startsWith(github.ref, 'refs/tags/v') && env.FERREX_MPV_WINDOWS_PRESENTER == 'disabled'
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: true

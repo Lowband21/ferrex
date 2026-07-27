@@ -84,13 +84,6 @@ lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git"
   "iced",
 ] }
 
-# Unified video abstraction based on subwave
-# subwave_unified = { git = "https://github.com/Lowband21/subwave.git" }
-# subwave_core = { git = "https://github.com/Lowband21/subwave.git" }
-
-subwave_unified = { git = "https://github.com/Lowband21/subwave.git", branch = "main" }
-subwave_core = { git = "https://github.com/Lowband21/subwave.git", branch = "main" }
-
 # Async runtime
 tokio.workspace = true
 async-trait.workspace = true
@@ -201,6 +194,7 @@ num-bigint = "0.4.6"
 
 [features]
 default = []
+mpv = ["ferrex-player-playback/mpv"]
 legacy-settings = []
 iced_tester = ["iced/tester"]
 hot = ["iced/hot"]
@@ -238,3 +232,11 @@ iced_runtime = { git = "https://github.com/Lowband21/iced-ferrex.git", package =
 #[[bench]]
 #name = "grid_rendering_bench"
 #harness = false
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The native presenter must preserve real controller input while the Iced view
+# is hosted inside mpv's AppKit window. Keep the runtime dependency macOS-only
+# so other desktop targets retain their existing input stacks.
+# gilrs-core 0.6.8's Windows feature guard is not target-gated, so retain the
+# default feature on Darwin; Cargo still excludes its Windows-only dependency.
+gilrs = "0.11.2"

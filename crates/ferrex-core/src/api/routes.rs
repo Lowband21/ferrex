@@ -260,6 +260,16 @@ pub mod v1 {
             v1_path!("/stream/{media_type}/{id}/progress");
     }
 
+    pub mod transcode {
+        /// Start or reuse one server-generated HLS quality rendition.
+        pub const START: &str = v1_path!("/transcode/{id}");
+        /// Inspect a job created by the authenticated user.
+        pub const STATUS: &str = v1_path!("/transcode/jobs/{job_id}");
+        /// Protected HLS manifest/segment delivery. `asset` is one safe file
+        /// name, never an arbitrary path.
+        pub const ASSET: &str = v1_path!("/transcode/{id}/{profile}/{asset}");
+    }
+
     pub mod sync {
         pub const WEBSOCKET: &str = v1_path!("/sync/ws");
     }

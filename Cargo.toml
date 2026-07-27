@@ -12,6 +12,7 @@ members = [
   "crates/ferrex-player-library",
   "crates/ferrex-player-media",
   "crates/ferrex-player-metadata",
+  "crates/ferrex-player-mpv",
   "crates/ferrex-player-playback",
   "crates/ferrex-player-search",
   "crates/ferrex-player-settings",
@@ -98,6 +99,10 @@ version = "0.1.2-alpha"
 path = "crates/ferrex-player-metadata"
 version = "0.1.2-alpha"
 
+[workspace.dependencies.ferrex-player-mpv]
+path = "crates/ferrex-player-mpv"
+version = "0.1.2-alpha"
+
 [workspace.dependencies.ferrex-player-playback]
 path = "crates/ferrex-player-playback"
 version = "0.1.2-alpha"
@@ -132,6 +137,7 @@ tokio = { version = "1.48", default-features = false, features = [
   "rt-multi-thread",
   "macros",
   "parking_lot",
+  "sync",
   "time",
   "process",
 ] }
@@ -348,6 +354,7 @@ iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" 
 iced_core = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_core" }
 iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_widget" }
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_wgpu" }
+winit = { path = "third-party/winit-0.30.13-ferrex" }
 
 [patch."https://github.com/iced-rs/iced.git"]
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }

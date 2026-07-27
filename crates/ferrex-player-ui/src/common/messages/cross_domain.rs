@@ -18,6 +18,17 @@ use crate::{
 };
 use iced::Task;
 
+/// Return the retained application-shell window.
+///
+/// Window-management events in this module describe the shell, not whichever
+/// Iced window happened to be allocated most recently. In particular, the
+/// macOS native-mpv controls host is deliberately a hidden donor window whose
+/// view is reparented into mpv's root. Selecting it via `window::latest()` would
+/// mutate that donor instead of the user-visible root.
+fn main_window_id(state: &State) -> Option<iced::window::Id> {
+    state.windows.get(ui::windows::WindowKind::Main)
+}
+
 #[cfg_attr(
     any(
         feature = "profile-with-puffin",
@@ -284,11 +295,15 @@ pub fn handle_event(
 
             let duration_hint = watch_duration_hint.or(metadata_duration_hint);
 
-            // Seed player state with progress hints so UI can update immediately
-            state.domains.player.state.last_valid_position =
-                resume_opt.map(|pos| pos as f64).unwrap_or(0.0);
-            state.domains.player.state.last_valid_duration =
-                duration_hint.unwrap_or(0.0);
+            // Seed an unowned projection for immediate UI feedback. A visible
+            // or not-yet-proven-absent root keeps ownership of `last_valid_*`
+            // until its terminal checkpoint has been attributed.
+            if !state.domains.player.state.has_observable_playback_root() {
+                state.domains.player.state.last_valid_position =
+                    resume_opt.map(|pos| pos as f64).unwrap_or(0.0);
+                state.domains.player.state.last_valid_duration =
+                    duration_hint.unwrap_or(0.0);
+            }
 
             // Store resume position so the player picks it up during PlayMediaWithId
             state.domains.media.state.pending_resume_position = resume_opt;
@@ -314,11 +329,14 @@ pub fn handle_event(
         // Window management events
         CrossDomainEvent::HideWindow => {
             log::info!("[CrossDomain] Hide window requested");
-            iced::window::latest().and_then(|id| {
-                log::info!("Hiding window with id: {:?}", id);
-                //iced::window::set_mode(id, iced::window::Mode::Fullscreen)
-                iced::window::minimize(id, true)
-            })
+            let Some(id) = main_window_id(state) else {
+                log::warn!(
+                    "[CrossDomain] Cannot hide shell: main window is not registered"
+                );
+                return Task::none();
+            };
+            log::info!("Hiding main window with id: {:?}", id);
+            iced::window::minimize(id, true)
         }
 
         CrossDomainEvent::RestoreWindow(fullscreen) => {
@@ -326,30 +344,98 @@ pub fn handle_event(
                 "[CrossDomain] Restore window requested (fullscreen: {})",
                 fullscreen
             );
-            let minimize_task = iced::window::latest().and_then(|id| {
-                log::info!("Hiding window with id: {:?}", id);
-                //iced::window::set_mode(id, iced::window::Mode::Fullscreen)
-                iced::window::minimize(id, true)
-            });
-
+            let Some(id) = main_window_id(state) else {
+                log::warn!(
+                    "[CrossDomain] Cannot restore shell: main window is not registered"
+                );
+                return Task::none();
+            };
             let mode = if fullscreen {
                 iced::window::Mode::Fullscreen
             } else {
                 iced::window::Mode::Windowed
             };
-            let restore_task = iced::window::latest().and_then(move |id| {
-                log::info!("Re storing window {:?} to mode: {:?}", id, mode);
-                iced::window::set_mode(id, mode)
-            });
-            Task::batch(vec![minimize_task, restore_task])
+            log::info!("Restoring main window {:?} to mode: {:?}", id, mode);
+            iced::window::set_mode(id, mode)
+                .chain(iced::window::minimize(id, false))
+                .chain(iced::window::gain_focus(id))
         }
 
         CrossDomainEvent::SetWindowMode(mode) => {
             log::info!("[CrossDomain] Set window mode: {:?}", mode);
-            iced::window::latest().and_then(move |id| {
-                log::info!("Setting window {:?} to mode: {:?}", id, mode);
-                iced::window::set_mode(id, mode)
-            })
+            let Some(id) = main_window_id(state) else {
+                log::warn!(
+                    "[CrossDomain] Cannot set shell mode: main window is not registered"
+                );
+                return Task::none();
+            };
+            log::info!("Setting main window {:?} to mode: {:?}", id, mode);
+            iced::window::set_mode(id, mode)
+        }
+
+        CrossDomainEvent::BeginIntegratedPlayback { request } => {
+            log::info!(
+                "[CrossDomain] Resolved integrated source ready; ordering shell hide before backend open"
+            );
+            ui::windows::controller::begin_integrated_playback(state, request)
+                .task
+        }
+
+        CrossDomainEvent::BeginExternalPlayback { request } => {
+            log::info!(
+                "[CrossDomain] Resolved external source ready; ordering donor close and shell hide before process spawn"
+            );
+            ui::windows::controller::begin_external_playback(state, request)
+                .task
+        }
+
+        CrossDomainEvent::ExternalPlaybackLaunchFailed { request } => {
+            log::warn!(
+                "[CrossDomain] External process launch failed; restoring matching shell owner before fallback"
+            );
+            ui::windows::controller::recover_external_playback_launch(
+                state, request,
+            )
+            .task
+        }
+
+        CrossDomainEvent::NativePresenterAttached { request } => {
+            log::info!(
+                "[CrossDomain] Native presenter attached; activating player overlay"
+            );
+            ui::windows::controller::activate_player_overlay(state, request)
+                .task
+        }
+
+        CrossDomainEvent::NativePresenterUnavailable {
+            request,
+            effective_target,
+        } => {
+            log::warn!(
+                "[CrossDomain] Native presenter unavailable; applying effective-target shell disposition: {:?}",
+                effective_target
+            );
+            if effective_target
+                == ferrex_player_playback::contract::PlaybackTarget::MPV_NATIVE_WINDOW
+            {
+                ui::windows::controller::dismiss_player_overlay_for_native_fallback(
+                    state, request,
+                )
+                .task
+            } else {
+                ui::windows::controller::dismiss_player_overlay(
+                    state,
+                    Some(request),
+                )
+                .task
+            }
+        }
+
+        CrossDomainEvent::PlaybackExited { request } => {
+            log::info!(
+                "[CrossDomain] Playback exited; restoring the retained main window"
+            );
+            ui::windows::controller::dismiss_player_overlay(state, request).task
         }
 
         // Media playback events
@@ -631,4 +717,250 @@ fn handle_library_refresh_request(state: &State) -> Task<DomainMessage> {
 /// trying to send messages to other domains directly.
 pub fn emit_event(event: CrossDomainEvent) -> Task<DomainMessage> {
     Task::done(DomainMessage::Event(event))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrex_core::player_prelude::{
+        LibraryId, MediaFile, MediaID, MovieID, UserWatchState,
+    };
+    use ferrex_player_playback::{
+        contract::SessionGeneration,
+        messages::PlayerMessage as PlaybackPlayerMessage,
+    };
+    use iced_runtime::{
+        Action, futures::futures::StreamExt, task,
+        window::Action as WindowAction,
+    };
+
+    async fn output_messages(
+        task_to_inspect: Task<DomainMessage>,
+    ) -> Vec<DomainMessage> {
+        let Some(stream) = task::into_stream(task_to_inspect) else {
+            return Vec::new();
+        };
+
+        stream
+            .filter_map(|action| async move {
+                match action {
+                    Action::Output(message) => Some(message),
+                    _ => None,
+                }
+            })
+            .collect()
+            .await
+    }
+
+    async fn window_actions(
+        task_to_inspect: Task<DomainMessage>,
+    ) -> Vec<WindowAction> {
+        let Some(stream) = task::into_stream(task_to_inspect) else {
+            return Vec::new();
+        };
+
+        stream
+            .filter_map(|action| async move {
+                match action {
+                    Action::Window(action) => Some(action),
+                    _ => None,
+                }
+            })
+            .collect()
+            .await
+    }
+
+    fn assert_targets_main(action: &WindowAction, main: iced::window::Id) {
+        let target = match action {
+            WindowAction::Minimize(id, _)
+            | WindowAction::SetMode(id, _)
+            | WindowAction::GainFocus(id) => *id,
+            _ => panic!("unexpected root-window action emitted by test"),
+        };
+        assert_eq!(target, main);
+    }
+
+    fn test_media_file(name: &str) -> (MediaFile, MediaID) {
+        let movie_id = MovieID::new_uuid();
+        let media_id = MediaID::Movie(movie_id);
+        (
+            MediaFile {
+                id: movie_id.to_uuid(),
+                media_id,
+                path: std::path::PathBuf::from(format!("/tmp/{name}.mkv")),
+                filename: format!("{name}.mkv"),
+                size: 1,
+                discovered_at: ferrex_core::types::chrono::Utc::now(),
+                created_at: ferrex_core::types::chrono::Utc::now(),
+                media_file_metadata: None,
+                library_id: LibraryId::new(),
+            },
+            media_id,
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn normal_play_defers_donor_allocation_to_the_shell_handoff() {
+        let mut state = State::default();
+        let (media, media_id) = test_media_file("macos-auto");
+
+        let routed = output_messages(handle_event(
+            &mut state,
+            CrossDomainEvent::MediaPlayWithId(media, media_id),
+        ))
+        .await;
+
+        assert!(matches!(
+            routed.as_slice(),
+            [DomainMessage::Player(
+                PlaybackPlayerMessage::PlayMediaWithId(_, routed_id)
+            )] if *routed_id == media_id
+        ));
+        assert!(
+            state
+                .windows
+                .get(crate::domains::ui::windows::WindowKind::PlayerOverlay)
+                .is_none()
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn replacement_hint_cannot_relabel_visible_external_checkpoint() {
+        let mut state = State::default();
+        let (old_media, old_media_id) = test_media_file("external-old");
+        let old_request =
+            state.domains.player.state.begin_playback_request().unwrap();
+        assert!(
+            state
+                .domains
+                .player
+                .state
+                .resolve_playback_request(old_request)
+        );
+        assert!(
+            state
+                .domains
+                .player
+                .state
+                .request_external_playback(old_request)
+        );
+        state.domains.player.state.current_media = Some(old_media);
+        state.domains.player.state.current_media_id = Some(old_media_id);
+        state.domains.player.state.begin_external_playback(
+            old_request,
+            Some(old_media_id),
+            SessionGeneration::new(3),
+            0.0,
+            100.0,
+            false,
+        );
+        state.domains.player.state.last_valid_position = 0.0;
+        state.domains.player.state.last_valid_duration = 100.0;
+
+        let (replacement, replacement_id) =
+            test_media_file("external-replacement");
+        let mut watch_state = UserWatchState::new();
+        watch_state.update_progress(*replacement_id.as_uuid(), 25.0, 100.0);
+        state.domains.media.state.user_watch_state = Some(watch_state);
+
+        let routed = output_messages(handle_event(
+            &mut state,
+            CrossDomainEvent::MediaPlayWithId(replacement, replacement_id),
+        ))
+        .await;
+        assert_eq!(state.domains.player.state.last_valid_position, 0.0);
+        assert_eq!(state.domains.player.state.last_valid_duration, 100.0);
+        assert_eq!(
+            state.domains.player.state.pending_resume_position,
+            Some(25.0)
+        );
+
+        let play = routed
+            .into_iter()
+            .find_map(|message| match message {
+                DomainMessage::Player(message) => Some(message),
+                _ => None,
+            })
+            .expect("cross-domain route must emit the player request");
+        let replacement_update =
+            crate::domains::player::update::update_player(&mut state, play);
+        assert!(replacement_update.events.is_empty());
+        assert_eq!(
+            state.domains.player.state.external_playback_request,
+            Some(old_request)
+        );
+        assert_eq!(state.domains.player.state.last_valid_position, 0.0);
+        assert_eq!(state.domains.player.state.last_valid_duration, 100.0);
+
+        let stopped = crate::domains::player::update::update_player(
+            &mut state,
+            PlaybackPlayerMessage::Stop,
+        );
+        let stop_outputs = output_messages(stopped.task).await;
+        assert!(stop_outputs.iter().any(|message| {
+            matches!(
+                message,
+                DomainMessage::Media(
+                    crate::domains::media::messages::MediaMessage::SendProgressUpdateWithData(
+                        media_id,
+                        position,
+                        duration,
+                    )
+                ) if *media_id == old_media_id
+                    && *position == 0.0
+                    && *duration == 100.0
+            )
+        }));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shell_root_mutators_never_select_player_overlay() {
+        let mut state = State::default();
+        let main = iced::window::Id::unique();
+        let overlay = iced::window::Id::unique();
+        state.windows.set(ui::windows::WindowKind::Main, main);
+        // Register and focus the overlay last: this is the exact state in
+        // which `window::latest()` could select its hidden donor.
+        state
+            .windows
+            .set(ui::windows::WindowKind::PlayerOverlay, overlay);
+        assert!(state.windows.record_focus(overlay));
+
+        let cases = [
+            CrossDomainEvent::HideWindow,
+            CrossDomainEvent::RestoreWindow(true),
+            CrossDomainEvent::SetWindowMode(iced::window::Mode::Windowed),
+        ];
+
+        for event in cases {
+            let actions = window_actions(handle_event(&mut state, event)).await;
+            assert!(!actions.is_empty());
+            for action in &actions {
+                assert_targets_main(action, main);
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shell_root_mutators_ignore_overlay_when_main_is_absent() {
+        let mut state = State::default();
+        let overlay = iced::window::Id::unique();
+        state
+            .windows
+            .set(ui::windows::WindowKind::PlayerOverlay, overlay);
+        assert!(state.windows.record_focus(overlay));
+
+        for event in [
+            CrossDomainEvent::HideWindow,
+            CrossDomainEvent::RestoreWindow(false),
+            CrossDomainEvent::SetWindowMode(iced::window::Mode::Fullscreen),
+        ] {
+            assert!(
+                window_actions(handle_event(&mut state, event))
+                    .await
+                    .is_empty()
+            );
+        }
+    }
 }

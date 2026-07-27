@@ -2,10 +2,18 @@
 
 /// Seeking shortcut defaults.
 pub mod seeking {
+    use std::time::Duration;
+
     pub const SEEK_FORWARD_COURSE: f64 = 30.0;
     pub const SEEK_BACKWARD_COURSE: f64 = -15.0;
     pub const SEEK_FORWARD_FINE: f64 = 15.0;
     pub const SEEK_BACKWARD_FINE: f64 = -10.0;
+
+    /// Minimum interval between seek-preview commands emitted while dragging.
+    ///
+    /// The mpv adapter adds a second bound by allowing only one absolute seek
+    /// request in flight and retaining only the newest queued position.
+    pub const SEEK_DRAG_THROTTLE: Duration = Duration::from_millis(100);
 }
 
 /// Player controls layout constants.

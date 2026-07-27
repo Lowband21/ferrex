@@ -1287,6 +1287,219 @@ fn validate_gstreamer_root(gst_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn locate_libmpv_root(override_path: Option<&Path>) -> Result<PathBuf> {
+    if let Some(path) = override_path {
+        return Ok(path.to_path_buf());
+    }
+    if let Ok(path) = std::env::var("LIBMPV_ROOT")
+        && !path.is_empty()
+    {
+        return Ok(PathBuf::from(path));
+    }
+    bail!(
+        "Windows native-mpv packaging requires the pinned LGPL SDK. Provide \
+         --libmpv-root or set LIBMPV_ROOT"
+    )
+}
+
+const REQUIRED_LIBMPV_PROFILE: &[&str] = &[
+    "mpv=0.41.0",
+    "mpv_commit=41f6a645068483470267271e1d09966ca3b9f413",
+    "client_api=2.5",
+    "gpl=false",
+    "libmpv=true",
+    "gpu_next=true",
+    "d3d11=true",
+    "direct3d=false",
+    "d3d_hwaccel=true",
+    "d3d9_hwaccel=true",
+    "wasapi=true",
+    "gl=false",
+    "vulkan=false",
+    "lua=luajit",
+    "ffmpeg=8.1.2",
+    "ffmpeg_commit=38b88335f99e76ed89ff3c93f877fdefce736c13",
+    "ffmpeg_gpl=false",
+    "ffmpeg_nonfree=false",
+    "ffmpeg_version3=false",
+    "libass=0.17.4",
+    "libass_commit=bbb3c7f1570a4a021e52683f3fbdf74fe492ae84",
+    "libplacebo=7.360.1",
+    "libplacebo_commit=cee9b076f2c63104ccfd497fa79c39a867293ec4",
+    "luajit_commit=b411bec3ce550ef9968fc83bca094455cf812c1f",
+    "toolchain=msys2-ucrt64",
+];
+
+#[derive(Debug)]
+struct WindowsLibmpvSdk {
+    root: PathBuf,
+    runtime_dll: PathBuf,
+    license_root: PathBuf,
+    runtime_dlls: Vec<PathBuf>,
+}
+
+fn validate_libmpv_root(root: &Path, target: &str) -> Result<WindowsLibmpvSdk> {
+    let include = root.join("include").join("mpv").join("client.h");
+    if !include.is_file() {
+        bail!("libmpv SDK is missing header: {}", include.display());
+    }
+    let import = if detect_windows_flavor(target)? == "msvc" {
+        root.join("lib").join("mpv.lib")
+    } else {
+        root.join("lib").join("libmpv.dll.a")
+    };
+    if !import.is_file() {
+        bail!(
+            "libmpv SDK is missing the target import library: {}",
+            import.display()
+        );
+    }
+
+    let bin = root.join("bin");
+    let runtime_dll = ["libmpv-2.dll", "mpv-2.dll", "mpv.dll"]
+        .into_iter()
+        .map(|name| bin.join(name))
+        .find(|path| path.is_file())
+        .with_context(|| {
+            format!(
+                "libmpv SDK has no versioned runtime DLL in {}",
+                bin.display()
+            )
+        })?;
+    let license_root =
+        root.join("share").join("licenses").join("ferrex-libmpv");
+    let profile_path = license_root.join("BUILD_PROFILE");
+    let profile = fs::read_to_string(&profile_path).with_context(|| {
+        format!("missing libmpv build profile: {}", profile_path.display())
+    })?;
+    let profile_lines: std::collections::HashSet<&str> =
+        profile.lines().map(str::trim).collect();
+    for required in REQUIRED_LIBMPV_PROFILE {
+        if !profile_lines.contains(required) {
+            bail!(
+                "libmpv BUILD_PROFILE is missing required assertion `{required}`"
+            );
+        }
+    }
+    for notice in [
+        "mpv/LICENSE.LGPL",
+        "ffmpeg/COPYING.LGPLv2.1",
+        "ffmpeg/LICENSE.md",
+        "libass/COPYING",
+        "libplacebo/LICENSE",
+        "luajit/COPYRIGHT",
+        "runtime-packages/MANIFEST",
+    ] {
+        let path = license_root.join(notice);
+        if !path.is_file() {
+            bail!("libmpv SDK is missing notice: {}", path.display());
+        }
+    }
+
+    let hashes_path = license_root.join("RUNTIME_DLLS.sha256");
+    let hashes = fs::read_to_string(&hashes_path).with_context(|| {
+        format!("missing libmpv DLL manifest: {}", hashes_path.display())
+    })?;
+    let mut runtime_dlls = Vec::new();
+    let mut manifested = std::collections::HashSet::new();
+    for (index, line) in hashes.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut fields = line.split_whitespace();
+        let expected = fields.next().unwrap_or_default();
+        let name = fields.next().unwrap_or_default().trim_start_matches('*');
+        if fields.next().is_some()
+            || expected.len() != 64
+            || !expected.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || Path::new(name).file_name() != Some(OsStr::new(name))
+            || !name.to_ascii_lowercase().ends_with(".dll")
+        {
+            bail!("invalid libmpv DLL manifest entry on line {}", index + 1);
+        }
+        let dll = bin.join(name);
+        if !dll.is_file() {
+            bail!("manifested libmpv dependency is missing: {}", dll.display());
+        }
+        let actual = compute_sha256(&dll)?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            bail!("libmpv dependency hash mismatch: {}", dll.display());
+        }
+        let normalized = name.to_ascii_lowercase();
+        if !manifested.insert(normalized) {
+            bail!("duplicate libmpv DLL manifest entry: {name}");
+        }
+        runtime_dlls.push(dll);
+    }
+    if runtime_dlls.is_empty() {
+        bail!("libmpv DLL manifest is empty");
+    }
+
+    for entry in fs::read_dir(&bin)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("dll"))
+        {
+            let name = path
+                .file_name()
+                .and_then(OsStr::to_str)
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !manifested.contains(&name) {
+                bail!("unmanifested DLL in libmpv SDK: {}", path.display());
+            }
+        }
+    }
+
+    Ok(WindowsLibmpvSdk {
+        root: root.to_path_buf(),
+        runtime_dll,
+        license_root,
+        runtime_dlls,
+    })
+}
+
+fn copy_file_without_collision(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
+    if destination.is_file() {
+        if compute_sha256(source)? != compute_sha256(destination)? {
+            bail!(
+                "conflicting Windows runtime DLLs share the name {}",
+                destination.display()
+            );
+        }
+        return Ok(());
+    }
+    fs::copy(source, destination).with_context(|| {
+        format!(
+            "failed to copy {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_recursive(&source_path, &destination_path)?;
+        } else if source_path.is_file() {
+            fs::copy(&source_path, &destination_path)?;
+        }
+    }
+    Ok(())
+}
+
 fn copy_dir_contents(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
 
@@ -1343,17 +1556,21 @@ pub async fn package_windows(
     target: &str,
     profile: &str,
     gst_root_override: Option<&Path>,
+    libmpv_root_override: Option<&Path>,
     out_dir: Option<&Path>,
     dry_run: bool,
 ) -> Result<()> {
     let flavor = detect_windows_flavor(target)?;
     let gst_root = locate_gstreamer_root(target, gst_root_override)?;
+    let libmpv_root = locate_libmpv_root(libmpv_root_override)?;
+    let libmpv = validate_libmpv_root(&libmpv_root, target)?;
 
     println!("Windows packaging configuration:");
     println!("  Target:  {}", target);
     println!("  Profile: {}", profile);
     println!("  Flavor:  {}", flavor);
     println!("  GStreamer root: {}", gst_root.display());
+    println!("  libmpv SDK root: {}", libmpv.root.display());
     if dry_run {
         println!("  Mode:    dry-run");
     }
@@ -1378,6 +1595,10 @@ pub async fn package_windows(
     let stage_dir = workspace.join("dist-windows");
     let bin_dir = stage_dir.join("bin");
     let plugins_dir = stage_dir.join("lib").join("gstreamer-1.0");
+    let libmpv_license_dir = stage_dir
+        .join("share")
+        .join("licenses")
+        .join("ferrex-libmpv");
     let build_windows_dir = workspace.join("utils").join("build-windows");
 
     if dry_run {
@@ -1412,6 +1633,17 @@ pub async fn package_windows(
             gst_root.display(),
             plugins_dir.display()
         );
+        println!(
+            "  - {} and {} hashed dependency DLLs → {}/",
+            libmpv.runtime_dll.display(),
+            libmpv.runtime_dlls.len().saturating_sub(1),
+            bin_dir.display()
+        );
+        println!(
+            "  - {} → {}/",
+            libmpv.license_root.display(),
+            libmpv_license_dir.display()
+        );
     } else {
         if stage_dir.exists() {
             fs::remove_dir_all(&stage_dir)?;
@@ -1438,6 +1670,13 @@ pub async fn package_windows(
             &gst_root.join("lib").join("gstreamer-1.0"),
             &plugins_dir,
         )?;
+        for dll in &libmpv.runtime_dlls {
+            let name = dll.file_name().with_context(|| {
+                format!("invalid libmpv dependency path: {}", dll.display())
+            })?;
+            copy_file_without_collision(dll, &bin_dir.join(name))?;
+        }
+        copy_dir_recursive(&libmpv.license_root, &libmpv_license_dir)?;
 
         println!("Staged distribution at: {}", stage_dir.display());
     }
@@ -1462,4 +1701,89 @@ pub async fn package_windows(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod windows_package_tests {
+    use super::*;
+
+    fn write_test_sdk(root: &Path, target: &str) {
+        let bin = root.join("bin");
+        let lib = root.join("lib");
+        let include = root.join("include/mpv");
+        let licenses = root.join("share/licenses/ferrex-libmpv");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&lib).unwrap();
+        fs::create_dir_all(&include).unwrap();
+        for directory in [
+            "mpv",
+            "ffmpeg",
+            "libass",
+            "libplacebo",
+            "luajit",
+            "runtime-packages",
+        ] {
+            fs::create_dir_all(licenses.join(directory)).unwrap();
+        }
+        fs::write(
+            include.join("client.h"),
+            "#define MPV_CLIENT_API_VERSION 0x00020005\n",
+        )
+        .unwrap();
+        let import = if target.contains("msvc") {
+            "mpv.lib"
+        } else {
+            "libmpv.dll.a"
+        };
+        fs::write(lib.join(import), b"import").unwrap();
+        let dll = bin.join("libmpv-2.dll");
+        fs::write(&dll, b"runtime").unwrap();
+        fs::write(
+            licenses.join("BUILD_PROFILE"),
+            REQUIRED_LIBMPV_PROFILE.join("\n"),
+        )
+        .unwrap();
+        for notice in [
+            "mpv/LICENSE.LGPL",
+            "ffmpeg/COPYING.LGPLv2.1",
+            "ffmpeg/LICENSE.md",
+            "libass/COPYING",
+            "libplacebo/LICENSE",
+            "luajit/COPYRIGHT",
+            "runtime-packages/MANIFEST",
+        ] {
+            fs::write(licenses.join(notice), b"notice").unwrap();
+        }
+        fs::write(
+            licenses.join("RUNTIME_DLLS.sha256"),
+            format!("{}  libmpv-2.dll\n", compute_sha256(&dll).unwrap()),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn validates_exact_windows_libmpv_sdk_contract() {
+        let temp = tempfile::tempdir().unwrap();
+        write_test_sdk(temp.path(), "x86_64-pc-windows-msvc");
+        let sdk = validate_libmpv_root(temp.path(), "x86_64-pc-windows-msvc")
+            .unwrap();
+        assert_eq!(sdk.runtime_dlls.len(), 1);
+        assert_eq!(sdk.runtime_dll.file_name().unwrap(), "libmpv-2.dll");
+    }
+
+    #[test]
+    fn rejects_tampered_or_unmanifested_runtime_dll() {
+        let temp = tempfile::tempdir().unwrap();
+        write_test_sdk(temp.path(), "x86_64-pc-windows-gnu");
+        fs::write(temp.path().join("bin/libmpv-2.dll"), b"tampered").unwrap();
+        assert!(
+            validate_libmpv_root(temp.path(), "x86_64-pc-windows-gnu").is_err()
+        );
+
+        write_test_sdk(temp.path(), "x86_64-pc-windows-gnu");
+        fs::write(temp.path().join("bin/untracked.dll"), b"extra").unwrap();
+        assert!(
+            validate_libmpv_root(temp.path(), "x86_64-pc-windows-gnu").is_err()
+        );
+    }
 }

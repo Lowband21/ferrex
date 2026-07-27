@@ -34,5 +34,7 @@ pub mod scan;
 pub mod startup;
 /// Thumbnail resolution and serving support.
 pub mod thumbnail_service;
+/// Bounded FFmpeg HLS generation and cache publication.
+pub mod transcode;
 /// Websocket connection management and event messages.
 pub mod websocket;

@@ -12,6 +12,7 @@ use crate::handlers::collections;
 use crate::handlers::discovery;
 use crate::handlers::media::collections as collection_media_handlers;
 use crate::handlers::stream::stream_handlers;
+use crate::handlers::stream::transcode_handlers;
 use crate::handlers::users::admin_user_management;
 use crate::handlers::users::{
     admin_handlers, auth, role_handlers, security_settings_handlers,
@@ -99,6 +100,10 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
         .route(
             v1::stream::PLAY,
             get(stream_handlers::stream_with_progress_handler),
+        )
+        .route(
+            v1::transcode::ASSET,
+            get(transcode_handlers::transcode_asset_handler),
         )
         //
         .merge(create_libraries_routes(state.clone()))
@@ -420,6 +425,14 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         .route(
             v1::stream::PLAYBACK_TICKET,
             get(stream_handlers::playback_ticket_handler),
+        )
+        .route(
+            v1::transcode::START,
+            post(transcode_handlers::start_transcode_handler),
+        )
+        .route(
+            v1::transcode::STATUS,
+            get(transcode_handlers::transcode_status_handler),
         )
         // Sync session endpoints
         // Unimplemented

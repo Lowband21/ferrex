@@ -129,6 +129,9 @@ ferrex-core = { path = "../ferrex-core" }
 ferrex-flatbuffers = { path = "../ferrex-flatbuffers" }
 ferrexctl = { path = "../ferrexctl" }
 ferrex-model = { path = "../ferrex-model", features = ["serde"] }
+# Display-backed Ferrex-router/libmpv acceptance only; excluded from normal
+# server builds and tests unless `native-mpv-e2e` is requested explicitly.
+ferrex-player-playback = { path = "../ferrex-player-playback", version = "0.1.2-alpha", optional = true, default-features = false, features = ["mpv"] }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -143,4 +146,7 @@ ed25519-dalek = { version = "2", default-features = false }
 [features]
 # Enable long-running external end-to-end HTTP tests
 e2e = []
+# Enable the ignored, display-backed native-mpv test against a real Ferrex
+# router and playback-scoped bearer ticket.
+native-mpv-e2e = ["dep:ferrex-player-playback"]
 demo = ["ferrex-core/demo"]

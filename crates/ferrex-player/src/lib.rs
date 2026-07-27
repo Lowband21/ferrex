@@ -5,4 +5,7 @@
 //! `ferrex-player` binary and historical `ferrex_player::*` imports working
 //! during the extraction stack.
 
+#[cfg(any(target_os = "macos", test))]
+pub mod macos_bundle_runtime;
+
 pub use ferrex_player_app::*;

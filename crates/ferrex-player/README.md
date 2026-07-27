@@ -139,6 +139,19 @@ Ferrex’s Wayland HDR path relies on the GStreamer 1.28 stable series. The Nix
 and Flatpak packaging pin **GStreamer 1.28.4**; when building outside those
 environments, use matching GStreamer and plugin development headers.
 
+## In-process mpv
+
+Normal macOS builds enable in-process mpv automatically. On Apple Silicon,
+`Auto` uses the functionally validated in-root AppKit presenter and may fall
+back only to mpv's native window; GStreamer playback is unavailable. Intel
+Macs are outside the supported validation matrix.
+
+Other platforms enable the backend with `--features mpv`. Ferrex defaults to a
+deterministic mpv profile with user config, scripts, and external URL resolvers
+disabled. See [Desktop playback backends](https://ferrexmedia.org/developer/desktop-playback-backends/)
+for platform behavior, current limitations, trusted configuration, and safe
+diagnostics.
+
 ## Windows MPV override
 
 If MPV auto-detection fails on Windows, set `FERREX_MPV_PATH` to the full path

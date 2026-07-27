@@ -71,5 +71,56 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         ));
     }
 
+    if let Some(overlay_id) = state.windows.get(WindowKind::PlayerOverlay) {
+        subs.push(iced::window::events().with(overlay_id).map(
+            |(tracked_id, (id, event))| match event {
+                iced::window::Event::Moved(position) if id == tracked_id => {
+                    DomainMessage::Ui(
+                        WindowUiMessage::WindowMoved(Some(position)).into(),
+                    )
+                }
+                iced::window::Event::Resized(size) if id == tracked_id => {
+                    DomainMessage::Ui(
+                        UiShellMessage::PlayerOverlayResized(id, size).into(),
+                    )
+                }
+                iced::window::Event::Focused if id == tracked_id => {
+                    DomainMessage::Ui(
+                        UiShellMessage::PlayerOverlayFocused.into(),
+                    )
+                }
+                iced::window::Event::Unfocused if id == tracked_id => {
+                    DomainMessage::Ui(
+                        UiShellMessage::PlayerOverlayUnfocused.into(),
+                    )
+                }
+                _ => DomainMessage::NoOp,
+            },
+        ));
+        // `exit_on_close_request` is disabled for this window so presenter
+        // detach and host-lease release run before native destruction.
+        if let Some(request) = state.windows.shell_hidden_for_playback() {
+            // Include the request in the subscription identity as well as the
+            // emitted message. A donor reused by a replacement must not keep
+            // the previous request in an otherwise identical mapper.
+            subs.push(
+                iced::window::close_requests()
+                    .with((overlay_id, request))
+                    .map(|((tracked_id, tracked_request), id)| {
+                        if id == tracked_id {
+                            DomainMessage::Ui(
+                                UiShellMessage::ClosePlayerOverlay {
+                                    request: tracked_request,
+                                }
+                                .into(),
+                            )
+                        } else {
+                            DomainMessage::NoOp
+                        }
+                    }),
+            );
+        }
+    }
+
     Subscription::batch(subs)
 }

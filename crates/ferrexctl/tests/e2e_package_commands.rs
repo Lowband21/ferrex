@@ -357,6 +357,7 @@ fn test_windows_help() {
         .stdout(predicates::str::contains("--target"))
         .stdout(predicates::str::contains("--profile"))
         .stdout(predicates::str::contains("--gst-root"))
+        .stdout(predicates::str::contains("--libmpv-root"))
         .stdout(predicates::str::contains("--out"))
         .stdout(predicates::str::contains("--dry-run"));
 }

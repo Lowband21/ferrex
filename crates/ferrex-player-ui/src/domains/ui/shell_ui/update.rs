@@ -360,9 +360,6 @@ pub fn update_shell_ui(
         UiShellMessage::PopOutSearch => search_surface::pop_out(state),
         UiShellMessage::CloseSearch => search_surface::close(state),
         UiShellMessage::SearchDetachedOpened(id) => {
-            state.search_window_id = Some(id);
-            state.domains.search.state.presentation =
-                crate::domains::search::types::SearchPresentation::DetachedWindow;
             windows::controller::on_search_opened(state, id)
         }
         UiShellMessage::MainWindowOpened(id) => {
@@ -370,6 +367,9 @@ pub fn update_shell_ui(
             DomainUpdateResult::task(Task::none())
         }
         UiShellMessage::MainWindowFocused => {
+            if let Some(id) = state.windows.get(windows::WindowKind::Main) {
+                state.windows.record_focus(id);
+            }
             // When regaining focus, re-emit initial snapshots to ensure images load
             init_all_tab_view(state);
             emit_initial_all_tab_snapshots_combined(state);
@@ -381,8 +381,48 @@ pub fn update_shell_ui(
             }
         }
         UiShellMessage::MainWindowUnfocused => {
-            // No special handling currently; keep behavior simple
+            if let Some(id) = state.windows.get(windows::WindowKind::Main) {
+                state.windows.record_unfocus(id);
+            }
             DomainUpdateResult::task(Task::none())
+        }
+        UiShellMessage::OpenPlayerOverlay => {
+            windows::controller::open_player_overlay(state)
+        }
+        UiShellMessage::PlayerOverlayOpened(id) => {
+            windows::controller::on_player_overlay_opened(state, id)
+        }
+        UiShellMessage::PlayerOverlayResized(id, size) => {
+            state.windows.set_player_overlay_size(id, size);
+            DomainUpdateResult::task(Task::none())
+        }
+        UiShellMessage::ActivatePlayerOverlay => {
+            let Some(request) = state.windows.player_overlay_launch_request()
+            else {
+                return DomainUpdateResult::task(Task::none());
+            };
+            windows::controller::activate_player_overlay(state, request)
+        }
+        UiShellMessage::PlayerOverlayHandoffReady { request } => {
+            windows::controller::finish_player_overlay_activation(
+                state, request,
+            )
+        }
+        UiShellMessage::PlayerOverlayFocused => {
+            windows::controller::on_player_overlay_focused(state)
+        }
+        UiShellMessage::PlayerOverlayUnfocused => {
+            windows::controller::on_player_overlay_unfocused(state)
+        }
+        UiShellMessage::PlayerControllerInput(button) => {
+            DomainUpdateResult::task(Task::done(
+                crate::domains::ui::views::tenfoot::player_overlay::controller_message_from_state(
+                    state, button,
+                ),
+            ))
+        }
+        UiShellMessage::ClosePlayerOverlay { request } => {
+            windows::controller::close_player_overlay(state, request)
         }
         UiShellMessage::RawWindowClosed(id) => {
             windows::controller::on_raw_window_closed(state, id)

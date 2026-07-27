@@ -60,6 +60,7 @@ jobs:
             libglib2.0-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            libmpv-dev \
             libavcodec-dev \
             libavformat-dev \
             libavutil-dev \
@@ -100,14 +101,15 @@ jobs:
   build:
     name: Build
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-15, windows-latest]
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: macos-latest
+          - os: macos-15
             target: aarch64-apple-darwin
       max-parallel: 3
     runs-on: ${{ matrix.os }}
@@ -123,6 +125,9 @@ jobs:
             libglib2.0-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            libmpv-dev \
+            ffmpeg \
+            fonts-dejavu-core \
             libavcodec-dev \
             libavformat-dev \
             libavutil-dev \
@@ -135,18 +140,137 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install pkg-config glib gstreamer gst-plugins-base ffmpeg
+          brew install \
+            pkg-config meson ninja nasm \
+            freetype fribidi harfbuzz \
+            molten-vk shaderc vulkan-headers vulkan-loader \
+            gstreamer
 
-      # On Windows leverage GitHub action to install official MSVC GStreamer runtime + devel packages
-      - name: Setup GStreamer (Windows)
+      - name: Build pinned LGPL libmpv (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          prefix="${RUNNER_TEMP}/ferrex-libmpv"
+          export MACOSX_DEPLOYMENT_TARGET="15.0"
+          echo "MACOSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET" >> "$GITHUB_ENV"
+          export PKG_CONFIG_PATH="$(brew --prefix vulkan-loader)/lib/pkgconfig:$(brew --prefix shaderc)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          bash scripts/release/macos-build-libmpv.sh "$prefix"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          echo "LIBRARY_PATH=$prefix/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$prefix/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Test macOS bundle policy parser
+        if: runner.os == 'macOS'
+        run: |
+          python3 -m unittest \
+            scripts/release/test_macos_bundle.py \
+            scripts/release/test_macos_build_profile.py
+
+      - name: Generate and validate native playback fixtures (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python3 -m unittest \
+            scripts/qa/test_native_playback_fixtures.py \
+            scripts/qa/test_native_playback_wayland_trace.py
+          ./scripts/qa/native_playback_fixtures.py generate \
+            --output "${RUNNER_TEMP}/native-playback-fixtures"
+          ./scripts/qa/native_playback_fixtures.py verify \
+            --output "${RUNNER_TEMP}/native-playback-fixtures"
+
+      - name: Enforce native mpv architecture boundaries (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/check-native-mpv-boundaries.sh
+
+      - name: Cache pinned GStreamer MSVC SDK (Windows)
         if: runner.os == 'Windows'
-        # v.1.5.3 not v1.5.3. The action installs MSI packages;
-        # upstream Windows 1.28.x artifacts are EXE-only, so pin the
-        # newest available MSI release until the action supports EXE installers.
-        uses: marcpabst/setup-gstreamer@v.1.5.3
+        uses: actions/cache@v4
         with:
-          version: '1.26.11'
-          arch: x86_64
+          path: ${{ runner.temp }}\gstreamer-msvc-x86_64
+          key: windows-gstreamer-msvc-1.28.4-1a745d67225e4339
+
+      - name: Install pinned GStreamer MSVC SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'gstreamer-msvc-x86_64'
+          & .\utils\build-windows\install-gstreamer.ps1 -Destination $root
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG=$root\bin\pkg-config.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path $root 'bin') | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Setup MSYS2 UCRT64 for pinned libmpv (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel
+            autoconf
+            autoconf-archive
+            automake
+            git
+            libtool
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-mako
+            mingw-w64-ucrt-x86_64-python-jinja
+            mingw-w64-ucrt-x86_64-python-glad
+            mingw-w64-ucrt-x86_64-harfbuzz
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-fribidi
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-lcms2
+            mingw-w64-ucrt-x86_64-shaderc
+            mingw-w64-ucrt-x86_64-spirv-cross
+            mingw-w64-ucrt-x86_64-xxhash
+            mingw-w64-ucrt-x86_64-zlib
+
+      - name: Cache pinned LGPL libmpv SDK (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: C:\ferrex-libmpv-sdk
+          key: windows-libmpv-lgpl-${{ hashFiles('utils/build-windows/build-libmpv-lgpl.sh') }}
+
+      - name: Build pinned LGPL libmpv SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          if [[ ! -f /c/ferrex-libmpv-sdk/share/licenses/ferrex-libmpv/BUILD_PROFILE ]]; then
+            ./utils/build-windows/build-libmpv-lgpl.sh /c/ferrex-libmpv-sdk
+          fi
+
+      - name: Enter MSVC developer environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate MSVC import library and export libmpv paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'C:\ferrex-libmpv-sdk'
+          & .\utils\build-windows\new-libmpv-import-library.ps1 -SdkRoot $root
+          $dll = Get-ChildItem (Join-Path $root 'bin') -File |
+            Where-Object { $_.Name -in @('libmpv-2.dll', 'mpv-2.dll', 'mpv.dll') } |
+            Select-Object -First 1
+          if (-not $dll) { throw "libmpv runtime DLL missing from $root\bin" }
+          "LIBMPV_ROOT=$root" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBMPV_LIB_DIR=$(Join-Path $root 'lib')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBMPV_INCLUDE_DIR=$(Join-Path $root 'include')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBMPV_DLL_DIR=$(Join-Path $root 'bin')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBMPV_DLL=$($dll.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "FERREX_MPV_WINDOWS_PRESENTER=spike" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path $root 'bin') | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
       - uses: moonrepo/setup-rust@v1
         if: runner.os != 'Windows'
@@ -165,6 +289,9 @@ jobs:
           targets: ${{ matrix.target }}
           components: clippy,rustfmt
           profile: minimal
+          # The explicit actions/cache step below owns Cargo caching. Avoid
+          # setup-rust's cargo-cache helper and its external binary mirrors.
+          cache: false
 
       - name: Cache Rust/Cargo artifacts
         uses: actions/cache@v4
@@ -194,6 +321,49 @@ jobs:
         if: runner.os != 'Windows'
         run: cargo build --workspace --all-features --target ${{ matrix.target }}
 
+      - name: Stage and audit relocatable app bundle (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(package["version"] for package in data["packages"] if package["name"] == "ferrex-player"))')"
+          prefix="${RUNNER_TEMP}/ferrex-libmpv"
+          search_roots=(--search-root "$prefix/lib")
+          while IFS= read -r formula; do
+            formula_lib="$(brew --prefix "$formula")/lib"
+            if [[ -d "$formula_lib" ]]; then
+              search_roots+=(--search-root "$formula_lib")
+            fi
+          done <"$prefix/share/ferrex/native-mpv/homebrew-formulae.txt"
+          molten_vk_prefix="$(brew --prefix molten-vk)"
+          python3 scripts/release/macos_bundle.py stage \
+            --binary "target/${{ matrix.target }}/debug/ferrex-player" \
+            --app "${RUNNER_TEMP}/Ferrex Player.app" \
+            --architecture arm64 \
+            --version "$version" \
+            --minimum-macos "$MACOSX_DEPLOYMENT_TARGET" \
+            --presenter-mode enabled \
+            "${search_roots[@]}" \
+            --resource "$prefix/share/ferrex/native-mpv" \
+            --extra-library "$molten_vk_prefix/lib/libMoltenVK.dylib" \
+            --require-library libMoltenVK.dylib \
+            --vulkan-icd "$molten_vk_prefix/etc/vulkan/icd.d/MoltenVK_icd.json"
+
+      - name: macOS presenter capability and fallback tests
+        if: runner.os == 'macOS'
+        run: cargo test -p ferrex-player-playback --features mpv --target ${{ matrix.target }} --lib macos_presenter::tests -- --test-threads=1
+
+      - name: libmpv control-plane smoke (non-Windows)
+        if: runner.os != 'Windows'
+        run: cargo test -p ferrex-player-mpv --features linked --target ${{ matrix.target }} -- --test-threads=1
+
+      - name: Playback contract and libmpv adapter tests (Linux)
+        if: runner.os == 'Linux'
+        run: cargo test -p ferrex-player-playback --features mpv --target ${{ matrix.target }} --lib -- --test-threads=1
+
+      - name: Backend-disabled rollback build (Linux)
+        if: runner.os == 'Linux'
+        run: cargo check -p ferrex-player --no-default-features --target ${{ matrix.target }}
+
       - name: Doctests (non-Windows)
         if: runner.os != 'Windows'
         run: cargo test --doc --workspace --all-features --target ${{ matrix.target }}
@@ -215,7 +385,8 @@ jobs:
           "gst-app:     $(pkg-config --modversion gstreamer-app-1.0)" | Write-Host
           "gst-video:   $(pkg-config --modversion gstreamer-video-1.0)" | Write-Host
 
-      # Run cargo in Windows shell with MinGW toolchain and official GStreamer
+      # Run the MSVC Rust target against the pinned MSVC GStreamer SDK and the
+      # import library generated from the MSYS2-built LGPL libmpv runtime.
       - name: Fmt (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -224,11 +395,56 @@ jobs:
       - name: Clippy (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cargo clippy -p ferrex-player --target ${{ matrix.target }} -- -W warnings
+        run: cargo clippy -p ferrex-player --features mpv --target ${{ matrix.target }} -- -W warnings
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cargo build -p ferrex-player --target ${{ matrix.target }}
+        run: cargo build -p ferrex-player --features mpv --target ${{ matrix.target }}
+
+      - name: Windows libmpv and presenter tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo test -p ferrex-player-mpv --features linked --target ${{ matrix.target }} -- --test-threads=1
+          cargo test -p ferrex-player-playback --all-features --target ${{ matrix.target }} --lib windows_presenter -- --test-threads=1
+
+      - name: Audit staged Windows runtime closure
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'ferrex-ci-runtime'
+          $bin = Join-Path $stage 'bin'
+          $plugins = Join-Path $stage 'lib\gstreamer-1.0'
+          $libexec = Join-Path $stage 'libexec\gstreamer-1.0'
+          $notices = Join-Path $stage 'share\licenses\ferrex-libmpv'
+          New-Item -ItemType Directory -Force -Path $bin, $plugins, $libexec, $notices | Out-Null
+          Copy-Item -Force "target\${{ matrix.target }}\debug\ferrex-player.exe" $stage
+          $buildMetadata = Join-Path $stage 'share\ferrex-player'
+          New-Item -ItemType Directory -Force -Path $buildMetadata | Out-Null
+          $env:FERREX_MPV_WINDOWS_PRESENTER | Set-Content (Join-Path $buildMetadata 'PRESENTER_BUILD_MODE')
+          Copy-Item -Force (Join-Path $env:LIBMPV_ROOT 'bin\*.dll') $bin
+          $pluginRoots = Join-Path (Get-Location).Path 'utils\build-windows\gstreamer-plugin-roots.txt'
+          & .\utils\build-windows\stage-gstreamer-runtime.ps1 -SourceRoot $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 -StageRoot $stage -PluginManifest $pluginRoots
+          $gstLicenseSource = @(
+            (Join-Path $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 'share\licenses'),
+            (Join-Path $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 'share\gstreamer-1.0\licenses')
+          ) | Where-Object { Test-Path $_ -PathType Container } | Select-Object -First 1
+          if (-not $gstLicenseSource) { throw 'GStreamer license directory is missing' }
+          $gstNotices = Join-Path $stage 'share\licenses\gstreamer'
+          New-Item -ItemType Directory -Force -Path $gstNotices | Out-Null
+          Copy-Item -Force -Recurse (Join-Path $gstLicenseSource '*') $gstNotices
+          @(
+            'gstreamer=1.28.4',
+            'abi=msvc-x86_64',
+            'installer_sha256=1a745d67225e43394a4a5db929c97397cb56e74b1c38bb77c6ded4b037d3c040',
+            'plugin_policy=explicit-recursive-pe-v1',
+            'codec_policy=openh264-mediafoundation-v1',
+            "plugin_roots_sha256=$((Get-FileHash $pluginRoots -Algorithm SHA256).Hash.ToLowerInvariant())"
+          ) | Set-Content (Join-Path $gstNotices 'FERREX_BUILD_PROFILE')
+          Copy-Item -Force -Recurse (Join-Path $env:LIBMPV_ROOT 'share\licenses\ferrex-libmpv\*') $notices
+          & .\utils\build-windows\verify-runtime-closure.ps1 -StageRoot $stage
   #     - name: Build documentation (TODO)
   #       run: cargo doc --workspace --no-deps --all-features -- -D warnings

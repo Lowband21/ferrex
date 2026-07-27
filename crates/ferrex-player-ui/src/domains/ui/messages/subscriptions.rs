@@ -514,36 +514,28 @@ fn search_surface_key_handler(
             return None;
         }
 
-        if tenfoot_search_overlay && tenfoot_keyboard_open {
-            return match key {
-                Key::Named(Named::Escape) => {
-                    Some(DomainMessage::Search(SearchMessage::HandleEscape))
+        if tenfoot_search_overlay {
+            let button = match key {
+                Key::Named(Named::Escape) => Some(ControllerButton::East),
+                Key::Named(Named::Enter) => Some(ControllerButton::South),
+                Key::Named(Named::ArrowUp) => Some(ControllerButton::DPadUp),
+                Key::Named(Named::ArrowDown) => {
+                    Some(ControllerButton::DPadDown)
                 }
-                Key::Named(Named::Enter) => Some(DomainMessage::Search(
-                    SearchMessage::TenFootKeyboardActivate,
-                )),
-                Key::Named(Named::ArrowUp) => Some(DomainMessage::Search(
-                    SearchMessage::TenFootKeyboardMove(
-                        TenFootKeyboardDirection::Up,
-                    ),
-                )),
-                Key::Named(Named::ArrowDown) => Some(DomainMessage::Search(
-                    SearchMessage::TenFootKeyboardMove(
-                        TenFootKeyboardDirection::Down,
-                    ),
-                )),
-                Key::Named(Named::ArrowLeft) => Some(DomainMessage::Search(
-                    SearchMessage::TenFootKeyboardMove(
-                        TenFootKeyboardDirection::Left,
-                    ),
-                )),
-                Key::Named(Named::ArrowRight) => Some(DomainMessage::Search(
-                    SearchMessage::TenFootKeyboardMove(
-                        TenFootKeyboardDirection::Right,
-                    ),
-                )),
+                Key::Named(Named::ArrowLeft) => {
+                    Some(ControllerButton::DPadLeft)
+                }
+                Key::Named(Named::ArrowRight) => {
+                    Some(ControllerButton::DPadRight)
+                }
                 _ => None,
             };
+            if let Some(button) = button {
+                return tenfoot_search_controller_message(
+                    button,
+                    tenfoot_keyboard_open,
+                );
+            }
         }
 
         match key {
@@ -576,6 +568,46 @@ fn search_surface_key_handler(
     } else {
         None
     }
+}
+
+/// Map normalized controller buttons through the same canonical Search domain
+/// messages as the in-root ten-foot keyboard.
+pub(crate) fn tenfoot_search_controller_message(
+    button: ControllerButton,
+    keyboard_open: bool,
+) -> Option<DomainMessage> {
+    let message = if keyboard_open {
+        match button {
+            ControllerButton::DPadUp => {
+                SearchMessage::TenFootKeyboardMove(TenFootKeyboardDirection::Up)
+            }
+            ControllerButton::DPadDown => SearchMessage::TenFootKeyboardMove(
+                TenFootKeyboardDirection::Down,
+            ),
+            ControllerButton::DPadLeft => SearchMessage::TenFootKeyboardMove(
+                TenFootKeyboardDirection::Left,
+            ),
+            ControllerButton::DPadRight => SearchMessage::TenFootKeyboardMove(
+                TenFootKeyboardDirection::Right,
+            ),
+            ControllerButton::South => SearchMessage::TenFootKeyboardActivate,
+            ControllerButton::East => SearchMessage::HandleEscape,
+            ControllerButton::Start | ControllerButton::Select => return None,
+        }
+    } else {
+        match button {
+            ControllerButton::DPadUp => SearchMessage::SelectPrevious,
+            ControllerButton::DPadDown => SearchMessage::SelectNext,
+            ControllerButton::DPadLeft | ControllerButton::DPadRight => {
+                SearchMessage::ShowTenFootKeyboard
+            }
+            ControllerButton::South => SearchMessage::SelectCurrent,
+            ControllerButton::East => SearchMessage::HandleEscape,
+            ControllerButton::Start | ControllerButton::Select => return None,
+        }
+    };
+
+    Some(DomainMessage::Search(message))
 }
 
 fn main_window_grid_key_handler(

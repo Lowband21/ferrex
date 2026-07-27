@@ -7,6 +7,7 @@ use crate::{
     },
     state::State,
 };
+use ferrex_core::player_prelude::TranscodingStatus;
 use ferrex_core::player_prelude::{EpisodeID, MediaID};
 use ferrex_player_api::services::api::ApiService;
 use ferrex_player_playback::update::{
@@ -114,8 +115,11 @@ impl PlaybackUpdatePort for PlayerPlaybackPort {
             PlaybackStartMode::Internal => {
                 PlaybackMessage::PlayMediaWithId(media_id)
             }
-            PlaybackStartMode::External => {
+            PlaybackStartMode::MpvNativeWindow => {
                 PlaybackMessage::PlayMediaWithIdInMpv(media_id)
+            }
+            PlaybackStartMode::External => {
+                PlaybackMessage::PlayMediaWithIdExternally(media_id)
             }
         };
         DomainMessage::Ui(crate::domains::ui::messages::UiMessage::Playback(
@@ -137,13 +141,58 @@ pub fn update_player(
     state: &mut State,
     message: PlayerMessage,
 ) -> DomainUpdateResult {
+    if let PlayerMessage::QualityProfileSelected(profile) = &message {
+        let profile = *profile;
+        let Some(media_id) = state
+            .domains
+            .player
+            .state
+            .current_media
+            .as_ref()
+            .map(|media| media.id.to_string())
+        else {
+            state.domains.ui.state.error_message =
+                Some("No media is available for quality switching".to_string());
+            return DomainUpdateResult::task(iced::Task::none());
+        };
+
+        state.domains.player.state.current_quality_profile =
+            Some(profile.as_str().to_string());
+        state.domains.player.state.show_quality_menu = false;
+        state.domains.streaming.state.using_hls = true;
+        state.domains.streaming.state.transcoding_job_id = None;
+        state.domains.streaming.state.transcoding_status =
+            Some(TranscodingStatus::Queued);
+        state.domains.streaming.state.transcoding_check_count = 0;
+
+        let service = state.domains.streaming.state.streaming_service.clone();
+        return DomainUpdateResult::task(iced::Task::perform(
+            async move {
+                service
+                    .start_transcoding(&media_id, profile)
+                    .await
+                    .map_err(|error| error.to_string())
+            },
+            |result| {
+                DomainMessage::Streaming(
+                    crate::domains::streaming::messages::StreamingMessage::TranscodingStarted(
+                        result,
+                    ),
+                )
+            },
+        ));
+    }
+
     let navigator = PlayerEpisodeNavigator {
         accessor: state.domains.ui.state.repo_accessor.clone(),
     };
 
     let api_service: Arc<dyn ApiService> = Arc::clone(&state.api_service);
     let server_url = state.server_url.clone();
-    let window_size = state.window_size;
+    let window_size = state
+        .windows
+        .player_overlay_size()
+        .unwrap_or(state.window_size);
     let window_position = state.window_position;
 
     let result = {
@@ -177,8 +226,64 @@ pub fn update_player(
             PlaybackWindowEvent::RestoreWindow(fullscreen) => {
                 CrossDomainEvent::RestoreWindow(fullscreen)
             }
+            PlaybackWindowEvent::BeginIntegratedPlayback { request } => {
+                CrossDomainEvent::BeginIntegratedPlayback { request }
+            }
+            PlaybackWindowEvent::BeginExternalPlayback { request } => {
+                CrossDomainEvent::BeginExternalPlayback { request }
+            }
+            PlaybackWindowEvent::ExternalPlaybackLaunchFailed { request } => {
+                CrossDomainEvent::ExternalPlaybackLaunchFailed { request }
+            }
+            PlaybackWindowEvent::NativePresenterAttached { request } => {
+                CrossDomainEvent::NativePresenterAttached { request }
+            }
+            PlaybackWindowEvent::NativePresenterUnavailable {
+                request,
+                effective_target,
+            } => CrossDomainEvent::NativePresenterUnavailable {
+                request,
+                effective_target,
+            },
+            PlaybackWindowEvent::PlaybackExited { request } => {
+                CrossDomainEvent::PlaybackExited { request }
+            }
         })
         .collect();
 
     DomainUpdateResult::with_events(result.task, events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::ui::windows::WindowKind;
+    use ferrex_player_playback::constants::player_controls;
+    use iced::{Point, Size, window};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mouse_seek_uses_live_overlay_viewport_after_native_resize() {
+        let mut state = State::default();
+        let retained_shell_size = state.window_size;
+        let overlay = window::Id::unique();
+        let overlay_size = Size::new(1_920.0, 1_080.0);
+
+        state.windows.set(WindowKind::PlayerOverlay, overlay);
+        assert!(state.windows.set_player_overlay_size(overlay, overlay_size));
+        state.domains.player.state.source_duration = Some(200.0);
+
+        let seek_bar_center_y =
+            overlay_size.height - player_controls::SEEK_BAR_CENTER_FROM_BOTTOM;
+        drop(update_player(
+            &mut state,
+            PlayerMessage::MouseMoved(Point::new(
+                overlay_size.width / 2.0,
+                seek_bar_center_y,
+            )),
+        ));
+
+        assert!(state.domains.player.state.seek_bar_hovered);
+        assert_eq!(state.domains.player.state.last_seek_position, Some(100.0));
+        assert_eq!(state.window_size, retained_shell_size);
+    }
 }

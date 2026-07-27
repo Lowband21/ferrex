@@ -1063,7 +1063,7 @@ mod tests {
     }
 
     #[test]
-    fn series_mpv_action_plays_selected_next_episode_externally() {
+    fn series_mpv_action_selects_the_explicit_mpv_route() {
         let series_id = SeriesID(Uuid::from_u128(1));
         let episode_id = EpisodeID(Uuid::from_u128(2));
         let actions = series_actions(series_id, Some(episode_id));

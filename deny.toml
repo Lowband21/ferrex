@@ -42,7 +42,9 @@ targets = [
 # If true, metadata will be collected with `--all-features`. Note that this can't
 # be toggled off if true, if you want to conditionally enable `--all-features` it
 # is recommended to pass `--all-features` on the cmd line instead
-all-features = false
+# Audit optional native backends too; otherwise their license exceptions are
+# reported as unused in the default backend-disabled graph.
+all-features = true
 # If true, metadata will be collected with `--no-default-features`. The same
 # caveat with `all-features` applies
 no-default-features = false
@@ -77,7 +79,9 @@ ignore = [
     { id = "RUSTSEC-2022-0081", reason = "`json` is a transitive build-dependency of `hsluv` used by `ferrex-player`; it is not linked into runtime artifacts and there is no upstream upgrade path yet" },
     { id = "RUSTSEC-2024-0384", reason = "`instant` is required by `notify` v7; upstream replacement not yet available" },
     { id = "RUSTSEC-2024-0436", reason = "`paste` comes from `wgpu` transitive deps; awaiting ecosystem migration" },
+    { id = "RUSTSEC-2025-0141", reason = "`bincode` is transitively required by Iced profiling and hot-reload tooling; the advisory has no safe upgrade path" },
     { id = "RUSTSEC-2026-0105", reason = "`core2` is pulled in transitively through `image`/`ravif`; no safe upgrade path is available yet" },
+    { id = "RUSTSEC-2026-0192", reason = "`ttf-parser` is required by the Iced font stack; the advisory has no safe upgrade path" },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -118,7 +122,8 @@ confidence-threshold = 0.8
 exceptions = [
     # Each entry is the crate and version constraint, and its specific allow
     # list
-    #{ allow = ["Zlib"], crate = "adler32" },
+    # Raw dynamically linked bindings selected by D-004; include in release notices.
+    { allow = ["LGPL-2.1-only"], crate = "libmpv2-sys@4.0.1" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -138,6 +143,15 @@ exceptions = [
 # Each entry is a crate relative path, and the (opaque) hash of its contents
 #{ path = "LICENSE", hash = 0xbd0eed23 }
 #]
+
+# libmpv2-sys uses the deprecated SPDX spelling `LGPL-2.1`; pin its verbatim
+# license text and normalize the expression until upstream metadata is updated.
+[[licenses.clarify]]
+crate = "libmpv2-sys@4.0.1"
+expression = "LGPL-2.1-only"
+license-files = [
+    { path = "LICENSE", hash = 0x13b834cd },
+]
 
 [licenses.private]
 # If true, ignores workspace crates that aren't published, or are only

@@ -1,0 +1,33 @@
+[package]
+name = "ferrex-player-mpv"
+description = "Optional libmpv control-plane foundation for Ferrex desktop playback"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+publish = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+# Link the production function table to the libmpv shared library. Keeping this
+# optional preserves backend-disabled builds and display-free unit tests.
+linked = ["dep:libmpv2-sys"]
+
+[dependencies]
+libmpv2-sys = { version = "=4.0.1", optional = true }
+thiserror.workspace = true
+
+[build-dependencies]
+pkg-config = "0.3"

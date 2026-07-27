@@ -10,6 +10,7 @@ pub enum PlaybackMessage {
     PlayMediaWithId(MediaID),
     PlayMediaWithIdFromStart(MediaID),
     PlayMediaWithIdInMpv(MediaID),
+    PlayMediaWithIdExternally(MediaID),
     PlaySeriesNextEpisode(SeriesID),
 }
 
@@ -25,6 +26,9 @@ impl PlaybackMessage {
             Self::PlayMediaWithId(_) => "UI::PlayMediaWithId",
             Self::PlayMediaWithIdFromStart(_) => "UI::PlayMediaWithIdFromStart",
             Self::PlayMediaWithIdInMpv(_) => "UI::PlayMediaWithIdInMpv",
+            Self::PlayMediaWithIdExternally(_) => {
+                "UI::PlayMediaWithIdExternally"
+            }
             Self::PlaySeriesNextEpisode(_) => "UI::PlaySeriesNextEpisode",
         }
     }
@@ -41,6 +45,9 @@ impl std::fmt::Debug for PlaybackMessage {
             }
             Self::PlayMediaWithIdInMpv(id) => {
                 write!(f, "UI::PlayMediaWithIdInMpv({:?})", id)
+            }
+            Self::PlayMediaWithIdExternally(id) => {
+                write!(f, "UI::PlayMediaWithIdExternally({:?})", id)
             }
             Self::PlaySeriesNextEpisode(series) => {
                 write!(f, "UI::PlaySeriesNextEpisode({:?})", series)

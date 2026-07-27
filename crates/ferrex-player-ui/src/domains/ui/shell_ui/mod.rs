@@ -62,6 +62,21 @@ pub enum UiShellMessage {
     MainWindowUnfocused,
     RawWindowClosed(window::Id),
 
+    // Dedicated native-player controls overlay lifecycle
+    OpenPlayerOverlay,
+    PlayerOverlayOpened(window::Id),
+    PlayerOverlayResized(window::Id, iced::Size),
+    ActivatePlayerOverlay,
+    PlayerOverlayHandoffReady {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+    },
+    PlayerOverlayFocused,
+    PlayerOverlayUnfocused,
+    PlayerControllerInput(crate::common::controller_input::ControllerButton),
+    ClosePlayerOverlay {
+        request: ferrex_player_playback::messages::PlaybackRequestId,
+    },
+
     // Search surface and query management
     UpdateSearchQuery(String),
     ExecuteSearch,
@@ -106,6 +121,17 @@ impl UiShellMessage {
             Self::MainWindowFocused => "UI::MainWindowFocused",
             Self::MainWindowUnfocused => "UI::MainWindowUnfocused",
             Self::RawWindowClosed(_) => "UI::RawWindowClosed",
+            Self::OpenPlayerOverlay => "UI::OpenPlayerOverlay",
+            Self::PlayerOverlayOpened(_) => "UI::PlayerOverlayOpened",
+            Self::PlayerOverlayResized(_, _) => "UI::PlayerOverlayResized",
+            Self::ActivatePlayerOverlay => "UI::ActivatePlayerOverlay",
+            Self::PlayerOverlayHandoffReady { .. } => {
+                "UI::PlayerOverlayHandoffReady"
+            }
+            Self::PlayerOverlayFocused => "UI::PlayerOverlayFocused",
+            Self::PlayerOverlayUnfocused => "UI::PlayerOverlayUnfocused",
+            Self::PlayerControllerInput(_) => "UI::PlayerControllerInput",
+            Self::ClosePlayerOverlay { .. } => "UI::ClosePlayerOverlay",
 
             // Search surface and query management
             Self::UpdateSearchQuery(_) => "UI::UpdateSearchQuery",
@@ -161,6 +187,33 @@ impl std::fmt::Debug for UiShellMessage {
             }
             UiShellMessage::RawWindowClosed(id) => {
                 write!(f, "UI::RawWindowClosed({:?})", id)
+            }
+            UiShellMessage::OpenPlayerOverlay => {
+                write!(f, "UI::OpenPlayerOverlay")
+            }
+            UiShellMessage::PlayerOverlayOpened(id) => {
+                write!(f, "UI::PlayerOverlayOpened({:?})", id)
+            }
+            UiShellMessage::PlayerOverlayResized(id, size) => {
+                write!(f, "UI::PlayerOverlayResized({id:?}, {size:?})")
+            }
+            UiShellMessage::ActivatePlayerOverlay => {
+                write!(f, "UI::ActivatePlayerOverlay")
+            }
+            UiShellMessage::PlayerOverlayHandoffReady { request } => {
+                write!(f, "UI::PlayerOverlayHandoffReady({request:?})")
+            }
+            UiShellMessage::PlayerOverlayFocused => {
+                write!(f, "UI::PlayerOverlayFocused")
+            }
+            UiShellMessage::PlayerOverlayUnfocused => {
+                write!(f, "UI::PlayerOverlayUnfocused")
+            }
+            UiShellMessage::PlayerControllerInput(button) => {
+                write!(f, "UI::PlayerControllerInput({button:?})")
+            }
+            UiShellMessage::ClosePlayerOverlay { request } => {
+                write!(f, "UI::ClosePlayerOverlay({request:?})")
             }
             UiShellMessage::UpdateSearchQuery(_) => {
                 write!(f, "UI::UpdateSearchQuery")

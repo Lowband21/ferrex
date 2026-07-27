@@ -1,15 +1,27 @@
-use crate::{constants::seeking::*, messages::PlayerMessage};
+use crate::{
+    constants::seeking::*,
+    contract::{BackendKind, PlaybackEventSignal, PlaybackTarget},
+    messages::PlayerMessage,
+};
+use futures::{StreamExt, stream::BoxStream};
 use iced::Subscription;
 use iced::event;
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 
 /// State snapshot needed to compose playback subscriptions.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PlaybackSubscriptionState {
     pub is_player_view: bool,
-    pub has_video: bool,
+    /// An in-process session owns an Iced/native presentation surface.
+    pub has_internal_video: bool,
+    /// Any backend snapshot currently represents an active lifecycle.
+    pub has_active_playback: bool,
+    pub playback_target: Option<PlaybackTarget>,
+    /// Integrated presentation or a pending native-window fallback proof
+    /// still needs UI-thread AppKit/Win32 refresh turns.
+    pub native_presenter_refresh_required: bool,
     pub controls_visible: bool,
-    pub external_mpv_active: bool,
+    pub event_signal: Option<PlaybackEventSignal>,
     pub is_playing: bool,
     pub tenfoot_mode: bool,
     pub search_open: bool,
@@ -21,24 +33,57 @@ pub fn subscription(
 ) -> Subscription<PlayerMessage> {
     let mut subs = vec![];
 
-    // Only run the controls visibility timer when overlay is visible and a video is present
-    if state.is_player_view && state.has_video && state.controls_visible {
+    // Only run the controls visibility timer when the Iced overlay is visible
+    // over an in-process presentation surface.
+    if state.is_player_view
+        && state.has_internal_video
+        && state.controls_visible
+    {
         subs.push(
             iced::time::every(std::time::Duration::from_millis(500))
                 .map(|_| PlayerMessage::CheckControlsVisibility),
         );
     }
 
-    // If using external player, poll for position updates every second
-    if state.external_mpv_active {
+    // The retained process adapter has no push wakeup, so poll its private IPC
+    // while its backend-neutral snapshot remains active.
+    if state.has_active_playback
+        && state
+            .playback_target
+            .is_some_and(|target| target.backend == BackendKind::ExternalMpv)
+    {
         subs.push(
             iced::time::every(std::time::Duration::from_secs(1))
                 .map(|_| PlayerMessage::PollExternalMpv),
         );
     }
 
-    // While playing internally, send a periodic heartbeat to persist progress
-    if state.is_player_view && state.has_video && state.is_playing {
+    // Native control planes wake Iced only after copied events are queued. The
+    // message then drains all pending events; no video-frame or timer-driven
+    // redraw loop is needed.
+    if state.has_internal_video
+        && let Some(event_signal) = state.event_signal.clone()
+    {
+        subs.push(Subscription::run_with(event_signal, playback_event_stream));
+    }
+
+    // A native-root presenter follows an mpv-owned OS window. Moving,
+    // minimizing, changing Spaces, or crossing a DPI boundary need not change
+    // Iced's slot revision or emit an mpv property event, so refresh the
+    // platform relationship while the integrated session is active.
+    if state.has_internal_video
+        && state.has_active_playback
+        && state.native_presenter_refresh_required
+    {
+        subs.push(
+            iced::time::every(std::time::Duration::from_millis(16))
+                .map(|_| PlayerMessage::NativePresenterRefresh),
+        );
+    }
+
+    // Progress persistence consumes the same snapshot for in-process and
+    // external backends.
+    if state.is_player_view && state.has_active_playback && state.is_playing {
         subs.push(
             iced::time::every(std::time::Duration::from_secs(10))
                 .map(|_| PlayerMessage::ProgressHeartbeat),
@@ -55,6 +100,21 @@ pub fn subscription(
     Subscription::batch(subs)
 }
 
+fn playback_event_stream(
+    signal: &PlaybackEventSignal,
+) -> BoxStream<'static, PlayerMessage> {
+    let signal = signal.clone();
+    futures::stream::unfold(signal, |signal| async move {
+        let waiter = signal.clone();
+        let notified =
+            tokio::task::spawn_blocking(move || waiter.wait_blocking())
+                .await
+                .unwrap_or(false);
+        notified.then_some((PlayerMessage::PlaybackEventsReady, signal))
+    })
+    .boxed()
+}
+
 fn keyboard_shortcuts(
     state: PlaybackSubscriptionState,
 ) -> Subscription<PlayerMessage> {
@@ -62,9 +122,12 @@ fn keyboard_shortcuts(
         return Subscription::none();
     }
 
-    let has_internal_video = state.has_video && !state.external_mpv_active;
+    let accepts_iced_input = state.has_internal_video
+        && state
+            .playback_target
+            .is_none_or(|target| target.backend != BackendKind::ExternalMpv);
 
-    if !(state.is_player_view && has_internal_video) {
+    if !(state.is_player_view && accepts_iced_input) {
         return Subscription::none();
     }
 
@@ -85,7 +148,7 @@ fn handle_player_key_press(
     key: Key,
     modifiers: Modifiers,
 ) -> Option<PlayerMessage> {
-    let msg = match key {
+    match key {
         Key::Named(Named::Space) => Some(PlayerMessage::PlayPause),
         Key::Named(Named::ArrowLeft) => {
             if modifiers.shift() {
@@ -122,6 +185,37 @@ fn handle_player_key_press(
             Some(PlayerMessage::CycleAudioTrack)
         }
         _ => None,
-    };
-    msg
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::mpsc, time::Duration};
+
+    use super::*;
+    use crate::contract::SessionGeneration;
+
+    #[tokio::test]
+    async fn native_event_stream_wakes_once_and_ends_on_disconnect() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let signal =
+            PlaybackEventSignal::new(SessionGeneration::INITIAL, receiver);
+        let mut stream = playback_event_stream(&signal);
+
+        sender.try_send(()).unwrap();
+        let message =
+            tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("event signal wakes subscription")
+                .expect("signal stream remains open");
+        assert!(matches!(message, PlayerMessage::PlaybackEventsReady));
+
+        drop(sender);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("disconnect wakes waiter")
+                .is_none()
+        );
+    }
 }

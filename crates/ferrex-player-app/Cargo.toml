@@ -71,8 +71,15 @@ png = "0.18"
 iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_test", default-features = false }
 tracy-client = { version = "0.18", default-features = false, optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# In-process mpv is the only supported macOS playback engine. Enabling the UI
+# feature here makes it part of every normal macOS player build without
+# changing defaults on Linux or Windows.
+ferrex-player-ui = { workspace = true, features = ["mpv"] }
+
 [features]
 default = []
+mpv = ["ferrex-player-ui/mpv"]
 legacy-settings = ["ferrex-player-ui/legacy-settings"]
 iced_tester = ["iced/tester", "ferrex-player-ui/iced_tester"]
 hot = ["iced/hot", "ferrex-player-ui/hot"]

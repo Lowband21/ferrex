@@ -122,6 +122,71 @@
           gst_1_28_4 = gstSet;
         };
 
+      # libmpv linked into Ferrex must use mpv's LGPL source profile. The
+      # nixpkgs default enables GPL code and GPL FFmpeg options, which is valid
+      # for the standalone player but not for this permissively licensed app.
+      mpvOverlay_0_41_0_lgpl =
+        final: prev:
+        let
+          ffmpegLgpl = prev.ffmpeg-headless.override {
+            withGPL = false;
+            withVersion3 = false;
+            withUnfree = false;
+          };
+
+          mpvBase = assert prev.lib.assertMsg (prev.mpv-unwrapped.version == "0.41.0")
+            "Ferrex's reviewed libmpv profile must be updated explicitly";
+          prev.mpv-unwrapped;
+
+          mpvLgpl = (mpvBase.override {
+            ffmpeg = ffmpegLgpl;
+            cddaSupport = false;
+            dvbinSupport = false;
+            dvdnavSupport = false;
+            rubberbandSupport = false;
+          }).overrideAttrs (old: {
+            mesonFlags = (old.mesonFlags or [ ]) ++ [
+              (prev.lib.mesonBool "gpl" false)
+            ];
+            postConfigure = (old.postConfigure or "") + ''
+              mpv_options="meson-info/intro-buildoptions.json"
+              ${prev.python3}/bin/python3 - "$mpv_options" <<'PY'
+              import json
+              import sys
+
+              with open(sys.argv[1], encoding="utf-8") as options_file:
+                  options = json.load(options_file)
+              if not any(option["name"] == "gpl" and option["value"] is False for option in options):
+                  raise SystemExit("Ferrex libmpv profile did not resolve gpl=false")
+              PY
+            '';
+            installCheckPhase = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
+              mpv_version="$($out/bin/mpv --no-config --version)"
+              printf '%s\n' "$mpv_version" | grep -q '^mpv v0\.41\.0 '
+              test -e "$out/lib/libmpv.so.2"
+
+              ffmpeg_license="$(${ffmpegLgpl.bin}/bin/ffmpeg -hide_banner -L 2>&1)"
+              printf '%s\n' "$ffmpeg_license" | grep -q 'GNU Lesser General Public'
+              ffmpeg_build="$(${ffmpegLgpl.bin}/bin/ffmpeg -hide_banner -buildconf 2>&1)"
+              if printf '%s\n' "$ffmpeg_build" | grep -Eq -- '--enable-(gpl|nonfree|version3)'; then
+                echo "Ferrex libmpv profile unexpectedly linked restricted FFmpeg options" >&2
+                exit 1
+              fi
+              echo "validated Ferrex LGPL-only mpv/FFmpeg profile"
+            '';
+            passthru = (old.passthru or { }) // {
+              ferrexLicenseProfile = "LGPL-2.1-or-later";
+              ferrexFfmpeg = ffmpegLgpl;
+            };
+            meta = (old.meta or { }) // {
+              license = [ prev.lib.licenses.lgpl21Plus ];
+            };
+          });
+        in
+        {
+          ferrexMpv_0_41_0 = mpvLgpl;
+        };
+
       workspaceToml = fromTOML (builtins.readFile ./Cargo.toml);
       workspaceVersion = workspaceToml.workspace.package.version or "0.0.0";
 
@@ -129,6 +194,11 @@
         { pkgs, gst }:
         [
           pkgs.pipewire
+
+          # libmpv runtime plus client headers/pkg-config metadata. The raw Rust
+          # bindings are feature-gated, but linked P2/P3 builds need both outputs.
+          pkgs.ferrexMpv_0_41_0
+          pkgs.ferrexMpv_0_41_0.dev
 
           # Include full outputs so setup hooks set `GST_PLUGIN_SYSTEM_PATH_1_0`.
           gst.gstreamer
@@ -183,6 +253,7 @@
             "${pkgs.libxi}/lib"
             "${pkgs.libxrandr}/lib"
             "${pkgs.vulkan-loader}/lib"
+            "${pkgs.ferrexMpv_0_41_0}/lib"
           ];
         in
         {
@@ -228,6 +299,7 @@
     in
     {
       overlays.gst_1_28_4 = gstOverlay_1_28_4;
+      overlays.mpv_0_41_0_lgpl = mpvOverlay_0_41_0_lgpl;
 
       packages = forAllSystems (
         system:
@@ -242,6 +314,7 @@
             inherit system;
             overlays = [
               self.overlays.gst_1_28_4
+              self.overlays.mpv_0_41_0_lgpl
               rust-overlay.overlays.default
             ];
             config.allowUnfree = true;
@@ -262,6 +335,23 @@
 
           src =
             let
+              sourceRoot = toString ./.;
+              generatedSourceRoots = map (name: "${sourceRoot}/${name}") [
+                ".direnv"
+                ".flatpak-builder"
+                "cache"
+                "target"
+                "target-nix"
+              ];
+              isGeneratedSource = path:
+                let
+                  pathString = toString path;
+                in
+                nixpkgs.lib.any (
+                  prefix:
+                  pathString == prefix
+                  || nixpkgs.lib.hasPrefix "${prefix}/" pathString
+                ) generatedSourceRoots;
               sqlxFilter = path: _type: (builtins.match ".*\.sqlx/.*" path) != null;
               migrationsFilter = path: _type: (builtins.match ".*/migrations/.*\.sql$" path) != null;
               wgslFilter = path: _type: (builtins.match ".*\.wgsl$" path) != null;
@@ -269,13 +359,19 @@
             in
             nixpkgs.lib.cleanSourceWith {
               src = ./.;
+              # `path:.` package smokes include untracked implementation files,
+              # but must not ingest ignored Flatpak/target build trees whose
+              # vendored Cargo manifests are unrelated to this workspace.
               filter =
                 path: type:
-                (sqlxFilter path type)
-                || (migrationsFilter path type)
-                || (wgslFilter path type)
-                || (ttfFilter path type)
-                || (craneLib.filterCargoSources path type);
+                !(isGeneratedSource path)
+                && (
+                  (sqlxFilter path type)
+                  || (migrationsFilter path type)
+                  || (wgslFilter path type)
+                  || (ttfFilter path type)
+                  || (craneLib.filterCargoSources path type)
+                );
             };
 
           mkCommonArgs =
@@ -302,10 +398,15 @@
             };
 
           commonArgs = mkCommonArgs { inherit pkgs libclang ffmpegPkg; };
-          playerCommonArgs = mkCommonArgs {
+          playerCommonArgs = (mkCommonArgs {
             pkgs = pkgsPlayer;
             libclang = libclangPlayer;
             ffmpegPkg = ffmpegPkgPlayer;
+          }) // {
+            # mpv 0.41 excludes its GPL-only X11 VO from this LGPL profile.
+            # Compile an early runtime preflight instead of letting explicit
+            # in-process mpv selection fail after session startup on X11.
+            FERREX_MPV_X11 = "disabled";
           };
 
           serverCargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
@@ -320,14 +421,14 @@
 
           playerCargoArtifacts = craneLibPlayer.buildDepsOnly (playerCommonArgs // {
             pname = "ferrex-player-deps";
-            cargoExtraArgs = "-p ferrex-player";
+            cargoExtraArgs = "-p ferrex-player --features mpv";
             buildInputs = playerCommonArgs.buildInputs ++ playerMediaBuildInputs;
           });
 
           ferrexPlayerBin = craneLibPlayer.buildPackage (playerCommonArgs // {
             cargoArtifacts = playerCargoArtifacts;
             pname = "ferrex-player";
-            cargoExtraArgs = "-p ferrex-player";
+            cargoExtraArgs = "-p ferrex-player --features mpv";
             doCheck = false;
 
             nativeBuildInputs = playerCommonArgs.nativeBuildInputs ++ (with pkgsPlayer; [
@@ -353,6 +454,7 @@
         in
         {
           gstreamer_1_28_4 = gst.gstreamer;
+          libmpv = pkgsPlayer.ferrexMpv_0_41_0;
           gst_plugins_base_1_28_4 = gst.gst-plugins-base;
           gst_plugins_good_1_28_4 = gst.gst-plugins-good;
           gst_plugins_bad_1_28_4 = gst.gst-plugins-bad;
@@ -425,6 +527,7 @@
             inherit system;
             overlays = [
               self.overlays.gst_1_28_4
+              self.overlays.mpv_0_41_0_lgpl
               rust-overlay.overlays.default
             ];
             config.allowUnfree = true;
@@ -522,9 +625,10 @@
             shellHook = ''
               export CARGO_TARGET_DIR="$PWD/target-nix"
               export LIBCLANG_PATH="${libclangPlayer.lib}/lib"
+              export FERREX_MPV_X11="disabled"
 
-              # Helps crates like ffmpeg-sys-next when building outside Nix's build sandbox.
-              export PKG_CONFIG_PATH="${ffmpegPkgPlayer.dev}/lib/pkgconfig:${ffmpegPkgPlayer.dev}/share/pkgconfig:''${PKG_CONFIG_PATH:-}"
+              # Helps native media bindings when building outside Nix's build sandbox.
+              export PKG_CONFIG_PATH="${pkgsPlayer.ferrexMpv_0_41_0.dev}/lib/pkgconfig:${ffmpegPkgPlayer.dev}/lib/pkgconfig:${ffmpegPkgPlayer.dev}/share/pkgconfig:''${PKG_CONFIG_PATH:-}"
 
               # Keep GStreamer plugin discovery consistent (avoid mixing system plugins
               # from other GStreamer versions via $NIX_PROFILES).

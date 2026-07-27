@@ -67,9 +67,11 @@ impl MediaServerTheme {
     /// Choose a theme based on application state and window.
     ///
     /// - Uses an opaque background everywhere by default.
-    /// - Switches to a transparent background only for the main window
-    ///   when showing the Player view with the Subwave Wayland backend
-    ///   active (so the video subsurface can render behind the controls).
+    /// - Gives the dedicated native-player overlay an explicitly transparent
+    ///   surface.
+    /// - Switches the main window to a transparent background when showing the
+    ///   Player view with the Subwave Wayland backend active (so its video
+    ///   subsurface can render behind the controls).
     pub fn theme_for_state(
         state: &State,
         window: Option<iced::window::Id>,
@@ -79,31 +81,20 @@ impl MediaServerTheme {
         // Default to opaque background
         let mut use_transparent_bg = false;
 
-        // Only consider transparency on the main window when actually
-        // presenting the player view with a Wayland subsurface backend.
-        if let Some(main_id) = state
+        let is_player_overlay = window.is_some_and(|window| {
+            state.windows.is_player_overlay_window(window)
+        });
+        if is_player_overlay {
+            use_transparent_bg = true;
+        } else if let Some(main_id) = state
             .windows
             .get(crate::domains::ui::windows::WindowKind::Main)
             && window.map(|w| w == main_id).unwrap_or(true)
             && matches!(state.domains.ui.state.view, ViewState::Player)
             && let Some(video) = state.domains.player.state.video_opt.as_ref()
         {
-            // Only make the background transparent when using Wayland.
-            // Treat any preference other than ForceAppsink on Wayland as Wayland-backed,
-            // which includes PreferWayland.
-            let pref = video.backend();
-            if std::env::var("WAYLAND_DISPLAY").is_ok() {
-                use_transparent_bg = !matches!(
-                    pref,
-                    subwave_unified::video::BackendPreference::ForceAppsink
-                );
-            } else {
-                // On non-Wayland, only enable if explicitly forced to Wayland
-                use_transparent_bg = matches!(
-                    pref,
-                    subwave_unified::video::BackendPreference::ForceWayland
-                );
-            }
+            // The legacy integrated Wayland surface also needs host alpha.
+            use_transparent_bg = video.uses_wayland_surface();
         }
 
         palette.background = if use_transparent_bg {
@@ -117,6 +108,34 @@ impl MediaServerTheme {
         palette.danger = Self::ERROR;
 
         Theme::custom("Ferrex Dark", palette)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::ui::windows::WindowKind;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dedicated_player_overlay_has_explicit_surface_alpha() {
+        let mut state = State::default();
+        let main = iced::window::Id::unique();
+        let overlay = iced::window::Id::unique();
+        state.windows.set(WindowKind::Main, main);
+        state.windows.set(WindowKind::PlayerOverlay, overlay);
+
+        assert_eq!(
+            MediaServerTheme::theme_for_state(&state, Some(overlay))
+                .palette()
+                .background,
+            Color::TRANSPARENT
+        );
+        assert_eq!(
+            MediaServerTheme::theme_for_state(&state, Some(main))
+                .palette()
+                .background,
+            MediaServerTheme::BACKGROUND
+        );
     }
 }
 

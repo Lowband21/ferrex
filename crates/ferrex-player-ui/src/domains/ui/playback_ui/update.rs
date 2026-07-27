@@ -1,11 +1,15 @@
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::ui::{messages::UiMessage, playback_ui::PlaybackMessage},
+    domains::ui::{
+        messages::UiMessage, playback_ui::PlaybackMessage,
+        shell_ui::UiShellMessage,
+    },
     state::State,
 };
 use ferrex_core::player_prelude::{
     EpisodeID, EpisodeLike, Media, MediaID, MovieLike,
 };
+use ferrex_player_playback::contract::{BackendRequest, PlaybackTarget};
 use iced::Task;
 
 fn play_media_with_position(
@@ -13,6 +17,7 @@ fn play_media_with_position(
     media_id: MediaID,
     position: f32,
 ) -> DomainUpdateResult {
+    state.domains.player.state.backend_request = BackendRequest::Auto;
     match state.domains.ui.state.repo_accessor.get(&media_id) {
         Ok(media) => {
             let media_file = match media {
@@ -31,8 +36,11 @@ fn play_media_with_position(
                 .filter(|duration| *duration > 0.0)
                 .unwrap_or(0.0);
 
-            state.domains.player.state.last_valid_position = position as f64;
-            state.domains.player.state.last_valid_duration = duration_hint;
+            if !state.domains.player.state.has_observable_playback_root() {
+                state.domains.player.state.last_valid_position =
+                    position as f64;
+                state.domains.player.state.last_valid_duration = duration_hint;
+            }
             state.domains.media.state.pending_resume_position = Some(position);
             state.domains.player.state.pending_resume_position = Some(position);
 
@@ -49,12 +57,104 @@ fn play_media_with_position(
     }
 }
 
+fn play_media_with_mpv_mode(
+    state: &mut State,
+    media_id: MediaID,
+    external_process: bool,
+) -> DomainUpdateResult {
+    // Backend-disabled builds retain the historical external-process action.
+    let external_process = external_process || !cfg!(feature = "mpv");
+    state.domains.player.state.backend_request = if external_process {
+        BackendRequest::Auto
+    } else {
+        BackendRequest::Exact(in_process_mpv_target())
+    };
+
+    let media_file = match state.domains.ui.state.repo_accessor.get(&media_id) {
+        Ok(Media::Movie(movie)) => movie.file(),
+        Ok(Media::Episode(episode)) => episode.file(),
+        Ok(_) => {
+            log::error!("Media not playable type {media_id}");
+            return DomainUpdateResult::task(Task::none());
+        }
+        Err(_) => {
+            log::error!("Failed to get media with id {media_id}");
+            return DomainUpdateResult::task(Task::none());
+        }
+    };
+
+    let mut resume_opt = None;
+    let mut watch_duration_hint = None;
+    if let Some(watch_state) = &state.domains.media.state.user_watch_state
+        && let Some(item) = watch_state.get_by_media_id(media_id.as_uuid())
+    {
+        if item.position > 0.0 && item.duration > 0.0 {
+            resume_opt = Some(item.position);
+        }
+        if item.duration > 0.0 {
+            watch_duration_hint = Some(item.duration as f64);
+        }
+    }
+    let metadata_duration_hint = media_file
+        .media_file_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.duration)
+        .filter(|duration| *duration > 0.0);
+    let duration_hint = watch_duration_hint.or(metadata_duration_hint);
+
+    if !state.domains.player.state.has_observable_playback_root() {
+        state.domains.player.state.last_valid_position =
+            resume_opt.map(|position| position as f64).unwrap_or(0.0);
+        state.domains.player.state.last_valid_duration =
+            duration_hint.unwrap_or(0.0);
+    }
+    state.domains.media.state.pending_resume_position = resume_opt;
+    state.domains.player.state.pending_resume_position = resume_opt;
+
+    if external_process {
+        DomainUpdateResult::task(Task::done(DomainMessage::Player(
+            crate::domains::player::messages::PlayerMessage::PlayMediaWithIdExternally(
+                media_file, media_id,
+            ),
+        )))
+    } else if in_process_mpv_target() == PlaybackTarget::MPV_INTEGRATED {
+        let play = Task::done(DomainMessage::Player(
+            crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
+                media_file, media_id,
+            ),
+        ));
+        // Allocate the transparent controls host before playback attachment.
+        // It remains invisible until the presenter reports `Attached`.
+        DomainUpdateResult::task(
+            Task::done(DomainMessage::Ui(
+                UiShellMessage::OpenPlayerOverlay.into(),
+            ))
+            .chain(play),
+        )
+    } else {
+        DomainUpdateResult::task(Task::done(DomainMessage::Player(
+            crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
+                media_file, media_id,
+            ),
+        )))
+    }
+}
+
+const fn in_process_mpv_target() -> PlaybackTarget {
+    if cfg!(any(target_os = "windows", target_os = "macos")) {
+        PlaybackTarget::MPV_INTEGRATED
+    } else {
+        PlaybackTarget::MPV_NATIVE_WINDOW
+    }
+}
+
 pub fn update_playback_ui(
     state: &mut State,
     message: PlaybackMessage,
 ) -> DomainUpdateResult {
     match message {
         PlaybackMessage::PlayMediaWithId(media_id) => {
+            state.domains.player.state.backend_request = BackendRequest::Auto;
             match state.domains.ui.state.repo_accessor.get(&media_id) {
                 Ok(media) => match media {
                     Media::Movie(movie) => DomainUpdateResult::with_events(
@@ -86,72 +186,12 @@ pub fn update_playback_ui(
             play_media_with_position(state, media_id, 0.0)
         }
         PlaybackMessage::PlayMediaWithIdInMpv(media_id) => {
-            match state.domains.ui.state.repo_accessor.get(&media_id) {
-                Ok(media) => {
-                    // Extract the concrete media file for playback
-                    let media_file = match media {
-                        Media::Movie(movie) => movie.file(),
-                        Media::Episode(episode) => episode.file(),
-                        _ => {
-                            log::error!("Media not playable type {}", media_id);
-                            return DomainUpdateResult::task(Task::none());
-                        }
-                    };
-
-                    // Seed resume/duration hints similarly to CrossDomainEvent::MediaPlayWithId
-                    let mut resume_opt: Option<f32> = None;
-                    let mut watch_duration_hint: Option<f64> = None;
-                    if let Some(watch_state) =
-                        &state.domains.media.state.user_watch_state
-                        && let Some(item) =
-                            watch_state.get_by_media_id(media_id.as_uuid())
-                    {
-                        if item.position > 0.0 && item.duration > 0.0 {
-                            resume_opt = Some(item.position);
-                        }
-                        if item.duration > 0.0 {
-                            watch_duration_hint = Some(item.duration as f64);
-                        }
-                    }
-
-                    let metadata_duration_hint = media_file
-                        .media_file_metadata
-                        .as_ref()
-                        .and_then(|meta| meta.duration)
-                        .filter(|d| *d > 0.0);
-
-                    let duration_hint =
-                        watch_duration_hint.or(metadata_duration_hint);
-
-                    state.domains.player.state.last_valid_position =
-                        resume_opt.map(|pos| pos as f64).unwrap_or(0.0);
-                    state.domains.player.state.last_valid_duration =
-                        duration_hint.unwrap_or(0.0);
-                    state.domains.media.state.pending_resume_position =
-                        resume_opt;
-                    state.domains.player.state.pending_resume_position =
-                        resume_opt;
-
-                    // First seed the player with PlayMediaWithId, then switch to external player
-                    let tasks = Task::batch(vec![
-                        Task::done(DomainMessage::Player(
-                            crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
-                                media_file,
-                                media_id,
-                            ),
-                        )),
-                        Task::done(DomainMessage::Player(
-                            crate::domains::player::messages::PlayerMessage::PlayExternal,
-                        )),
-                    ]);
-
-                    DomainUpdateResult::task(tasks)
-                }
-                Err(_) => {
-                    log::error!("Failed to get media with id {}", media_id);
-                    DomainUpdateResult::task(Task::none())
-                }
-            }
+            // Explicit mpv selection on non-macOS platforms. macOS Auto uses
+            // the same in-process presenter by default.
+            play_media_with_mpv_mode(state, media_id, false)
+        }
+        PlaybackMessage::PlayMediaWithIdExternally(media_id) => {
+            play_media_with_mpv_mode(state, media_id, true)
         }
         PlaybackMessage::PlaySeriesNextEpisode(series_id) => {
             // Prefer identity-based next-episode from server, fall back to local selection

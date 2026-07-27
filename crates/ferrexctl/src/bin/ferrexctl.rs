@@ -205,6 +205,8 @@ enum PackageAction {
         profile: String,
         #[arg(long, help = "Override GStreamer root path")]
         gst_root: Option<PathBuf>,
+        #[arg(long, help = "Pinned LGPL libmpv SDK root (or set LIBMPV_ROOT)")]
+        libmpv_root: Option<PathBuf>,
         #[arg(long, help = "Output directory for zip")]
         out: Option<PathBuf>,
         #[arg(long, help = "Show what would be done without executing")]
@@ -870,6 +872,7 @@ async fn main() -> Result<()> {
                 target,
                 profile,
                 gst_root,
+                libmpv_root,
                 out,
                 dry_run,
             } => {
@@ -877,6 +880,7 @@ async fn main() -> Result<()> {
                     &target,
                     &profile,
                     gst_root.as_deref(),
+                    libmpv_root.as_deref(),
                     out.as_deref(),
                     dry_run,
                 )

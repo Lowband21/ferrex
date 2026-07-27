@@ -121,6 +121,8 @@ pub use rate_limit::{
 };
 pub use subject_key::{NormalizedPathKey, OpaqueSubjectKey, SubjectKey};
 pub use transcoding::{
+    ParseTranscodeQualityProfileError, StartTranscodeRequest,
+    TranscodeJobState, TranscodeJobStatusResponse, TranscodeQualityProfile,
     TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
 };
 pub use watch::{

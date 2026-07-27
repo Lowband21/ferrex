@@ -37,7 +37,9 @@ pub use super::media_id::ArchivedMediaID;
 pub use super::media_id::MediaID;
 pub use super::media_type::{ImageMediaType, VideoMediaType};
 pub use super::transcoding::{
-    TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
+    StartTranscodeRequest, TranscodeJobState, TranscodeJobStatusResponse,
+    TranscodeQualityProfile, TranscodingJobResponse,
+    TranscodingProgressDetails, TranscodingStatus,
 };
 pub use super::watch::{
     EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,

@@ -25,7 +25,7 @@ A Rust‑native media server and player focused on delivering a smooth and low l
 
 - Feels local, because it is: batched rendering of custom UI primitives keeps latency spikes in check as you fling through high‑DPI posters.
 - Zero‑copy HDR on Wayland: a Wayland‑subsurface path uses current GStreamer stable HDR support to preserve metadata and avoid expensive copies.
-- Pragmatic elsewhere: on other platforms, Ferrex can hand off to mpv.
+- Pragmatic elsewhere: Ferrex uses native mpv presentation where supported.
 
 Status: pre-alpha (0.1.0-alpha). Expect rapid changes while core surfaces continue to stabilize.
 
@@ -35,7 +35,7 @@ Existing home media tools are flexible but often not fast in the ways that feel 
 
 ## Who it’s for
 
-Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.28 stable series for correct HDR metadata passthrough (tested with **GStreamer 1.28.4**). Windows and macOS may utilize mpv hand‑off or the alternate player backend that does not include any HDR passthrough or tone-mapping.
+Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.28 stable series for correct HDR metadata passthrough (tested with **GStreamer 1.28.4**). Windows may use an alternate backend; macOS on Apple Silicon uses native in-process mpv presentation. Neither path currently claims HDR passthrough or tone-mapping.
 
 ## Highlights
 
@@ -43,7 +43,7 @@ Self‑hosters and performance‑minded enthusiasts who value a fluid desktop ex
 - Animated poster grids that stream in as fast as your GPU can swallow textures.
 - Keyboard driven and animated UI navigation/scrolling.
 - Wayland HDR pipeline with a subsurface strategy tailored for native output.
-- mpv hand‑off with watch status tracking maintained.
+- Native mpv playback with watch status tracking maintained.
 
 ## Quickstart
 
@@ -132,16 +132,16 @@ See `ferrexctl --help` for all packaging options.
   - Tested environment: Arch Linux (Hyprland WM). Please report results for GNOME/KDE/wlroots compositors.
   - Player specifics and platform notes: see [crates/ferrex-player/README.md](crates/ferrex-player/README.md).
 
-- Other platforms: playback via the cross‑platform backend or "Open with MPV" from detail views.
-
 ### Compatibility
 
-| Platform          | Playback path              | HDR passthrough | Zero‑copy | Status             |
-|-------------------|----------------------------|-----------------|-----------|--------------------|
-| Linux (Wayland)   | GStreamer + subsurface     | Yes (1.28.x)    | Yes       | Primary, supported |
-| Linux (Xorg)      | Alt backend / mpv hand‑off | No              | No        | Works, less ideal  |
-| Windows           | Alt backend / mpv hand‑off | No (today)      | No        | Experimental       |
-| macOS             | Alt backend / mpv hand‑off | No (today)      | No        | Experimental       |
+| Platform              | Playback path                           | HDR passthrough | Zero‑copy | Status                       |
+|-----------------------|-----------------------------------------|-----------------|-----------|------------------------------|
+| Linux (Wayland)       | GStreamer + subsurface                  | Yes (1.28.x)    | Yes       | Primary, supported           |
+| Linux (Xorg)          | Alt backend / mpv hand‑off              | No              | No        | Works, less ideal            |
+| Windows               | Alt backend / mpv hand‑off              | No (today)      | No        | Experimental                 |
+| macOS (Apple Silicon) | In-process mpv presenter / native-window fallback | Not claimed | Not claimed | Default; core path validated |
+
+Intel/x86_64 Macs are legacy and outside the supported validation matrix.
 
 ## Security notes
 
@@ -158,7 +158,7 @@ See [Architecture](https://ferrexmedia.org/developer/architecture/) for the diag
 
 ## Configuration
 
-See [Configuration](https://ferrexmedia.org/operator/configuration/) for options and workflows, and [`.env.example`](.env.example) for the authoritative reference of environment variables.
+See [Configuration](https://ferrexmedia.org/operator/configuration/) for options and workflows, and [`.env.example`](.env.example) for generated server and stack variables.
 
 ## FAQ
 

@@ -96,6 +96,80 @@ modules:
         url: https://gstreamer.freedesktop.org/src/gst-plugins-ugly/gst-plugins-ugly-1.28.4.tar.xz
         sha256: 5486cd145c5af43259fd37caca59d048e2a67ddb07082ea8f50ef0f02a85f8a5
 
+  # libmpv is linked into the permissively licensed Ferrex binary, so keep
+  # this profile synchronized with D-005 and the Nix LGPL profile.  In
+  # particular, never inherit a distro mpv built with its default GPL option.
+  - name: libass
+    config-opts:
+      - --disable-static
+      - --enable-asm
+      - --enable-fontconfig
+      - --enable-harfbuzz
+    post-install:
+      - install -Dm644 COPYING /app/share/licenses/io.github.lowband21.FerrexPlayer/libass/COPYING
+    cleanup:
+      - /include/ass
+      - /lib/libass.la
+      - /lib/pkgconfig/libass.pc
+    sources:
+      - type: git
+        url: https://github.com/libass/libass.git
+        tag: 0.17.4
+        commit: bbb3c7f1570a4a021e52683f3fbdf74fe492ae84
+
+  - name: ffmpeg-lgpl
+    config-opts:
+      - --disable-debug
+      - --disable-doc
+      - --disable-programs
+      - --disable-static
+      - --disable-gpl
+      - --disable-nonfree
+      - --disable-version3
+      - --enable-shared
+      - --enable-gnutls
+      - --enable-libass
+      - --enable-libdrm
+      - --enable-vaapi
+      - --enable-vulkan
+    post-install:
+      - >-
+        if grep -Eq '^CONFIG_(GPL|NONFREE|VERSION3)=yes$' ffbuild/config.mak;
+        then echo 'FFmpeg resolved a restricted license option' >&2; exit 1;
+        fi
+      - install -Dm644 COPYING.LGPLv2.1 /app/share/licenses/io.github.lowband21.FerrexPlayer/ffmpeg/COPYING.LGPLv2.1
+      - install -Dm644 LICENSE.md /app/share/licenses/io.github.lowband21.FerrexPlayer/ffmpeg/LICENSE.md
+      - >-
+        printf '%s\n' 'FFmpeg n8.1.2' 'gpl=no' 'nonfree=no'
+        'version3=no' 'shared=yes' 'gnutls=yes' 'libass=yes'
+        'libdrm=yes' 'vaapi=yes' 'vulkan=yes'
+        > /app/share/licenses/io.github.lowband21.FerrexPlayer/ffmpeg/BUILD_PROFILE
+    cleanup:
+      - /include/libavcodec
+      - /include/libavdevice
+      - /include/libavfilter
+      - /include/libavformat
+      - /include/libavutil
+      - /include/libpostproc
+      - /include/libswresample
+      - /include/libswscale
+      - /lib/pkgconfig/libavcodec.pc
+      - /lib/pkgconfig/libavdevice.pc
+      - /lib/pkgconfig/libavfilter.pc
+      - /lib/pkgconfig/libavformat.pc
+      - /lib/pkgconfig/libavutil.pc
+      - /lib/pkgconfig/libpostproc.pc
+      - /lib/pkgconfig/libswresample.pc
+      - /lib/pkgconfig/libswscale.pc
+      - /share/ffmpeg/examples
+    sources:
+      - type: git
+        url: https://github.com/FFmpeg/FFmpeg.git
+        tag: n8.1.2
+        commit: 38b88335f99e76ed89ff3c93f877fdefce736c13
+
+  # Build gst-libav against the bundled FFmpeg ABI instead of loading a second
+  # runtime FFmpeg into the same process.
   - name: gst-libav
     buildsystem: meson
     config-opts:
@@ -105,6 +179,117 @@ modules:
         url: https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-1.28.4.tar.xz
         sha256: bd17a5df2874a7a58bcbaf7b940223379ad9613624db8ead783db03e74bb904b
 
+  - name: luajit
+    no-autogen: true
+    make-args:
+      - BUILDMODE=dynamic
+      - PREFIX=/app
+    make-install-args:
+      - PREFIX=/app
+    post-install:
+      - install -Dm644 COPYRIGHT /app/share/licenses/io.github.lowband21.FerrexPlayer/luajit/COPYRIGHT
+    cleanup:
+      - /bin/luajit*
+      - /include/luajit-*
+      - /lib/pkgconfig/luajit.pc
+      - /share/man/man1/luajit.1
+    sources:
+      - type: git
+        url: https://github.com/openresty/luajit2.git
+        tag: v2.1-20260620
+        commit: b411bec3ce550ef9968fc83bca094455cf812c1f
+
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Ddefault_library=shared
+      - -Dvulkan=enabled
+      - -Dshaderc=enabled
+      - -Dopengl=enabled
+      - -Dlcms=enabled
+      - -Ddemos=false
+      - -Dtests=false
+      - -Dbench=false
+    post-install:
+      - install -Dm644 ../LICENSE /app/share/licenses/io.github.lowband21.FerrexPlayer/libplacebo/LICENSE
+      - >-
+        printf '%s\n' 'libplacebo 7.360.1' 'shared=yes' 'vulkan=enabled'
+        'shaderc=enabled' 'opengl=enabled' 'lcms=enabled'
+        > /app/share/licenses/io.github.lowband21.FerrexPlayer/libplacebo/BUILD_PROFILE
+    cleanup:
+      - /include/libplacebo
+      - /lib/pkgconfig/libplacebo.pc
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+
+  - name: mpv-lgpl
+    buildsystem: meson
+    config-opts:
+      - -Dgpl=false
+      - -Dbuild-date=false
+      - -Dcplayer=false
+      - -Dlibmpv=true
+      - -Dtests=false
+      - -Dfuzzers=false
+      - -Dmanpage-build=disabled
+      - -Dhtml-build=disabled
+      - -Dpdf-build=disabled
+      - -Dcdda=disabled
+      - -Ddvbin=disabled
+      - -Ddvdnav=disabled
+      - -Djavascript=disabled
+      - -Dlua=enabled
+      - -Drubberband=disabled
+      - -Duchardet=disabled
+      - -Dvapoursynth=disabled
+      - -Dzimg=disabled
+      - -Dalsa=disabled
+      - -Dpipewire=enabled
+      - -Dpulse=enabled
+      - -Ddmabuf-wayland=enabled
+      - -Ddrm=disabled
+      - -Degl=enabled
+      - -Degl-wayland=enabled
+      - -Degl-x11=disabled
+      - -Dgbm=disabled
+      - -Dgl=enabled
+      - -Dplain-gl=enabled
+      - -Dshaderc=disabled
+      - -Dvaapi=enabled
+      - -Dvaapi-drm=disabled
+      - -Dvaapi-wayland=enabled
+      - -Dvaapi-x11=disabled
+      - -Dvulkan=enabled
+      - -Dwayland=enabled
+      # mpv 0.41's X11 VO sources are GPL-only. The Flatpak must keep this
+      # disabled under D-005 and use the existing GStreamer fallback on X11.
+      - -Dx11=disabled
+    post-install:
+      - >-
+        python3 -c "import json;
+        options={item['name']: item['value'] for item in json.load(open('meson-info/intro-buildoptions.json', encoding='utf-8'))};
+        required={'gpl': False, 'libmpv': True, 'vulkan': 'enabled', 'wayland': 'enabled', 'x11': 'disabled', 'dmabuf-wayland': 'enabled'};
+        missing={key: (options.get(key), value) for key, value in required.items() if options.get(key) != value};
+        assert not missing, f'unexpected mpv build options: {missing}'"
+      - test -e /app/lib/libmpv.so.2
+      - install -Dm644 ../LICENSE.LGPL /app/share/licenses/io.github.lowband21.FerrexPlayer/mpv/LICENSE.LGPL
+      - >-
+        printf '%s\n' 'mpv 0.41.0 / client API 2.5'
+        'gpl=false' 'libmpv=true' 'vulkan=enabled' 'wayland=enabled'
+        'dmabuf-wayland=enabled' 'x11=disabled'
+        > /app/share/licenses/io.github.lowband21.FerrexPlayer/mpv/BUILD_PROFILE
+    cleanup:
+      - /include/mpv
+      - /lib/pkgconfig/mpv.pc
+    sources:
+      - type: git
+        url: https://github.com/mpv-player/mpv.git
+        tag: v0.41.0
+        commit: 41f6a645068483470267271e1d09966ca3b9f413
+
   - name: ferrex-player
     buildsystem: simple
     build-options:
@@ -113,12 +298,17 @@ modules:
       append-path: /app/tools/rust/bin
       env:
         SQLX_OFFLINE: "true"
+        # Compiles the D-023 preflight that rejects X11-only sessions before
+        # starting this LGPL libmpv build, whose X11 VO is intentionally absent.
+        FERREX_MPV_X11: "disabled"
         CARGO_HOME: /run/build/ferrex-player/cargo-home
         CARGO_TARGET_DIR: /run/build/ferrex-player/target
         PKG_CONFIG_PATH: /app/lib/pkgconfig:/app/share/pkgconfig
     build-commands:
-      - cargo build --release -p ferrex-player
+      - cargo build --release -p ferrex-player --features mpv
       - install -Dm755 /run/build/ferrex-player/target/release/ferrex-player /app/bin/ferrex-player
+      - readelf -d /app/bin/ferrex-player | grep -q 'Shared library: \[libmpv.so.2\]'
+      - test "$(pkg-config --modversion mpv)" = 2.5.0
       - install -Dm644 flatpak/io.github.lowband21.FerrexPlayer.desktop /app/share/applications/io.github.lowband21.FerrexPlayer.desktop
       - install -Dm644 flatpak/io.github.lowband21.FerrexPlayer.metainfo.xml /app/share/metainfo/io.github.lowband21.FerrexPlayer.metainfo.xml
       - install -Dm644 flatpak/icons/128x128/apps/io.github.lowband21.FerrexPlayer.png /app/share/icons/hicolor/128x128/apps/io.github.lowband21.FerrexPlayer.png

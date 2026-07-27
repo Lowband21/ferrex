@@ -7,16 +7,43 @@
 
 /// Playback constants shared by controls, shortcuts, and update logic.
 pub mod constants;
+/// Backend-neutral playback commands, events, snapshots, and selection policy.
+pub mod contract;
 /// UI controls for playback overlays.
 #[cfg(feature = "ui")]
 pub mod controls;
 mod diagnostics;
 /// External MPV process integration for HDR passthrough.
 pub mod external_mpv;
+/// macOS AppKit native-root presenter capability and fallback gate.
+///
+/// Normal builds compile this only on macOS. Unit tests compile its pure
+/// evidence model on every host so conservative fallback remains display-free.
+#[cfg(any(target_os = "macos", test))]
+pub mod macos_presenter;
 /// Playback message and subscription DTOs.
 pub mod messages;
+#[cfg(feature = "mpv")]
+mod mpv_adapter;
+/// Event-loop-local orchestration between native slots and platform
+/// presenters. It is compiled only where an integrated presenter exists.
+#[cfg(all(
+    feature = "mpv",
+    feature = "ui",
+    any(target_os = "windows", target_os = "macos", test)
+))]
+mod native_presentation;
+/// Renderer-neutral Iced slot and raw host capture for native presentation.
+#[cfg(feature = "ui")]
+pub mod native_video_slot;
+/// Platform-neutral native presenter lifecycle and geometry model.
+pub mod presenter;
+/// Backend-neutral active playback session handle.
+pub mod session;
 /// Playback state container and notification DTOs.
 pub mod state;
+#[cfg(not(target_os = "macos"))]
+mod subwave_adapter;
 /// Playback UI theme helpers.
 #[cfg(feature = "ui")]
 pub mod theme;
@@ -29,6 +56,13 @@ pub mod video;
 /// Playback overlay views.
 #[cfg(feature = "ui")]
 pub mod view;
+/// Windows native-root/transparent-overlay presenter spike.
+///
+/// The module is target-gated in normal builds. Unit tests compile its pure
+/// relationship and capability model on every host so fallback behavior does
+/// not require a Windows desktop.
+#[cfg(any(target_os = "windows", test))]
+pub mod windows_presenter;
 
 use ferrex_core::player_prelude::LibraryId;
 use ferrex_player_api::services::api::ApiService;
@@ -37,6 +71,15 @@ use std::sync::Arc;
 
 /// Redact sensitive playback URLs for diagnostics.
 pub use diagnostics::redact_playback_url;
+/// Serializable playback diagnostics and native-output observations.
+pub use diagnostics::{
+    MpvClientApiDiagnostics, MpvConfigurationDiagnostics,
+    MpvConfigurationPolicy, MpvLogVerbosity,
+    PLAYBACK_DIAGNOSTIC_SCHEMA_VERSION, PlaybackBackendLifecycle,
+    PlaybackDiagnosticSnapshot, PlaybackDiagnosticSummary,
+    PlaybackFrameDiagnostics, PlaybackOutputDiagnostics,
+    PlaybackVersionDiagnostics,
+};
 /// Playback message type.
 pub use messages::PlayerMessage;
 /// Playback state and track-notification DTOs.
