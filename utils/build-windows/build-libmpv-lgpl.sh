@@ -108,6 +108,19 @@ popd >/dev/null
 pushd "$WORK/src/luajit" >/dev/null
 make -j"$JOBS" BUILDMODE=dynamic TARGET_SYS=Windows
 make install BUILDMODE=dynamic TARGET_SYS=Windows PREFIX="$PREFIX"
+# LuaJIT's top-level installer is POSIX-oriented and does not copy the MinGW
+# DLL or import library produced by src/Makefile. Install both explicitly so
+# luajit.pc's `-lluajit-5.1` resolves and the runtime closure contains lua51.
+install -m 0755 src/lua51.dll "$PREFIX/bin/lua51.dll"
+install -m 0644 src/libluajit-5.1.dll.a "$PREFIX/lib/libluajit-5.1.dll.a"
+[[ -f "$PREFIX/bin/lua51.dll" ]] || {
+	echo "error: LuaJIT did not install lua51.dll" >&2
+	exit 1
+}
+[[ -f "$PREFIX/lib/libluajit-5.1.dll.a" ]] || {
+	echo "error: LuaJIT did not install libluajit-5.1.dll.a" >&2
+	exit 1
+}
 popd >/dev/null
 
 # libplacebo 7.360.1 provides gpu-next's D3D11 renderer. Vulkan/OpenGL are not
