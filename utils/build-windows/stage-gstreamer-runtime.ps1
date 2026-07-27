@@ -17,6 +17,7 @@ $pluginManifest = (Resolve-Path $PluginManifest).Path
 $sourceBin = Join-Path $sourceRoot 'bin'
 $sourcePlugins = Join-Path $sourceRoot 'lib\gstreamer-1.0'
 $sourceGioModules = Join-Path $sourceRoot 'lib\gio\modules'
+$sourceLibproxy = Join-Path $sourceRoot 'lib\libproxy'
 $stageBin = Join-Path $stageRoot 'bin'
 $stagePlugins = Join-Path $stageRoot 'lib\gstreamer-1.0'
 $stageGioModules = Join-Path $stageRoot 'lib\gio\modules'
@@ -26,7 +27,7 @@ $noticeRoot = Join-Path $stageRoot 'share\licenses\gstreamer'
 $system32 = Join-Path $env:SystemRoot 'System32'
 $dumpbin = (Get-Command dumpbin.exe -ErrorAction Stop).Source
 
-foreach ($directory in @($sourceBin, $sourcePlugins, $sourceGioModules)) {
+foreach ($directory in @($sourceBin, $sourcePlugins, $sourceGioModules, $sourceLibproxy)) {
     if (-not (Test-Path $directory -PathType Container)) {
         throw "GStreamer source directory is missing: $directory"
     }
@@ -124,11 +125,13 @@ function Get-Imports([string]$Path) {
 }
 
 $availableByName = @{}
-foreach ($file in Get-ChildItem $sourceBin -File -Filter '*.dll') {
-    if ($availableByName.ContainsKey($file.Name)) {
-        throw "Duplicate GStreamer runtime DLL basename: $($file.Name)"
+foreach ($directory in @($sourceBin, $sourceLibproxy)) {
+    foreach ($file in Get-ChildItem $directory -File -Filter '*.dll') {
+        if ($availableByName.ContainsKey($file.Name)) {
+            throw "Duplicate GStreamer runtime DLL basename: $($file.Name)"
+        }
+        $availableByName[$file.Name] = $file.FullName
     }
-    $availableByName[$file.Name] = $file.FullName
 }
 
 $localByName = @{}
