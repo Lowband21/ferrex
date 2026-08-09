@@ -71,6 +71,14 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use uuid::Uuid;
 
+/// Destructive library-dashboard action awaiting confirmation or completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryMaintenanceAction {
+    Delete(LibraryId),
+    Reset(LibraryId),
+    ClearAllData,
+}
+
 /// UI domain state
 #[derive(Debug)]
 pub struct UIDomainState {
@@ -135,8 +143,9 @@ pub struct UIDomainState {
     pub show_seasons_carousel: Option<CarouselState>,
     pub season_episodes_carousel: Option<CarouselState>,
 
-    // Dialog states
-    pub show_clear_database_confirm: bool,
+    // Dialog/destructive-operation states
+    pub library_maintenance_confirmation: Option<LibraryMaintenanceAction>,
+    pub library_maintenance_in_flight: Option<LibraryMaintenanceAction>,
 
     // Navigation history for back button functionality
     pub navigation_history: Vec<ViewState>,

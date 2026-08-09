@@ -1412,18 +1412,12 @@ pub fn handle_local_auth_state_reset(
 ) -> Task<AuthMessage> {
     match result {
         Ok(()) => {
+            // The server may have been reset at the same time as the local
+            // credentials (for example, Clear All Data). Reconcile setup
+            // status before choosing between login and first-run setup.
             state.domains.auth.state.auth_flow =
-                AuthenticationFlow::PreAuthLogin {
-                    username: String::new(),
-                    password: SecureCredential::new(String::new()),
-                    show_password: false,
-                    remember_device: false,
-                    error: Some(
-                        "Local auth and trusted-device state cleared. Sign in with your username and password to trust this device again."
-                            .to_string(),
-                    ),
-                    loading: false,
-                };
+                AuthenticationFlow::LoadingUsers;
+            return Task::done(AuthMessage::CheckSetupStatus);
         }
         Err(error) => {
             state.domains.auth.state.auth_flow =

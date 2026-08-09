@@ -5,7 +5,8 @@ use crate::domains::ui::interaction_ui::InteractionMessage;
 use crate::domains::ui::theme;
 use crate::domains::ui::types::ViewState;
 use crate::domains::ui::views::admin::{
-    view_admin_dashboard, view_admin_users, view_library_management,
+    view_admin_dashboard, view_admin_users,
+    view_library_maintenance_confirmation, view_library_management,
 };
 use crate::domains::ui::views::auth::view_auth;
 use crate::domains::ui::views::collections::view_collection_detail;
@@ -387,18 +388,30 @@ pub fn view(
             layered
         };
 
+    let with_maintenance_confirmation =
+        if let Some(overlay) = view_library_maintenance_confirmation(state) {
+            Stack::new()
+                .push(with_search_overlay)
+                .push(overlay.map(DomainMessage::from))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            with_search_overlay
+        };
+
     // Overlay toast notifications if any are active
     if state.domains.ui.state.toast_manager.has_toasts() {
         let toast_overlay =
             crate::domains::ui::views::toast_overlay::view_toast_overlay(state);
         Stack::new()
-            .push(with_search_overlay)
+            .push(with_maintenance_confirmation)
             .push(toast_overlay.map(DomainMessage::from))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     } else {
-        with_search_overlay
+        with_maintenance_confirmation
     }
 }
 

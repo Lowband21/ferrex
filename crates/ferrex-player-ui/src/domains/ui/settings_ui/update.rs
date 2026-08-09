@@ -16,6 +16,7 @@ use crate::{
             },
         },
         ui::{
+            LibraryMaintenanceAction,
             feedback_ui::{FeedbackMessage, ToastNotification},
             settings_ui::{RuntimeConfigMessage, SettingsUiMessage},
         },
@@ -178,18 +179,42 @@ pub fn update_settings_ui(
             SettingsUiMessage::DemoApplySizing => demo_controls::handle_apply_sizing(state),
         #[cfg(feature = "demo")]
             SettingsUiMessage::DemoRefreshStatus => demo_controls::handle_refresh_status(state),
-        SettingsUiMessage::ShowClearDatabaseConfirm => {
-                state.domains.ui.state.show_clear_database_confirm = true;
-                DomainUpdateResult::task(Task::none())
+        SettingsUiMessage::ShowLibraryMaintenanceConfirm(action) => {
+            if state
+                .domains
+                .ui
+                .state
+                .library_maintenance_in_flight
+                .is_none()
+            {
+                state.domains.ui.state.library_maintenance_confirmation =
+                    Some(action);
+                state.domains.library.state.library_form_errors.clear();
+                state.domains.library.state.library_form_success = None;
+                state.domains.ui.state.error_message = None;
             }
-        SettingsUiMessage::HideClearDatabaseConfirm => {
-                state.domains.ui.state.show_clear_database_confirm = false;
-                DomainUpdateResult::task(Task::none())
-            }
+            DomainUpdateResult::task(Task::none())
+        }
+        SettingsUiMessage::HideLibraryMaintenanceConfirm => {
+            state.domains.ui.state.library_maintenance_confirmation = None;
+            DomainUpdateResult::task(Task::none())
+        }
         SettingsUiMessage::ClearDatabase => {
-                let task = crate::common::clear_database::handle_clear_database(state);
-                DomainUpdateResult::task(task)
+            if state
+                .domains
+                .ui
+                .state
+                .library_maintenance_in_flight
+                .is_some()
+            {
+                return DomainUpdateResult::task(Task::none());
             }
+            state.domains.ui.state.library_maintenance_confirmation = None;
+            state.domains.ui.state.library_maintenance_in_flight =
+                Some(LibraryMaintenanceAction::ClearAllData);
+            let task = crate::common::clear_database::handle_clear_database(state);
+            DomainUpdateResult::task(task)
+        }
         SettingsUiMessage::DatabaseCleared(result) => {
                 let task = crate::common::clear_database::handle_database_cleared(state, result);
                 DomainUpdateResult::task(task)
@@ -367,6 +392,18 @@ pub fn update_settings_ui(
             ))),
         ),
         SettingsUiMessage::DeleteLibrary(library_id) => {
+            if state
+                .domains
+                .ui
+                .state
+                .library_maintenance_in_flight
+                .is_some()
+            {
+                return DomainUpdateResult::task(Task::none());
+            }
+            state.domains.ui.state.library_maintenance_confirmation = None;
+            state.domains.ui.state.library_maintenance_in_flight =
+                Some(LibraryMaintenanceAction::Delete(library_id));
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 LibraryMessage::DeleteLibrary(library_id),
             )))
@@ -449,6 +486,18 @@ pub fn update_settings_ui(
             )),
         ),
         SettingsUiMessage::ResetLibrary(library_id) => {
+            if state
+                .domains
+                .ui
+                .state
+                .library_maintenance_in_flight
+                .is_some()
+            {
+                return DomainUpdateResult::task(Task::none());
+            }
+            state.domains.ui.state.library_maintenance_confirmation = None;
+            state.domains.ui.state.library_maintenance_in_flight =
+                Some(LibraryMaintenanceAction::Reset(library_id));
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 LibraryMessage::ResetLibrary(library_id),
             )))

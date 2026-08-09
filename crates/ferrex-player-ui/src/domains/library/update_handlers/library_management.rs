@@ -1,10 +1,11 @@
 use crate::domains::library::messages::LibraryMessage;
 use crate::infra::api_types::Library;
 use crate::state::State;
-
 use chrono::Utc;
 use ferrex_core::{
-    api::types::{CreateLibraryRequest, UpdateLibraryRequest},
+    api::types::{
+        CreateLibraryRequest, ResetLibraryRequest, UpdateLibraryRequest,
+    },
     types::{ids::LibraryId, library::LibraryType},
 };
 use ferrex_model::MovieReferenceBatchSize;
@@ -28,6 +29,8 @@ fn create_library_request(
         "enabled": library.enabled,
         "auto_scan": library.auto_scan,
         "watch_for_changes": library.watch_for_changes,
+        "analyze_on_scan": library.analyze_on_scan,
+        "max_retry_attempts": library.max_retry_attempts,
         "movie_ref_batch_size": library.movie_ref_batch_size.get(),
         "start_scan": start_scan,
     }))
@@ -46,6 +49,8 @@ fn update_library_request(library: &Library) -> UpdateLibraryRequest {
         "enabled": library.enabled,
         "auto_scan": library.auto_scan,
         "watch_for_changes": library.watch_for_changes,
+        "analyze_on_scan": library.analyze_on_scan,
+        "max_retry_attempts": library.max_retry_attempts,
     }))
     .expect("serialized library update request must match API schema")
 }
@@ -170,6 +175,9 @@ pub fn handle_delete_library(
     library_id: LibraryId,
     _server_url: String,
 ) -> Task<LibraryMessage> {
+    state.domains.ui.state.error_message = None;
+    state.domains.library.state.library_form_errors.clear();
+    state.domains.library.state.library_form_success = None;
     let api = state.api_service.clone();
     Task::perform(
         async move {
@@ -188,6 +196,7 @@ pub fn handle_library_deleted(
     state: &mut State,
     result: Result<LibraryId, String>,
 ) -> Task<LibraryMessage> {
+    state.domains.ui.state.library_maintenance_in_flight = None;
     match result {
         Ok(library_id) => {
             log::info!(
@@ -198,20 +207,37 @@ pub fn handle_library_deleted(
                 state.domains.ui.state.scope =
                     crate::domains::ui::shell_ui::Scope::Home;
             }
-            Task::perform(
-                super::library_loaded::fetch_libraries(
-                    state.api_service.clone(),
-                    state.disk_media_repo_cache.clone(),
+            state.domains.library.state.library_form_errors.clear();
+            state.domains.ui.state.error_message = None;
+            state.domains.library.state.library_form_success =
+                Some("Library deleted successfully".to_string());
+            Task::batch([
+                Task::perform(
+                    super::library_loaded::fetch_libraries(
+                        state.api_service.clone(),
+                        state.disk_media_repo_cache.clone(),
+                    ),
+                    |res| {
+                        LibraryMessage::LibrariesLoaded(
+                            res.map_err(|e| e.to_string()),
+                        )
+                    },
                 ),
-                |res| {
-                    LibraryMessage::LibrariesLoaded(
-                        res.map_err(|e| e.to_string()),
-                    )
-                },
-            )
+                Task::done(LibraryMessage::FetchActiveScans),
+            ])
         }
         Err(e) => {
             log::error!("Failed to delete library: {}", e);
+            let message = format!("Failed to delete library: {}", e);
+            state.domains.library.state.library_form_success = None;
+            state.domains.library.state.library_form_errors.clear();
+            state
+                .domains
+                .library
+                .state
+                .library_form_errors
+                .push(message.clone());
+            state.domains.ui.state.error_message = Some(message);
             Task::none()
         }
     }
@@ -223,6 +249,7 @@ pub fn handle_show_library_form(
 ) -> Task<LibraryMessage> {
     state.domains.library.state.library_form_errors.clear();
     state.domains.library.state.library_form_success = None;
+    state.domains.ui.state.error_message = None;
     state.domains.library.state.library_form_data = Some(match library {
         Some(lib) => {
             // Editing existing library
@@ -273,59 +300,25 @@ pub fn handle_hide_library_form(state: &mut State) -> Task<LibraryMessage> {
     Task::none()
 }
 
-/// Delete a library and recreate it with the same properties, triggering a fresh bulk scan.
+/// Ask the server to atomically clear the library while preserving its identity
+/// and settings, then start a fresh bulk scan.
 pub fn handle_reset_library(
     state: &mut State,
     library_id: LibraryId,
 ) -> Task<LibraryMessage> {
-    use rkyv::{deserialize, rancor::Error};
-
-    // Read current library from repo (archived)
-    let archived = state
-        .domains
-        .library
-        .state
-        .repo_accessor
-        .get_archived_library_yoke(library_id.as_uuid());
-
-    let Ok(Some(yoke)) = archived else {
-        return Task::done(LibraryMessage::ResetLibraryDone(Err(
-            "library_not_found".to_string(),
-        )));
-    };
-
-    let lib = match deserialize::<crate::infra::api_types::Library, Error>(
-        *yoke.get(),
-    ) {
-        Ok(v) => v,
-        Err(_) => {
-            return Task::done(LibraryMessage::ResetLibraryDone(Err(
-                "deserialize_failed".to_string(),
-            )));
-        }
-    };
-
-    let delete_api = state.api_service.clone();
-    let create_api = state.api_service.clone();
+    state.domains.library.state.library_form_errors.clear();
+    state.domains.library.state.library_form_success = None;
+    state.domains.ui.state.error_message = None;
+    let api = state.api_service.clone();
 
     Task::perform(
         async move {
-            // Delete existing library
-            delete_api
-                .delete_library(library_id)
+            api.reset_library(library_id, ResetLibraryRequest::default())
                 .await
-                .map_err(|e| e.to_string())?;
-
-            // Recreate with same properties and start_scan=true
-            let req = create_library_request(&lib, true);
-            let _id = create_api
-                .create_library(req)
-                .await
-                .map_err(|e| e.to_string())?;
-            Ok::<(), String>(())
+                .map_err(|e| e.to_string())
         },
         |result| match result {
-            Ok(()) => LibraryMessage::ResetLibraryDone(Ok(())),
+            Ok(reset) => LibraryMessage::ResetLibraryDone(Ok(reset)),
             Err(err) => LibraryMessage::ResetLibraryDone(Err(err)),
         },
     )

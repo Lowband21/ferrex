@@ -508,26 +508,64 @@ pub fn update_library(
         }
 
         LibraryMessage::ResetLibraryDone(result) => {
-            if let Err(err) = result {
-                state.domains.ui.state.error_message =
-                    Some(format!("Library reset failed: {}", err));
-            } else {
-                // Refresh libraries and active scans after fresh rescan
-                let fetch =
-                    super::update_handlers::library_loaded::fetch_libraries(
-                        state.api_service.clone(),
-                        state.disk_media_repo_cache.clone(),
+            let reset_library_id =
+                match state.domains.ui.state.library_maintenance_in_flight {
+                    Some(
+                        crate::domains::ui::LibraryMaintenanceAction::Reset(
+                            library_id,
+                        ),
+                    ) => Some(library_id),
+                    _ => None,
+                };
+            state.domains.ui.state.library_maintenance_in_flight = None;
+
+            match result {
+                Ok(reset) => {
+                    debug_assert_eq!(reset_library_id, Some(reset.library_id));
+                    state.domains.library.state.library_form_errors.clear();
+                    state.domains.ui.state.error_message = None;
+                    state.domains.library.state.library_form_success = Some(
+                        if reset.scan.is_some() {
+                            "Library reset successfully; a fresh scan has started"
+                                .to_string()
+                        } else {
+                            "Library reset successfully; enable it to start a fresh scan"
+                                .to_string()
+                        },
                     );
-                return DomainUpdateResult::task(
-                    Task::perform(fetch, |res| {
-                        LibraryMessage::LibrariesLoaded(
-                            res.map_err(|e| format!("{:#}", e)),
-                        )
-                    })
-                    .map(DomainMessage::Library),
-                );
+                }
+                Err(err) => {
+                    let message = format!("Library reset failed: {}", err);
+                    state.domains.ui.state.error_message =
+                        Some(message.clone());
+                    state.domains.library.state.library_form_success = None;
+                    state.domains.library.state.library_form_errors.clear();
+                    state
+                        .domains
+                        .library
+                        .state
+                        .library_form_errors
+                        .push(message);
+                }
             }
-            DomainUpdateResult::task(Task::none())
+
+            // Reconcile library contents and scan state after success or an
+            // error returned after the transactional reset boundary.
+            let fetch = super::update_handlers::library_loaded::fetch_libraries(
+                state.api_service.clone(),
+                state.disk_media_repo_cache.clone(),
+            );
+            DomainUpdateResult::task(Task::batch([
+                Task::perform(fetch, |res| {
+                    LibraryMessage::LibrariesLoaded(
+                        res.map_err(|e| format!("{:#}", e)),
+                    )
+                })
+                .map(DomainMessage::Library),
+                Task::done(DomainMessage::Library(
+                    LibraryMessage::FetchActiveScans,
+                )),
+            ]))
         }
 
         // Library form management - using actual handlers

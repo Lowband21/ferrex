@@ -1,32 +1,25 @@
 use iced::Task;
 
 use crate::{
-    common::messages::{CrossDomainEvent, DomainMessage},
+    common::messages::DomainMessage,
+    domains::auth::messages::AuthMessage,
     domains::ui::{
         messages::UiMessage, settings_ui::SettingsUiMessage, types::ViewState,
     },
     state::State,
 };
+use ferrex_core::api::types::admin::ResetDatabaseRequest;
 
 pub fn handle_clear_database(state: &mut State) -> Task<DomainMessage> {
     log::info!("Clearing all database contents");
-    state.domains.ui.state.show_clear_database_confirm = false; // Hide confirmation dialog
-    let server_url = state.server_url.clone();
+    state.domains.ui.state.library_maintenance_confirmation = None;
+    let api = state.api_service.clone();
     Task::perform(
         async move {
-            let client = reqwest::Client::new();
-            let url = format!("{}/maintenance/clear-database", server_url);
-
-            match client.post(&url).send().await {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        Ok(())
-                    } else {
-                        Err(format!("Server error: {}", response.status()))
-                    }
-                }
-                Err(e) => Err(format!("Request failed: {}", e)),
-            }
+            api.reset_database(ResetDatabaseRequest::clear_all_data())
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
         },
         |result| {
             DomainMessage::Ui(UiMessage::Settings(
@@ -40,6 +33,7 @@ pub fn handle_database_cleared(
     state: &mut State,
     result: Result<(), String>,
 ) -> Task<DomainMessage> {
+    state.domains.ui.state.library_maintenance_in_flight = None;
     match result {
         Ok(()) => {
             log::info!("Database cleared successfully");
@@ -57,7 +51,11 @@ pub fn handle_database_cleared(
             // Clear library state
             state.domains.library.state.library_form_data = None;
             state.domains.library.state.library_form_errors.clear();
+            state.domains.library.state.library_form_success = None;
             state.domains.library.state.library_media_cache.clear();
+            state.domains.library.state.libraries.clear();
+            state.domains.library.state.load_state =
+                crate::domains::library::LibrariesLoadState::NotStarted;
 
             // Reset scan state
             state.loading = false;
@@ -73,6 +71,9 @@ pub fn handle_database_cleared(
             // Clear UI state
             state.domains.ui.state.hovered_media_id = None;
             state.domains.ui.state.error_message = None;
+            state.domains.ui.state.current_library_id = None;
+            state.domains.ui.state.scope =
+                crate::domains::ui::shell_ui::Scope::Home;
 
             // Reset TabManager tabs
             //state.tab_manager.clear();
@@ -82,16 +83,27 @@ pub fn handle_database_cleared(
 
             // Reset view to library (in case user was in detail view)
             state.domains.ui.state.view = ViewState::Library;
+            state.is_authenticated = false;
+            state.domains.auth.state.is_authenticated = false;
+            state.domains.auth.state.user_permissions = None;
 
             log::info!("All local state cleared and reset");
 
-            // Emit cross-domain event to trigger library refresh
-            Task::done(DomainMessage::Event(CrossDomainEvent::DatabaseCleared))
+            // The full wipe includes users and sessions. Clear persisted local
+            // credentials as well so the next screen is a clean setup/login flow.
+            Task::done(DomainMessage::Auth(AuthMessage::ResetLocalAuthState))
         }
         Err(e) => {
             log::error!("Failed to clear database: {}", e);
-            state.domains.ui.state.error_message =
-                Some(format!("Failed to clear database: {}", e));
+            let message = format!("Failed to clear all data: {}", e);
+            state.domains.ui.state.error_message = Some(message.clone());
+            state.domains.library.state.library_form_errors.clear();
+            state
+                .domains
+                .library
+                .state
+                .library_form_errors
+                .push(message);
             Task::none()
         }
     }

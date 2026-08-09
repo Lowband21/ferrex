@@ -47,6 +47,24 @@ pub type RefreshTokenCallback = Arc<
     >,
 >;
 
+fn decode_api_response<T>(response: ApiResponse<T>) -> Result<T> {
+    let ApiResponse {
+        status,
+        data,
+        error,
+        message,
+    } = response;
+
+    if status != "success" || error.is_some() {
+        let detail = error.or(message).unwrap_or_else(|| {
+            format!("Server returned API status '{status}'")
+        });
+        return Err(anyhow::anyhow!(detail));
+    }
+
+    data.ok_or_else(|| anyhow::anyhow!("Empty response from server"))
+}
+
 /// API client with authentication support
 #[derive(Clone)]
 pub struct ApiClient {
@@ -264,10 +282,7 @@ impl ApiClient {
                     ));
                 }
                 let api_response: ApiResponse<T> = response.json().await?;
-                match api_response.data {
-                    Some(data) => Ok(data),
-                    None => Err(anyhow::anyhow!("Empty response from server")),
-                }
+                decode_api_response(api_response)
             }
             StatusCode::UNAUTHORIZED => {
                 // Try to refresh token if we have a callback
@@ -330,10 +345,7 @@ impl ApiClient {
                     ));
                 }
                 let api_response: ApiResponse<T> = response.json().await?;
-                match api_response.data {
-                    Some(data) => Ok(data),
-                    None => Err(anyhow::anyhow!("Empty response from server")),
-                }
+                decode_api_response(api_response)
             }
             StatusCode::UNAUTHORIZED => {
                 // Don't retry, just clear token and return error
@@ -1197,6 +1209,27 @@ mod tests {
 
     fn uuid(value: &str) -> Uuid {
         Uuid::parse_str(value).expect("valid uuid")
+    }
+
+    #[test]
+    fn api_error_envelope_on_http_success_surfaces_server_detail() {
+        let error = decode_api_response::<String>(ApiResponse::error(
+            "library deletion blocked by provenance".to_string(),
+        ))
+        .expect_err(
+            "error envelope must not be treated as a successful request",
+        );
+
+        assert_eq!(error.to_string(), "library deletion blocked by provenance");
+    }
+
+    #[test]
+    fn api_success_envelope_returns_payload() {
+        assert_eq!(
+            decode_api_response(ApiResponse::success("deleted".to_string()))
+                .expect("success envelope should return data"),
+            "deleted"
+        );
     }
 
     #[test]
