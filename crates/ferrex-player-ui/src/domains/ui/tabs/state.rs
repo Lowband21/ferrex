@@ -1555,6 +1555,11 @@ impl LibraryTabState {
         Some(left)
     }
 
+    /// Return whether a media ID is already represented in the cached ordering.
+    pub(crate) fn contains_cached_media_id(&self, id: &Uuid) -> bool {
+        self.cached_index_set.contains(id)
+    }
+
     /// Insert a newly discovered media item into the cached ordering based on the
     /// current sort configuration. Returns true if the media was inserted.
     pub fn insert_media_reference(&mut self, media: &Media) -> bool {
