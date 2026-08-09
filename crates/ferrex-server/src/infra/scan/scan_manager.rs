@@ -49,7 +49,7 @@ use std::{
 use tokio::{
     spawn,
     sync::{Mutex, RwLock, broadcast},
-    time::interval,
+    time::{MissedTickBehavior, interval},
 };
 
 use tracing::{info, instrument, warn};
@@ -69,6 +69,8 @@ const DEFAULT_QUIESCENCE: Duration = Duration::from_secs(3);
 const STALLED_SCAN_TIMEOUT_MULTIPLIER: u32 = 5;
 const SERIES_BUNDLE_TRACKER_IDLE_TTL: Duration = Duration::from_secs(10 * 60);
 const SERIES_BUNDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const DURABLE_RECONCILIATION_INITIAL_BACKOFF: Duration = Duration::from_secs(5);
+const DURABLE_RECONCILIATION_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 fn subject_key_path(key: &SubjectKey) -> Option<&str> {
     match key {
@@ -3592,6 +3594,7 @@ mod tests {
             kind: JobKind::FolderScan,
             media_id: None,
             indexing_change: None,
+            series_identity: None,
             state,
             attempts,
             dedupe_key: dedupe_key.into(),
@@ -3774,8 +3777,79 @@ mod tests {
         assert!(gate.is_required(correlation_id).await);
         assert!(!gate.allows_terminal(correlation_id).await);
 
-        gate.reconciled(correlation_id).await;
+        let ticket = gate.begin_reconciliation(correlation_id).await;
+        assert!(gate.reconciled(correlation_id, &ticket).await);
         assert!(gate.allows_terminal(correlation_id).await);
+    }
+
+    #[tokio::test]
+    async fn reconciliation_pacing_backs_off_until_a_new_trigger_resets_it() {
+        let correlation_id = Uuid::now_v7();
+        let pacing = DurableReconciliationPacing::default();
+        let started_at = Instant::now();
+
+        assert!(pacing.allows_attempt(correlation_id, started_at).await);
+        pacing.defer_next_attempt(correlation_id, started_at).await;
+        assert!(
+            !pacing
+                .allows_attempt(
+                    correlation_id,
+                    started_at + DURABLE_RECONCILIATION_INITIAL_BACKOFF
+                        - Duration::from_millis(1),
+                )
+                .await
+        );
+
+        pacing.forget(correlation_id).await;
+        assert!(
+            pacing
+                .allows_attempt(
+                    correlation_id,
+                    started_at + Duration::from_millis(1),
+                )
+                .await,
+            "a new lag or enrollment trigger must force one immediate attempt"
+        );
+        pacing.defer_next_attempt(correlation_id, started_at).await;
+        assert!(
+            !pacing
+                .allows_attempt(
+                    correlation_id,
+                    started_at + Duration::from_millis(2),
+                )
+                .await,
+            "the same still-required gate must not requery every tick"
+        );
+
+        let second_attempt =
+            started_at + DURABLE_RECONCILIATION_INITIAL_BACKOFF;
+        assert!(pacing.allows_attempt(correlation_id, second_attempt).await);
+        pacing
+            .defer_next_attempt(correlation_id, second_attempt)
+            .await;
+        assert!(
+            !pacing
+                .allows_attempt(
+                    correlation_id,
+                    second_attempt + DURABLE_RECONCILIATION_INITIAL_BACKOFF,
+                )
+                .await,
+            "an unchanged active snapshot doubles the retry delay"
+        );
+        assert!(
+            pacing
+                .allows_attempt(
+                    correlation_id,
+                    second_attempt + DURABLE_RECONCILIATION_INITIAL_BACKOFF * 2,
+                )
+                .await
+        );
+
+        pacing.forget(correlation_id).await;
+        assert!(
+            pacing.allows_attempt(correlation_id, second_attempt).await,
+            "terminal or forgotten runs must discard their cooldown"
+        );
     }
 
     #[tokio::test]
@@ -3784,27 +3858,121 @@ mod tests {
         let gate = DurableReconciliationGate::default();
         gate.require_catalog_projection_recovery([correlation_id])
             .await;
+        let ticket = gate.begin_reconciliation(correlation_id).await;
 
-        assert!(gate.requires_catalog_projection(correlation_id).await);
+        assert!(ticket.catalog_projection_required);
         assert!(
             !gate
-                .clear_after_seeded_snapshot(correlation_id, false, true)
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &ticket,
+                    false,
+                    true,
+                )
                 .await
         );
         assert!(
             !gate
-                .clear_after_seeded_snapshot(correlation_id, true, false)
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &ticket,
+                    true,
+                    false,
+                )
                 .await
         );
         assert!(gate.is_required(correlation_id).await);
-        assert!(gate.requires_catalog_projection(correlation_id).await);
+        assert!(
+            gate.begin_reconciliation(correlation_id)
+                .await
+                .catalog_projection_required
+        );
 
         assert!(
-            gate.clear_after_seeded_snapshot(correlation_id, true, true)
-                .await
+            gate.clear_after_seeded_snapshot(
+                correlation_id,
+                &ticket,
+                true,
+                true,
+            )
+            .await
         );
         assert!(gate.allows_terminal(correlation_id).await);
-        assert!(!gate.requires_catalog_projection(correlation_id).await);
+        assert!(
+            !gate
+                .begin_reconciliation(correlation_id)
+                .await
+                .catalog_projection_required
+        );
+    }
+
+    #[tokio::test]
+    async fn reconciliation_generation_preserves_triggers_arriving_in_flight() {
+        let correlation_id = Uuid::now_v7();
+        let retry_job_id = JobId::new();
+        let gate = DurableReconciliationGate::default();
+
+        gate.require_all([correlation_id]).await;
+        let snapshot_ticket = gate.begin_reconciliation(correlation_id).await;
+
+        // A second lag arrives while the durable snapshot is in flight.
+        gate.require_all([correlation_id]).await;
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &snapshot_ticket,
+                    true,
+                    true,
+                )
+                .await
+        );
+        assert!(gate.is_required(correlation_id).await);
+
+        let lag_ticket = gate.begin_reconciliation(correlation_id).await;
+        // Catalog recovery is requested while that snapshot is projecting.
+        gate.require_catalog_projection_recovery([correlation_id])
+            .await;
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &lag_ticket,
+                    true,
+                    true,
+                )
+                .await
+        );
+
+        let catalog_ticket = gate.begin_reconciliation(correlation_id).await;
+        assert!(catalog_ticket.catalog_projection_required);
+        // A retry outcome becomes uncertain before the catalog pass settles.
+        gate.require_retryable_failure(correlation_id, retry_job_id)
+            .await;
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &catalog_ticket,
+                    true,
+                    true,
+                )
+                .await
+        );
+
+        let latest_ticket = gate.begin_reconciliation(correlation_id).await;
+        assert!(latest_ticket.catalog_projection_required);
+        assert!(latest_ticket.retryable_failures.contains(&retry_job_id));
+        assert!(
+            gate.clear_after_seeded_snapshot(
+                correlation_id,
+                &latest_ticket,
+                true,
+                true,
+            )
+            .await
+        );
+        assert!(gate.allows_terminal(correlation_id).await);
     }
 
     #[test]
@@ -3845,6 +4013,7 @@ mod tests {
         let now = Utc::now();
         let gate = DurableReconciliationGate::default();
         gate.require_retryable_failure(correlation_id, job_id).await;
+        let ticket = gate.begin_reconciliation(correlation_id).await;
 
         let leased = durable_job(
             correlation_id,
@@ -3856,8 +4025,7 @@ mod tests {
             now,
         );
         assert_eq!(
-            gate.unresolved_retryable_failures(correlation_id, &[leased])
-                .await,
+            gate.unresolved_retryable_failures(&ticket, &[leased]).await,
             vec![(job_id, Some(JobState::Leased))]
         );
         assert!(!gate.allows_terminal(correlation_id).await);
@@ -3872,11 +4040,11 @@ mod tests {
             now + ChronoDuration::milliseconds(1),
         );
         assert!(
-            gate.unresolved_retryable_failures(correlation_id, &[ready])
+            gate.unresolved_retryable_failures(&ticket, &[ready])
                 .await
                 .is_empty()
         );
-        gate.reconciled(correlation_id).await;
+        assert!(gate.reconciled(correlation_id, &ticket).await);
         assert!(gate.allows_terminal(correlation_id).await);
     }
 
@@ -3968,6 +4136,7 @@ mod tests {
         let mut receiver = run.subscribe();
         let gate = DurableReconciliationGate::default();
         gate.require_all([correlation_id]).await;
+        let pre_seed_ticket = gate.begin_reconciliation(correlation_id).await;
 
         // The first ticker can race Start and observe an empty database before
         // its enqueue batch is complete. Production reconcile_run must not
@@ -3977,6 +4146,7 @@ mod tests {
             !gate
                 .clear_after_seeded_snapshot(
                     correlation_id,
+                    &pre_seed_ticket,
                     run.seed_completed().await,
                     true,
                 )
@@ -4024,6 +4194,7 @@ mod tests {
         assert!(!early_completion);
         assert_eq!(run.lifecycle_status().await, ScanLifecycleStatus::Running);
 
+        let post_seed_ticket = gate.begin_reconciliation(correlation_id).await;
         run.reconcile_durable_job_states(&[durable_job(
             correlation_id,
             shared_job_id,
@@ -4037,6 +4208,7 @@ mod tests {
         assert!(
             gate.clear_after_seeded_snapshot(
                 correlation_id,
+                &post_seed_ticket,
                 run.seed_completed().await,
                 true,
             )
@@ -5051,7 +5223,7 @@ mod tests {
             let barrier = Arc::clone(&barrier);
             tokio::spawn(async move {
                 barrier.wait().await;
-                entry.lock().await.claim_next_finalization().is_some()
+                entry.lock().await.claim_next_finalization()
             })
         };
         let second = {
@@ -5059,26 +5231,94 @@ mod tests {
             let barrier = Arc::clone(&barrier);
             tokio::spawn(async move {
                 barrier.wait().await;
-                entry.lock().await.claim_next_finalization().is_some()
+                entry.lock().await.claim_next_finalization()
             })
         };
 
         barrier.wait().await;
         let (first, second) = tokio::join!(first, second);
-        let claims = usize::from(first.unwrap()) + usize::from(second.unwrap());
+        let first = first.unwrap();
+        let second = second.unwrap();
+        let claims =
+            usize::from(first.is_some()) + usize::from(second.is_some());
         assert_eq!(claims, 1, "only one worker may claim the same bundle");
+        let claimed = first.or(second).expect("one worker claimed the bundle");
 
         let mut guard = entry.lock().await;
-        guard.settle_finalization(&series_root_path, false);
-        assert!(
-            guard.claim_next_finalization().is_some(),
-            "a failed publication must release its claim for polling retries"
+        assert!(!guard.settle_finalization(&claimed, false));
+        let retry = guard.claim_next_finalization().expect(
+            "a failed publication releases its claim for polling retries",
         );
-        guard.settle_finalization(&series_root_path, true);
+        assert!(guard.settle_finalization(&retry, true));
         assert!(
             guard.claim_next_finalization().is_none(),
             "a published bundle must remain finalized"
         );
+    }
+
+    #[test]
+    fn series_bundle_claim_revalidates_work_enrolled_during_publish() {
+        use ferrex_core::domain::scan::orchestration::job::JobPriority;
+
+        let library_id = LibraryId::new();
+        let series_id = ferrex_core::types::SeriesID(Uuid::now_v7());
+        let series_root_path =
+            SeriesRootPath::try_new("/library/Claim Race").unwrap();
+        let episode_path = "/library/Claim Race/Season 1/S01E02.mkv";
+        let mut entry = ready_series_bundle_entry(
+            library_id,
+            series_id,
+            series_root_path.clone(),
+        );
+
+        let claimed = entry
+            .claim_next_finalization()
+            .expect("the initial bundle is ready");
+        let late_job_id = JobId::new();
+
+        // Simulate episode enrollment while catalog publication is awaiting its
+        // database projection.
+        entry.tracker.observe_job_event(&JobEvent::from_job(
+            None,
+            library_id,
+            "episode:late:index".into(),
+            SubjectKey::path(episode_path).ok(),
+            JobEventPayload::Enqueued {
+                job_id: late_job_id,
+                kind: JobKind::IndexUpsert,
+                priority: JobPriority::P0,
+            },
+        ));
+        assert!(
+            entry.claim_next_finalization().is_none(),
+            "the original in-flight claim prevents a duplicate publisher"
+        );
+
+        // Even if the late episode terminalizes before publication returns, the
+        // original claim still describes the pre-enrollment generation. It must
+        // be rejected and published again from the updated generation.
+        entry.tracker.observe_job_event(&JobEvent::from_job(
+            None,
+            library_id,
+            "episode:late:index".into(),
+            SubjectKey::path(episode_path).ok(),
+            JobEventPayload::DeadLettered {
+                job_id: late_job_id,
+                kind: JobKind::IndexUpsert,
+                priority: JobPriority::P0,
+            },
+        ));
+        assert!(
+            !entry.settle_finalization(&claimed, true),
+            "a successful publication from a stale generation must not finalize the root"
+        );
+
+        let retry = entry
+            .claim_next_finalization()
+            .expect("the updated terminal generation must be published again");
+        assert_eq!(retry.series_root_path, series_root_path);
+        assert!(entry.settle_finalization(&retry, true));
+        assert!(entry.claim_next_finalization().is_none());
     }
 }
 
@@ -5095,6 +5335,53 @@ struct ScanRunAggregatorInner {
     catalog_events: CatalogEventProjection,
     series_bundles: Mutex<HashMap<LibraryId, SeriesBundleTrackerEntry>>,
     reconciliation_gate: DurableReconciliationGate,
+    durable_reconciliation_pacing: DurableReconciliationPacing,
+}
+
+#[derive(Default)]
+struct DurableReconciliationPacing {
+    state: Mutex<HashMap<Uuid, DurableReconciliationPacingState>>,
+}
+
+#[derive(Clone, Copy)]
+struct DurableReconciliationPacingState {
+    not_before: Instant,
+    backoff: Duration,
+}
+
+impl DurableReconciliationPacing {
+    async fn allows_attempt(&self, correlation_id: Uuid, now: Instant) -> bool {
+        self.state
+            .lock()
+            .await
+            .get(&correlation_id)
+            .is_none_or(|state| now >= state.not_before)
+    }
+
+    async fn defer_next_attempt(&self, correlation_id: Uuid, now: Instant) {
+        let mut state = self.state.lock().await;
+        let backoff = state
+            .get(&correlation_id)
+            .map(|current| {
+                current
+                    .backoff
+                    .checked_mul(2)
+                    .unwrap_or(DURABLE_RECONCILIATION_MAX_BACKOFF)
+                    .min(DURABLE_RECONCILIATION_MAX_BACKOFF)
+            })
+            .unwrap_or(DURABLE_RECONCILIATION_INITIAL_BACKOFF);
+        state.insert(
+            correlation_id,
+            DurableReconciliationPacingState {
+                not_before: now + backoff,
+                backoff,
+            },
+        );
+    }
+
+    async fn forget(&self, correlation_id: Uuid) {
+        self.state.lock().await.remove(&correlation_id);
+    }
 }
 
 #[derive(Default)]
@@ -5104,24 +5391,57 @@ struct DurableReconciliationGate {
 
 #[derive(Default)]
 struct DurableReconciliationRequirements {
-    required: HashSet<Uuid>,
-    catalog_projection_required: HashSet<Uuid>,
-    retryable_failures: HashMap<Uuid, HashSet<JobId>>,
+    next_generation: u64,
+    by_correlation: HashMap<Uuid, DurableReconciliationRequirement>,
+}
+
+#[derive(Clone, Default)]
+struct DurableReconciliationRequirement {
+    generation: u64,
+    catalog_projection_required: bool,
+    retryable_failures: HashSet<JobId>,
+}
+
+#[derive(Clone, Default)]
+struct DurableReconciliationTicket {
+    generation: Option<u64>,
+    catalog_projection_required: bool,
+    retryable_failures: HashSet<JobId>,
+}
+
+impl DurableReconciliationRequirements {
+    fn require(
+        &mut self,
+        correlation_id: Uuid,
+    ) -> &mut DurableReconciliationRequirement {
+        self.next_generation = self
+            .next_generation
+            .checked_add(1)
+            .expect("durable reconciliation generation exhausted");
+        let generation = self.next_generation;
+        let requirement =
+            self.by_correlation.entry(correlation_id).or_default();
+        requirement.generation = generation;
+        requirement
+    }
 }
 
 impl DurableReconciliationGate {
     async fn require_all(&self, correlations: impl IntoIterator<Item = Uuid>) {
-        self.state.lock().await.required.extend(correlations);
+        let mut state = self.state.lock().await;
+        for correlation_id in correlations {
+            state.require(correlation_id);
+        }
     }
 
     async fn require_catalog_projection_recovery(
         &self,
         correlations: impl IntoIterator<Item = Uuid>,
     ) {
-        let correlations = correlations.into_iter().collect::<Vec<_>>();
         let mut state = self.state.lock().await;
-        state.required.extend(correlations.iter().copied());
-        state.catalog_projection_required.extend(correlations);
+        for correlation_id in correlations {
+            state.require(correlation_id).catalog_projection_required = true;
+        }
     }
 
     async fn require_retryable_failure(
@@ -5130,71 +5450,87 @@ impl DurableReconciliationGate {
         job_id: JobId,
     ) {
         let mut state = self.state.lock().await;
-        state.required.insert(correlation_id);
         state
+            .require(correlation_id)
             .retryable_failures
-            .entry(correlation_id)
-            .or_default()
             .insert(job_id);
     }
 
     async fn is_required(&self, correlation_id: Uuid) -> bool {
-        self.state.lock().await.required.contains(&correlation_id)
+        self.state
+            .lock()
+            .await
+            .by_correlation
+            .contains_key(&correlation_id)
     }
 
     async fn allows_terminal(&self, correlation_id: Uuid) -> bool {
         !self.is_required(correlation_id).await
     }
 
-    async fn requires_catalog_projection(&self, correlation_id: Uuid) -> bool {
+    async fn begin_reconciliation(
+        &self,
+        correlation_id: Uuid,
+    ) -> DurableReconciliationTicket {
         self.state
             .lock()
             .await
-            .catalog_projection_required
-            .contains(&correlation_id)
+            .by_correlation
+            .get(&correlation_id)
+            .map(|requirement| DurableReconciliationTicket {
+                generation: Some(requirement.generation),
+                catalog_projection_required: requirement
+                    .catalog_projection_required,
+                retryable_failures: requirement.retryable_failures.clone(),
+            })
+            .unwrap_or_default()
     }
 
-    async fn reconciled(&self, correlation_id: Uuid) {
+    async fn reconciled(
+        &self,
+        correlation_id: Uuid,
+        ticket: &DurableReconciliationTicket,
+    ) -> bool {
         let mut state = self.state.lock().await;
-        state.required.remove(&correlation_id);
-        state.catalog_projection_required.remove(&correlation_id);
-        state.retryable_failures.remove(&correlation_id);
+        let current_generation = state
+            .by_correlation
+            .get(&correlation_id)
+            .map(|requirement| requirement.generation);
+        if current_generation != ticket.generation {
+            return false;
+        }
+        state.by_correlation.remove(&correlation_id);
+        true
     }
 
     async fn clear_after_seeded_snapshot(
         &self,
         correlation_id: Uuid,
+        ticket: &DurableReconciliationTicket,
         seed_completed: bool,
         catalog_projection_complete: bool,
     ) -> bool {
         if !seed_completed || !catalog_projection_complete {
             return false;
         }
-        self.reconciled(correlation_id).await;
-        true
+        self.reconciled(correlation_id, ticket).await
     }
 
     async fn unresolved_retryable_failures(
         &self,
-        correlation_id: Uuid,
+        ticket: &DurableReconciliationTicket,
         jobs: &[DurableJobState],
     ) -> Vec<(JobId, Option<JobState>)> {
-        let required = {
-            let state = self.state.lock().await;
-            state
-                .retryable_failures
-                .get(&correlation_id)
-                .cloned()
-                .unwrap_or_default()
-        };
-        if required.is_empty() {
+        if ticket.retryable_failures.is_empty() {
             return Vec::new();
         }
 
         let durable_states: HashMap<_, _> =
             jobs.iter().map(|job| (job.job_id, job.state)).collect();
-        required
-            .into_iter()
+        ticket
+            .retryable_failures
+            .iter()
+            .copied()
             .filter_map(|job_id| {
                 let state = durable_states.get(&job_id).copied();
                 (!matches!(
@@ -5211,7 +5547,11 @@ impl DurableReconciliationGate {
     }
 
     async fn forget(&self, correlation_id: Uuid) {
-        self.reconciled(correlation_id).await;
+        self.state
+            .lock()
+            .await
+            .by_correlation
+            .remove(&correlation_id);
     }
 }
 
@@ -5249,16 +5589,17 @@ impl SeriesBundleTrackerEntry {
 
     fn settle_finalization(
         &mut self,
-        series_root_path: &SeriesRootPath,
+        finalization: &SeriesBundleFinalization,
         published: bool,
-    ) {
-        if !self.finalizations_in_flight.remove(series_root_path) {
-            return;
+    ) -> bool {
+        if !self
+            .finalizations_in_flight
+            .remove(&finalization.series_root_path)
+        {
+            return false;
         }
 
-        if published {
-            self.tracker.mark_finalized(series_root_path);
-        }
+        published && self.tracker.mark_finalized_if_still_eligible(finalization)
     }
 }
 
@@ -5275,6 +5616,8 @@ impl ScanRunAggregator {
             .unwrap_or(Duration::from_secs(60));
         let stall_window = ChronoDuration::from_std(stall_std)
             .unwrap_or_else(|_| ChronoDuration::seconds(60));
+        let durable_reconciliation_pacing =
+            DurableReconciliationPacing::default();
         let inner = Arc::new(ScanRunAggregatorInner {
             orchestrator,
             runs: RwLock::new(HashMap::new()),
@@ -5283,6 +5626,7 @@ impl ScanRunAggregator {
             catalog_events,
             series_bundles: Mutex::new(HashMap::new()),
             reconciliation_gate: DurableReconciliationGate::default(),
+            durable_reconciliation_pacing,
         });
 
         let aggregator = Self {
@@ -5293,9 +5637,17 @@ impl ScanRunAggregator {
     }
 
     fn spawn_worker(&self) {
-        let job_progress = Arc::clone(&self.inner);
+        let job_events = Arc::clone(&self.inner);
         spawn(async move {
-            ScanRunAggregatorInner::run_job_progress(job_progress).await;
+            ScanRunAggregatorInner::run_job_events(job_events).await;
+        });
+
+        let durable_reconciliation = Arc::clone(&self.inner);
+        spawn(async move {
+            ScanRunAggregatorInner::run_durable_reconciliation(
+                durable_reconciliation,
+            )
+            .await;
         });
 
         let scan_events = Arc::clone(&self.inner);
@@ -5316,6 +5668,10 @@ impl ScanRunAggregator {
             .reconciliation_gate
             .require_all([correlation_id])
             .await;
+        self.inner
+            .durable_reconciliation_pacing
+            .forget(correlation_id)
+            .await;
     }
 
     async fn drop(&self, correlation_id: &Uuid) {
@@ -5323,6 +5679,10 @@ impl ScanRunAggregator {
         guard.remove(correlation_id);
         drop(guard);
         self.inner.reconciliation_gate.forget(*correlation_id).await;
+        self.inner
+            .durable_reconciliation_pacing
+            .forget(*correlation_id)
+            .await;
     }
 
     async fn forget_library(&self, library_id: LibraryId) {
@@ -5341,35 +5701,44 @@ impl ScanRunAggregator {
 
         for correlation_id in correlations {
             self.inner.reconciliation_gate.forget(correlation_id).await;
+            self.inner
+                .durable_reconciliation_pacing
+                .forget(correlation_id)
+                .await;
         }
         self.inner.series_bundles.lock().await.remove(&library_id);
     }
 }
 
 impl ScanRunAggregatorInner {
-    async fn run_job_progress(self: Arc<Self>) {
+    async fn run_job_events(self: Arc<Self>) {
         use tokio::sync::broadcast::error::RecvError;
 
         let mut receiver = self.orchestrator.subscribe_job_events();
-        let mut ticker = interval(Duration::from_millis(500));
 
         loop {
-            tokio::select! {
-                result = receiver.recv() => {
-                    match result {
-                        Ok(event) => self.handle_job_event(event).await,
-                        Err(RecvError::Lagged(skipped)) => {
-                            warn!("scan aggregator lagged {skipped} events");
-                            self.mark_all_runs_reconciliation_required().await;
-                            self.reconcile_all_runs("job_event_lag").await;
-                        }
-                        Err(RecvError::Closed) => break,
-                    }
+            match receiver.recv().await {
+                Ok(event) => self.handle_job_event(event).await,
+                Err(RecvError::Lagged(skipped)) => {
+                    warn!("scan aggregator lagged {skipped} events");
+                    // Keep draining immediately. PostgreSQL reconciliation can
+                    // require decoding every job in a large run; doing that in
+                    // this receiver loop creates a feedback cycle where the
+                    // durable read itself causes another broadcast lag.
+                    self.mark_all_runs_reconciliation_required().await;
                 }
-                _ = ticker.tick() => {
-                    self.check_quiescence().await;
-                }
+                Err(RecvError::Closed) => break,
             }
+        }
+    }
+
+    async fn run_durable_reconciliation(self: Arc<Self>) {
+        let mut ticker = interval(Duration::from_millis(500));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            ticker.tick().await;
+            self.check_quiescence().await;
         }
     }
 
@@ -5400,14 +5769,30 @@ impl ScanRunAggregatorInner {
         };
 
         for run in runs {
-            let lag_reconciliation_required = self
+            let explicit_reconciliation_required = self
                 .reconciliation_gate
                 .is_required(run.correlation_id())
                 .await;
             let pre_stall =
                 run.needs_pre_stall_reconciliation(self.stall_timeout).await;
-            if lag_reconciliation_required || pre_stall {
-                let reason = if lag_reconciliation_required {
+            let reconciliation_requested =
+                explicit_reconciliation_required || pre_stall;
+            let reconciliation_due = reconciliation_requested
+                && self
+                    .durable_reconciliation_pacing
+                    .allows_attempt(run.correlation_id(), Instant::now())
+                    .await;
+
+            if reconciliation_requested && !reconciliation_due {
+                // The last attempt still observed active jobs, an incomplete
+                // seed, or an unavailable durable store. Preserve that gate
+                // until its bounded retry is due instead of re-reading the
+                // entire run every 500 ms.
+                continue;
+            }
+
+            if reconciliation_due {
+                let reason = if explicit_reconciliation_required {
                     "lag_retry"
                 } else {
                     "pre_stall"
@@ -5420,6 +5805,12 @@ impl ScanRunAggregatorInner {
                         reason,
                         "durable scan reconciliation failed; deferring terminal decision"
                     );
+                    self.durable_reconciliation_pacing
+                        .defer_next_attempt(
+                            run.correlation_id(),
+                            Instant::now(),
+                        )
+                        .await;
                     continue;
                 }
 
@@ -5467,33 +5858,26 @@ impl ScanRunAggregatorInner {
     async fn mark_all_runs_reconciliation_required(&self) {
         let correlations: Vec<Uuid> =
             self.runs.read().await.keys().copied().collect();
-        self.reconciliation_gate.require_all(correlations).await;
+        self.reconciliation_gate
+            .require_all(correlations.iter().copied())
+            .await;
+        for correlation_id in correlations {
+            self.durable_reconciliation_pacing
+                .forget(correlation_id)
+                .await;
+        }
     }
 
     async fn mark_all_runs_catalog_reconciliation_required(&self) {
         let correlations: Vec<Uuid> =
             self.runs.read().await.keys().copied().collect();
         self.reconciliation_gate
-            .require_catalog_projection_recovery(correlations)
+            .require_catalog_projection_recovery(correlations.iter().copied())
             .await;
-    }
-
-    async fn reconcile_all_runs(&self, reason: &'static str) {
-        let runs: Vec<Arc<ScanRun>> = {
-            let guard = self.runs.read().await;
-            guard.values().cloned().collect()
-        };
-
-        for run in runs {
-            if let Err(err) = self.reconcile_run(&run, reason).await {
-                warn!(
-                    scan = %run.scan_id(),
-                    library = %run.library_id(),
-                    error = %err,
-                    reason,
-                    "failed to reconcile scan run from durable job state"
-                );
-            }
+        for correlation_id in correlations {
+            self.durable_reconciliation_pacing
+                .forget(correlation_id)
+                .await;
         }
     }
 
@@ -5502,6 +5886,14 @@ impl ScanRunAggregatorInner {
         run: &Arc<ScanRun>,
         reason: &'static str,
     ) -> ferrex_core::error::Result<()> {
+        // This ticket fences every async read and projection below. A lag,
+        // retry, or catalog trigger that arrives while reconciliation is in
+        // flight advances the generation and cannot be cleared by this older
+        // snapshot.
+        let reconciliation_ticket = self
+            .reconciliation_gate
+            .begin_reconciliation(run.correlation_id())
+            .await;
         let tracked_job_ids = run.tracked_job_ids().await;
         let jobs = self
             .orchestrator
@@ -5532,7 +5924,7 @@ impl ScanRunAggregatorInner {
         }
         let unresolved_retryable_failures = self
             .reconciliation_gate
-            .unresolved_retryable_failures(run.correlation_id(), &jobs)
+            .unresolved_retryable_failures(&reconciliation_ticket, &jobs)
             .await;
         if !unresolved_retryable_failures.is_empty() {
             return Err(ferrex_core::error::MediaError::Internal(format!(
@@ -5542,15 +5934,12 @@ impl ScanRunAggregatorInner {
             )));
         }
 
-        let catalog_projection_complete = if self
-            .reconciliation_gate
-            .requires_catalog_projection(run.correlation_id())
-            .await
-        {
-            self.reconcile_catalog_projections(run, &jobs).await
-        } else {
-            true
-        };
+        let catalog_projection_complete =
+            if reconciliation_ticket.catalog_projection_required {
+                self.reconcile_catalog_projections(run, &jobs).await
+            } else {
+                true
+            };
 
         tracing::debug!(
             scan = %run.scan_id(),
@@ -5562,10 +5951,22 @@ impl ScanRunAggregatorInner {
             "reconciling scan progress from durable job state"
         );
         run.reconcile_durable_job_states(&jobs).await;
+        if jobs.iter().any(|job| job.series_identity.is_some()) {
+            let now = Instant::now();
+            let mut guard = self.series_bundles.lock().await;
+            let entry = guard
+                .entry(run.library_id())
+                .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
+            entry.touch(now);
+            entry
+                .tracker
+                .reconcile_durable_job_states(run.library_id(), &jobs);
+        }
         if !self
             .reconciliation_gate
             .clear_after_seeded_snapshot(
                 run.correlation_id(),
+                &reconciliation_ticket,
                 run.seed_completed().await,
                 catalog_projection_complete,
             )
@@ -5575,8 +5976,23 @@ impl ScanRunAggregatorInner {
                 scan = %run.scan_id(),
                 library = %run.library_id(),
                 reason,
-                "durable snapshot preceded seed completion; retaining reconciliation gate"
+                "durable snapshot did not satisfy the current reconciliation generation; retaining gate"
             );
+        }
+
+        if self
+            .reconciliation_gate
+            .is_required(run.correlation_id())
+            .await
+            || run.has_active_items().await
+        {
+            self.durable_reconciliation_pacing
+                .defer_next_attempt(run.correlation_id(), Instant::now())
+                .await;
+        } else {
+            self.durable_reconciliation_pacing
+                .forget(run.correlation_id())
+                .await;
         }
         Ok(())
     }
@@ -5813,6 +6229,9 @@ impl ScanRunAggregatorInner {
                                 *job_id,
                             )
                             .await;
+                        self.durable_reconciliation_pacing
+                            .forget(run.correlation_id())
+                            .await;
                     }
                     run.record_job_failure(
                         &event.meta.idempotency_key,
@@ -5825,18 +6244,9 @@ impl ScanRunAggregatorInner {
                     .await;
 
                     if *retryable {
-                        if let Err(err) = self
-                            .reconcile_run(&run, "retryable_job_failure")
-                            .await
-                        {
-                            warn!(
-                                scan = %run.scan_id(),
-                                library = %run.library_id(),
-                                job = %job_id,
-                                error = %err,
-                                "retryable job failure is not yet confirmed durably; terminalization remains gated"
-                            );
-                        }
+                        // Keep the broadcast receiver draining. The dedicated
+                        // durable worker observes the reset gate on its next
+                        // tick and confirms the authoritative retry outcome.
                         false
                     } else if terminalization_allowed {
                         run.try_complete(
@@ -5893,19 +6303,6 @@ impl ScanRunAggregatorInner {
             .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
         entry.touch(now);
         entry.tracker.observe_job_event(event);
-
-        drop(guard);
-
-        match &event.payload {
-            JobEventPayload::Completed { .. }
-            | JobEventPayload::DeadLettered { .. }
-            | JobEventPayload::Failed {
-                retryable: false, ..
-            } => {
-                self.try_emit_series_bundle_finalized(library_id).await;
-            }
-            _ => {}
-        }
     }
 
     async fn handle_scan_event(&self, event: ScanEvent) {
@@ -5944,6 +6341,12 @@ impl ScanRunAggregatorInner {
                     if let Some(run) = run {
                         let has_enrollment =
                             !summary.enrolled_job_ids.is_empty();
+                        // Seed completion changes whether the registration
+                        // snapshot is authoritative, even for an empty run.
+                        // Let the dedicated worker retry immediately.
+                        self.durable_reconciliation_pacing
+                            .forget(correlation_id)
+                            .await;
                         if has_enrollment {
                             // Even if every enqueue notification was dropped,
                             // the seed mailbox has the exact durable job IDs.
@@ -5968,6 +6371,12 @@ impl ScanRunAggregatorInner {
                                 .reconcile_run(&run, "post_seed_enrollment")
                                 .await
                         {
+                            self.durable_reconciliation_pacing
+                                .defer_next_attempt(
+                                    correlation_id,
+                                    Instant::now(),
+                                )
+                                .await;
                             warn!(
                                 scan = %run.scan_id(),
                                 library = %run.library_id(),
@@ -6110,10 +6519,7 @@ impl ScanRunAggregatorInner {
 
             let mut guard = self.series_bundles.lock().await;
             if let Some(entry) = guard.get_mut(&library_id) {
-                entry.settle_finalization(
-                    &finalization.series_root_path,
-                    frame.is_some(),
-                );
+                entry.settle_finalization(&finalization, frame.is_some());
             }
             drop(guard);
 

@@ -136,6 +136,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn production_sized_job_stream_buffers_bursts_above_256() {
+        let bus = InProcJobEventBus::with_capacities(32_768, 8192);
+        let mut receiver = bus.subscribe();
+        let library_id = LibraryId::new();
+
+        for sequence in 0..300 {
+            bus.publish(JobEvent {
+                meta: EventMeta::new(
+                    None,
+                    library_id,
+                    format!("burst:{sequence}"),
+                    None,
+                ),
+                payload: JobEventPayload::ThroughputTick {
+                    queue_depths: Vec::new(),
+                    sampled_at: Utc::now(),
+                },
+            })
+            .await
+            .expect("event publish succeeds");
+        }
+
+        for expected in 0..300 {
+            let event = receiver
+                .recv()
+                .await
+                .expect("production-sized job stream retains the burst");
+            assert_eq!(event.meta.idempotency_key, format!("burst:{expected}"));
+        }
+    }
+
+    #[tokio::test]
     async fn scan_stream_capacity_is_independent_from_job_reconciliation_stream()
      {
         let bus = InProcJobEventBus::with_capacities(8, 512);

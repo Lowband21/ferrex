@@ -5,22 +5,25 @@ use crate::error::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::from_value;
-use sqlx::{Executor, PgPool};
+use sqlx::{Executor, PgPool, Row};
 use std::fmt;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use tracing::{debug, info, trace, warn};
 
 use crate::domain::scan::orchestration::{
     config::RetryConfig,
+    context::{SeasonLink, SeriesLink, SeriesRootPath},
     events::stable_path_key,
     job::{
-        DependencyKey, EnqueueRequest, JobHandle, JobId, JobKind, JobPayload,
-        JobPriority, JobState, ScanReason, TranscriptExtractJob,
+        AnalyzeScanHierarchy, DependencyKey, EnqueueRequest, JobHandle, JobId,
+        JobKind, JobPayload, JobPriority, JobState, ScanReason,
+        TranscriptExtractJob,
     },
     lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
     queue::{
-        DurableJobState, FailOutcome, LeaseExpiryScanner, QueueInstrumentation,
-        QueueService, QueueSnapshot, QueueTransitionOutcome, ReadyQueueCount,
+        DurableJobState, DurableSeriesIdentity, FailOutcome,
+        LeaseExpiryScanner, QueueInstrumentation, QueueService, QueueSnapshot,
+        QueueTransitionOutcome, ReadyQueueCount,
     },
     scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
 };
@@ -45,6 +48,78 @@ fn transcript_media_type(job: &TranscriptExtractJob) -> Option<&'static str> {
 
 fn bounded_queue_error(error: Option<String>) -> Option<String> {
     error.map(|message| message.chars().take(2048).collect())
+}
+
+fn resolved_series_id(series: &SeriesLink) -> Option<crate::types::SeriesID> {
+    match series {
+        SeriesLink::Resolved(reference) => Some(reference.id),
+        SeriesLink::Hint(_) => None,
+    }
+}
+
+fn season_number(season: &SeasonLink) -> Option<u16> {
+    match season {
+        SeasonLink::Resolved(reference) => reference.number,
+        SeasonLink::Number(number) => Some(*number),
+    }
+}
+
+fn hierarchy_series_identity(
+    hierarchy: &AnalyzeScanHierarchy,
+) -> Option<DurableSeriesIdentity> {
+    match hierarchy {
+        AnalyzeScanHierarchy::Movie(_) => None,
+        AnalyzeScanHierarchy::Series(hierarchy) => {
+            Some(DurableSeriesIdentity {
+                series_root_path: hierarchy.series_root_path.clone(),
+                series_id: resolved_series_id(&hierarchy.series),
+                season_number: None,
+            })
+        }
+        AnalyzeScanHierarchy::Season(hierarchy) => {
+            Some(DurableSeriesIdentity {
+                series_root_path: hierarchy.series_root_path.clone(),
+                series_id: resolved_series_id(&hierarchy.series),
+                season_number: season_number(&hierarchy.season),
+            })
+        }
+        AnalyzeScanHierarchy::Episode(hierarchy) => {
+            Some(DurableSeriesIdentity {
+                series_root_path: hierarchy.series_root_path.clone(),
+                series_id: resolved_series_id(&hierarchy.series),
+                season_number: season_number(&hierarchy.season),
+            })
+        }
+    }
+}
+
+fn durable_series_identity(
+    payload: &JobPayload,
+) -> Option<DurableSeriesIdentity> {
+    match payload {
+        JobPayload::SeriesResolve(job) => Some(DurableSeriesIdentity {
+            series_root_path: job.series_root_path.clone(),
+            series_id: None,
+            season_number: None,
+        }),
+        JobPayload::MediaAnalyze(job) => {
+            hierarchy_series_identity(&job.hierarchy)
+        }
+        JobPayload::MetadataEnrich(job) => {
+            hierarchy_series_identity(&job.hierarchy)
+        }
+        JobPayload::IndexUpsert(job) => {
+            hierarchy_series_identity(&job.hierarchy)
+        }
+        JobPayload::EpisodeMatch(job) => Some(DurableSeriesIdentity {
+            series_root_path: job.hierarchy.series_root_path.clone(),
+            series_id: resolved_series_id(&job.hierarchy.series),
+            season_number: season_number(&job.hierarchy.season),
+        }),
+        JobPayload::FolderScan(_)
+        | JobPayload::ImageFetch(_)
+        | JobPayload::TranscriptExtract(_) => None,
+    }
 }
 
 async fn mark_transcript_queue_status(
@@ -630,6 +705,108 @@ impl PostgresQueueService {
 
         Ok(counts)
     }
+
+    /// Atomically release deferred EpisodeMatch rows for one terminal series
+    /// root.
+    ///
+    /// The row lock makes the terminal check linearizable with
+    /// `enroll_resolution_generation`: if a retry enrollment wins first this
+    /// observes nonterminal state, and if this wins first its release belongs to
+    /// the prior terminal generation.
+    pub async fn release_terminal_series_dependency(
+        &self,
+        library_id: LibraryId,
+        series_root_path: &SeriesRootPath,
+    ) -> Result<u64> {
+        let updated = sqlx::query(
+            r#"
+            WITH terminal_series AS MATERIALIZED (
+                SELECT library_id, series_root_path
+                FROM series_scan_state
+                WHERE library_id = $2
+                  AND series_root_path = $3
+                  AND status IN ('resolved', 'failed')
+                FOR UPDATE
+            )
+            UPDATE orchestrator_jobs AS job
+            SET state = 'ready',
+                dependency_key = NULL,
+                available_at = NOW(),
+                updated_at = NOW()
+            FROM terminal_series AS series
+            WHERE job.kind = $1
+              AND job.state = 'deferred'
+              AND job.library_id = series.library_id
+              AND job.dependency_key =
+                  'series_root:' || series.series_root_path
+            "#,
+        )
+        .bind(JobKind::EpisodeMatch as i16)
+        .bind(library_id.0)
+        .bind(series_root_path.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(|error| {
+            MediaError::Internal(format!(
+                "terminal series dependency release failed: {error}"
+            ))
+        })?;
+
+        Ok(updated.rows_affected())
+    }
+
+    /// Promote EpisodeMatch rows stranded behind a series dependency that has
+    /// already reached a terminal durable state.
+    ///
+    /// This closes the recovery side of the lost-wakeup window where
+    /// SeriesResolve releases a dependency immediately before the episode row
+    /// is inserted as deferred. Restricting the update to EpisodeMatch jobs and
+    /// an exact library/root dependency match avoids releasing unrelated work.
+    /// Locking terminal state rows serializes repair with fresh resolver
+    /// enrollment, so a historical failed snapshot cannot release the new
+    /// generation after enrollment has begun.
+    pub async fn repair_terminal_series_dependencies(&self) -> Result<u64> {
+        let updated = sqlx::query(
+            r#"
+            WITH terminal_series AS MATERIALIZED (
+                SELECT series.library_id, series.series_root_path
+                FROM series_scan_state AS series
+                WHERE series.status IN ('resolved', 'failed')
+                  AND EXISTS (
+                      SELECT 1
+                      FROM orchestrator_jobs AS blocked
+                      WHERE blocked.kind = $1
+                        AND blocked.state = 'deferred'
+                        AND blocked.library_id = series.library_id
+                        AND blocked.dependency_key =
+                            'series_root:' || series.series_root_path
+                  )
+                FOR UPDATE
+            )
+            UPDATE orchestrator_jobs AS job
+            SET state = 'ready',
+                dependency_key = NULL,
+                available_at = NOW(),
+                updated_at = NOW()
+            FROM terminal_series AS series
+            WHERE job.kind = $1
+              AND job.state = 'deferred'
+              AND job.library_id = series.library_id
+              AND job.dependency_key =
+                  'series_root:' || series.series_root_path
+            "#,
+        )
+        .bind(JobKind::EpisodeMatch as i16)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "terminal series dependency repair failed: {e}"
+            ))
+        })?;
+
+        Ok(updated.rows_affected())
+    }
 }
 
 #[async_trait]
@@ -680,8 +857,100 @@ impl QueueInstrumentation for PostgresQueueService {
     }
 }
 
+/// Finalize authoritative series failure and promote only the matching
+/// deferred episode work inside the caller's queue transition transaction.
+///
+/// Callers must already hold the series-state row lock before locking the
+/// SeriesResolve job row. `record_failure` is used by retry-budget exhaustion,
+/// whose dispatcher never persisted `Failed`; direct dead-letter dispatch has
+/// already done so and passes `false`.
+async fn finalize_terminal_series_failure(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    library_id: LibraryId,
+    series_root_path: &SeriesRootPath,
+    failure_reason: Option<&str>,
+    record_failure: bool,
+) -> Result<u64> {
+    if record_failure {
+        sqlx::query(
+            r#"
+            UPDATE series_scan_state
+            SET status = 'failed'::series_scan_status,
+                failed_at = NOW(),
+                failure_reason = $3,
+                updated_at = NOW()
+            WHERE library_id = $1
+              AND series_root_path = $2
+              AND status <> 'resolved'::series_scan_status
+            "#,
+        )
+        .bind(library_id.0)
+        .bind(series_root_path.as_str())
+        .bind(failure_reason.unwrap_or("series resolution retry limit reached"))
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "terminal series-state failure update failed: {e}"
+            ))
+        })?;
+    }
+
+    let dependency_key = DependencyKey::series_root(series_root_path);
+    let released = sqlx::query(
+        r#"
+        UPDATE orchestrator_jobs
+        SET state = 'ready',
+            dependency_key = NULL,
+            available_at = NOW(),
+            updated_at = NOW()
+        WHERE kind = $1
+          AND state = 'deferred'
+          AND library_id = $2
+          AND dependency_key = $3
+        "#,
+    )
+    .bind(JobKind::EpisodeMatch as i16)
+    .bind(library_id.0)
+    .bind(dependency_key.as_str())
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "terminal series dependency release failed: {e}"
+        ))
+    })?;
+
+    Ok(released.rows_affected())
+}
+
+fn is_superseding_exhausted_series_generation(
+    status: &str,
+    series_updated_at: chrono::DateTime<Utc>,
+    lease_started_at: chrono::DateTime<Utc>,
+) -> bool {
+    status == "discovered" && series_updated_at > lease_started_at
+}
+
 #[async_trait]
 impl QueueService for PostgresQueueService {
+    async fn release_terminal_series_dependency(
+        &self,
+        library_id: LibraryId,
+        series_root_path: &SeriesRootPath,
+    ) -> Result<u64> {
+        Self::release_terminal_series_dependency(
+            self,
+            library_id,
+            series_root_path,
+        )
+        .await
+    }
+
+    async fn repair_terminal_series_dependencies(&self) -> Result<u64> {
+        Self::repair_terminal_series_dependencies(self).await
+    }
+
     async fn ready_counts_grouped(&self) -> Result<Vec<ReadyQueueCount>> {
         Self::ready_counts_grouped(self).await
     }
@@ -1537,7 +1806,7 @@ impl QueueService for PostgresQueueService {
             payload: serde_json::Value,
             priority: i16,
             attempts: i32,
-            available_at: chrono::DateTime<chrono::Utc>,
+            _available_at: chrono::DateTime<chrono::Utc>,
             dedupe_key: String,
             dependency_key: Option<String>,
             correlation_id: Option<Uuid>,
@@ -1581,7 +1850,7 @@ impl QueueService for PostgresQueueService {
                 payload: row.payload,
                 priority: row.priority,
                 attempts: row.attempts,
-                available_at: row.available_at,
+                _available_at: row.available_at,
                 dedupe_key: row.dedupe_key,
                 dependency_key: row.dependency_key,
                 correlation_id: row.correlation_id,
@@ -1610,7 +1879,7 @@ impl QueueService for PostgresQueueService {
                     payload: row.payload,
                     priority: row.priority,
                     attempts: row.attempts,
-                    available_at: row.available_at,
+                    _available_at: row.available_at,
                     dedupe_key: row.dedupe_key,
                     dependency_key: row.dependency_key,
                     correlation_id: row.correlation_id,
@@ -1628,8 +1897,10 @@ impl QueueService for PostgresQueueService {
         let lease_id = LeaseId::new();
         let expires_at = chrono::Utc::now() + request.lease_ttl;
 
-        // Update to leased state
-        let updated = sqlx::query!(
+        // While a row is leased, `available_at` is its stable lease-start
+        // marker. Lease renewal deliberately leaves it unchanged; every path
+        // that returns a row to Ready assigns a new availability timestamp.
+        let updated = sqlx::query(
             r#"
             UPDATE orchestrator_jobs
             SET state='leased',
@@ -1637,26 +1908,33 @@ impl QueueService for PostgresQueueService {
                 lease_id=$2,
                 lease_expires_at=$3,
                 attempts = COALESCE(attempts, 0),
+                available_at=NOW(),
                 updated_at=NOW()
             WHERE id = $4 AND state = 'ready'
-            RETURNING lease_id
+            RETURNING available_at
             "#,
-            request.worker_id,
-            lease_id.0,
-            expires_at,
-            row.id
         )
+        .bind(&request.worker_id)
+        .bind(lease_id.0)
+        .bind(expires_at)
+        .bind(row.id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
             MediaError::Internal(format!("dequeue update->leased failed: {e}"))
         })?;
 
-        if updated.is_none() {
+        let Some(updated) = updated else {
             // Raced with state change; treat as empty
             drop(tx);
             return Ok(None);
-        }
+        };
+        let lease_started_at: chrono::DateTime<Utc> =
+            updated.try_get("available_at").map_err(|e| {
+                MediaError::Internal(format!(
+                    "dequeue lease-start timestamp decode failed: {e}"
+                ))
+            })?;
 
         // Build JobRecord from the selected row and new lease fields
         let payload: JobPayload =
@@ -1685,7 +1963,7 @@ impl QueueService for PostgresQueueService {
             priority,
             state: JobState::Leased,
             attempts: row.attempts.max(0) as u16,
-            available_at: row.available_at,
+            available_at: lease_started_at,
             lease_owner: Some(request.worker_id.clone()),
             lease_expires_at: Some(expires_at),
             backoff_until: None,
@@ -1856,9 +2134,80 @@ impl QueueService for PostgresQueueService {
         retryable: bool,
         error: Option<String>,
     ) -> Result<FailOutcome> {
+        // A retryable SeriesResolve can cross its attempt limit here without
+        // passing through the dispatcher's explicit dead-letter path. Read its
+        // identity first so a terminal transition can follow the same global
+        // series-state -> queue-row lock order as dependency release and the
+        // direct dead-letter transition below.
+        let terminal_series_identity = if let Some(candidate) = sqlx::query(
+            r#"
+            SELECT attempts, payload
+            FROM orchestrator_jobs
+            WHERE lease_id = $1::uuid AND state = 'leased'
+            "#,
+        )
+        .bind(lease_id.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("fail identity read failed: {e}"))
+        })? {
+            let attempts: i32 = candidate.try_get("attempts").map_err(|e| {
+                MediaError::Internal(format!(
+                    "fail identity attempts decode failed: {e}"
+                ))
+            })?;
+            let payload: serde_json::Value =
+                candidate.try_get("payload").map_err(|e| {
+                    MediaError::Internal(format!(
+                        "fail identity payload decode failed: {e}"
+                    ))
+                })?;
+            let payload: JobPayload =
+                serde_json::from_value(payload).map_err(|e| {
+                    MediaError::Internal(format!(
+                        "fail identity payload deserialize failed: {e}"
+                    ))
+                })?;
+            let terminal = !retryable
+                || attempts >= i32::from(self.retry_config.max_attempts);
+            match payload {
+                JobPayload::SeriesResolve(job) if terminal => {
+                    Some((job.library_id, job.series_root_path))
+                }
+                _ => None,
+            }
+        } else {
+            return Ok(FailOutcome::Missing);
+        };
+
         let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!("begin fail tx failed: {e}"))
         })?;
+
+        let locked_series_state =
+            if let Some((library_id, root)) = &terminal_series_identity {
+                sqlx::query_as::<_, (String, chrono::DateTime<Utc>)>(
+                    r#"
+                SELECT status::text, updated_at
+                FROM series_scan_state
+                WHERE library_id = $1
+                  AND series_root_path = $2
+                FOR UPDATE
+                "#,
+                )
+                .bind(library_id.0)
+                .bind(root.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "fail terminal series-state lock failed: {e}"
+                    ))
+                })?
+            } else {
+                None
+            };
 
         // Lock the row and get current attempts
         let row = sqlx::query!(
@@ -1895,6 +2244,85 @@ impl QueueService for PostgresQueueService {
                 row_id
             ))
         })?;
+        if let Some((library_id, root)) = &terminal_series_identity {
+            let identity_matches = matches!(
+                &payload,
+                JobPayload::SeriesResolve(job)
+                    if job.library_id == *library_id
+                        && job.series_root_path == *root
+            );
+            if !identity_matches {
+                return Err(MediaError::Internal(
+                    "terminal fail SeriesResolve identity changed while leased"
+                        .into(),
+                ));
+            }
+            let Some((locked_status, series_updated_at)) =
+                locked_series_state.as_ref()
+            else {
+                return Err(MediaError::Internal(format!(
+                    "terminal fail missing authoritative series state for {}",
+                    root.as_str()
+                )));
+            };
+            let lease_started_at: chrono::DateTime<Utc> = sqlx::query_scalar(
+                "SELECT available_at FROM orchestrator_jobs WHERE id = $1",
+            )
+            .bind(row_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "fail lease-start timestamp lookup failed: {e}"
+                ))
+            })?;
+            if is_superseding_exhausted_series_generation(
+                locked_status,
+                *series_updated_at,
+                lease_started_at,
+            ) {
+                let requeued = sqlx::query(
+                    r#"
+                    UPDATE orchestrator_jobs
+                    SET state = 'ready',
+                        attempts = 0,
+                        available_at = NOW(),
+                        lease_owner = NULL,
+                        lease_id = NULL,
+                        lease_expires_at = NULL,
+                        dependency_key = NULL,
+                        last_error = NULL,
+                        updated_at = NOW()
+                    WHERE id = $1
+                      AND lease_id = $2::uuid
+                      AND state = 'leased'
+                    "#,
+                )
+                .bind(row_id)
+                .bind(lease_id.0)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "superseded exhausted SeriesResolve requeue failed: {e}"
+                    ))
+                })?;
+                if requeued.rows_affected() != 1 {
+                    return Ok(FailOutcome::Missing);
+                }
+                tx.commit().await.map_err(|e| {
+                    MediaError::Internal(format!(
+                        "superseded exhausted SeriesResolve commit failed: {e}"
+                    ))
+                })?;
+                info!(
+                    job = %row_id,
+                    series_root = %root.as_str(),
+                    "requeued exhausted SeriesResolve superseded by a fresh root enrollment"
+                );
+                return Ok(FailOutcome::Requeued);
+            }
+        }
         let transcript_job = transcript_payload(&payload);
 
         let mut library_under_pressure =
@@ -2019,6 +2447,17 @@ impl QueueService for PostgresQueueService {
                 ))
             })?;
 
+            if let Some((library_id, root)) = &terminal_series_identity {
+                finalize_terminal_series_failure(
+                    &mut tx,
+                    *library_id,
+                    root,
+                    error.as_deref(),
+                    true,
+                )
+                .await?;
+            }
+
             tx.commit().await.map_err(|e| {
                 MediaError::Internal(format!("fail tx commit failed: {e}"))
             })?;
@@ -2067,69 +2506,248 @@ impl QueueService for PostgresQueueService {
         lease_id: LeaseId,
         error: Option<String>,
     ) -> Result<QueueTransitionOutcome> {
-        let row = sqlx::query!(
+        // Read only enough identity to establish the global lock order for a
+        // SeriesResolve transition. The lease is revalidated under lock below;
+        // this first read never authorizes a state change by itself.
+        let candidate_payload = sqlx::query_scalar::<_, serde_json::Value>(
+            r#"
+            SELECT payload
+            FROM orchestrator_jobs
+            WHERE lease_id = $1::uuid AND state = 'leased'
+            "#,
+        )
+        .bind(lease_id.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "dead_letter identity read failed: {e}"
+            ))
+        })?;
+
+        let Some(candidate_payload) = candidate_payload else {
+            return Ok(QueueTransitionOutcome::Missing);
+        };
+        let candidate_job: JobPayload =
+            serde_json::from_value(candidate_payload).map_err(|e| {
+                MediaError::Internal(format!(
+                    "dead_letter payload decode failed: {e}"
+                ))
+            })?;
+        let series_identity = match &candidate_job {
+            JobPayload::SeriesResolve(job) => {
+                Some((job.library_id, job.series_root_path.clone()))
+            }
+            _ => None,
+        };
+
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            MediaError::Internal(format!("begin dead_letter tx failed: {e}"))
+        })?;
+
+        // Series-state operations consistently lock the authoritative root
+        // before queue rows. This matches enrollment and dependency repair and
+        // avoids a queue->series inversion with the housekeeper.
+        let series_status =
+            if let Some((library_id, series_root_path)) = &series_identity {
+                sqlx::query_scalar::<_, String>(
+                    r#"
+                SELECT status::text
+                FROM series_scan_state
+                WHERE library_id = $1
+                  AND series_root_path = $2
+                FOR UPDATE
+                "#,
+                )
+                .bind(library_id.0)
+                .bind(series_root_path.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "dead_letter series-state lock failed: {e}"
+                    ))
+                })?
+            } else {
+                None
+            };
+
+        let row = sqlx::query(
             r#"
             SELECT id, attempts, payload, correlation_id
             FROM orchestrator_jobs
             WHERE lease_id = $1::uuid AND state = 'leased'
+            FOR UPDATE
             "#,
-            lease_id.0,
         )
-        .fetch_optional(&self.pool)
+        .bind(lease_id.0)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
-            MediaError::Internal(format!("dead_letter select failed: {e}"))
+            MediaError::Internal(format!("dead_letter lease lock failed: {e}"))
         })?;
 
-        let res = sqlx::query!(
+        let Some(row) = row else {
+            return Ok(QueueTransitionOutcome::Missing);
+        };
+        let row_id: uuid::Uuid = row.try_get("id").map_err(|e| {
+            MediaError::Internal(format!("dead_letter id decode failed: {e}"))
+        })?;
+        let attempts: i32 = row.try_get("attempts").map_err(|e| {
+            MediaError::Internal(format!(
+                "dead_letter attempts decode failed: {e}"
+            ))
+        })?;
+        let row_payload: serde_json::Value =
+            row.try_get("payload").map_err(|e| {
+                MediaError::Internal(format!(
+                    "dead_letter payload row decode failed: {e}"
+                ))
+            })?;
+        let row_correlation_id: Option<uuid::Uuid> =
+            row.try_get("correlation_id").map_err(|e| {
+                MediaError::Internal(format!(
+                    "dead_letter correlation decode failed: {e}"
+                ))
+            })?;
+        let locked_job: JobPayload =
+            serde_json::from_value(row_payload.clone()).map_err(|e| {
+                MediaError::Internal(format!(
+                    "dead_letter locked payload decode failed: {e}"
+                ))
+            })?;
+
+        if let Some((library_id, series_root_path)) = &series_identity {
+            let identity_matches = matches!(
+                &locked_job,
+                JobPayload::SeriesResolve(job)
+                    if job.library_id == *library_id
+                        && job.series_root_path == *series_root_path
+            );
+            if !identity_matches {
+                return Err(MediaError::Internal(
+                    "dead_letter leased SeriesResolve identity changed while leased"
+                        .into(),
+                ));
+            }
+            if series_status.is_none() {
+                return Err(MediaError::Internal(format!(
+                    "dead_letter missing authoritative series state for {}",
+                    series_root_path.as_str()
+                )));
+            }
+
+            if matches!(series_status.as_deref(), Some("discovered" | "seeded"))
+            {
+                let requeued = sqlx::query(
+                    r#"
+                    UPDATE orchestrator_jobs
+                    SET state = 'ready',
+                        attempts = 0,
+                        available_at = NOW(),
+                        lease_owner = NULL,
+                        lease_id = NULL,
+                        lease_expires_at = NULL,
+                        dependency_key = NULL,
+                        last_error = NULL,
+                        updated_at = NOW()
+                    WHERE id = $1
+                      AND lease_id = $2::uuid
+                      AND state = 'leased'
+                    "#,
+                )
+                .bind(row_id)
+                .bind(lease_id.0)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "superseded SeriesResolve requeue failed: {e}"
+                    ))
+                })?;
+                if requeued.rows_affected() != 1 {
+                    return Ok(QueueTransitionOutcome::Missing);
+                }
+
+                tx.commit().await.map_err(|e| {
+                    MediaError::Internal(format!(
+                        "superseded SeriesResolve commit failed: {e}"
+                    ))
+                })?;
+                info!(
+                    job = %row_id,
+                    series_root = %series_root_path.as_str(),
+                    "requeued SeriesResolve superseded by a fresh root enrollment"
+                );
+                return Ok(QueueTransitionOutcome::Requeued);
+            }
+        }
+
+        let transitioned = sqlx::query(
             r#"
             UPDATE orchestrator_jobs
-            SET state='dead_letter',
-                lease_owner=NULL,
-                lease_id=NULL,
-                lease_expires_at=NULL,
-                last_error=$2,
-                updated_at=NOW()
-            WHERE lease_id = $1::uuid AND state = 'leased'
+            SET state = 'dead_letter',
+                lease_owner = NULL,
+                lease_id = NULL,
+                lease_expires_at = NULL,
+                last_error = $3,
+                updated_at = NOW()
+            WHERE id = $1
+              AND lease_id = $2::uuid
+              AND state = 'leased'
             "#,
-            lease_id.0,
-            error
         )
-        .execute(&self.pool)
+        .bind(row_id)
+        .bind(lease_id.0)
+        .bind(error.clone())
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
             MediaError::Internal(format!("dead_letter update failed: {e}"))
         })?;
-
-        if res.rows_affected() > 0 {
-            if let Some(row) = row {
-                let row_id = row.id;
-                let attempts = row.attempts;
-                let row_correlation_id = row.correlation_id;
-                let row_payload = row.payload;
-                if let Ok(payload) =
-                    serde_json::from_value::<JobPayload>(row_payload)
-                    && let Some(job) = transcript_payload(&payload)
-                    && let Err(err) = mark_transcript_queue_status(
-                        &self.pool,
-                        &job,
-                        TranscriptProcessingState::Failed,
-                        attempts.saturating_add(1),
-                        self.retry_config.max_attempts,
-                        error.clone(),
-                        None,
-                        row_correlation_id,
-                    )
-                    .await
-                {
-                    warn!(error = %err, job = %row_id, "failed to mark transcript dead-letter status");
-                }
-            }
-            warn!("job with lease {:?} moved to dead_letter", lease_id.0);
-            Ok(QueueTransitionOutcome::Applied)
-        } else {
-            Ok(QueueTransitionOutcome::Missing)
+        if transitioned.rows_affected() != 1 {
+            return Ok(QueueTransitionOutcome::Missing);
         }
+
+        // A failed SeriesResolve releases only its own deferred EpisodeMatch
+        // rows, and only while the same locked root remains terminal. Legacy
+        // rows missed before this transaction are still covered by the
+        // housekeeper's terminal dependency repair sweep.
+        if let Some((library_id, series_root_path)) = &series_identity
+            && matches!(series_status.as_deref(), Some("failed" | "resolved"))
+        {
+            finalize_terminal_series_failure(
+                &mut tx,
+                *library_id,
+                series_root_path,
+                error.as_deref(),
+                false,
+            )
+            .await?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("dead_letter tx commit failed: {e}"))
+        })?;
+
+        if let Some(job) = transcript_payload(&locked_job)
+            && let Err(err) = mark_transcript_queue_status(
+                &self.pool,
+                &job,
+                TranscriptProcessingState::Failed,
+                attempts.saturating_add(1),
+                self.retry_config.max_attempts,
+                error.clone(),
+                None,
+                row_correlation_id,
+            )
+            .await
+        {
+            warn!(error = %err, job = %row_id, "failed to mark transcript dead-letter status");
+        }
+
+        warn!("job with lease {:?} moved to dead_letter", lease_id.0);
+        Ok(QueueTransitionOutcome::Applied)
     }
 
     async fn cancel_job(&self, job_id: JobId) -> Result<()> {
@@ -2260,6 +2878,7 @@ impl QueueService for PostgresQueueService {
                 kind,
                 media_id,
                 indexing_change,
+                series_identity: durable_series_identity(&payload),
                 state: Self::parse_state(&row.state)?,
                 attempts: row.attempts.max(0) as u16,
                 dedupe_key: row.dedupe_key,
@@ -2309,9 +2928,16 @@ impl QueueService for PostgresQueueService {
 mod tests {
     use super::*;
     use crate::domain::scan::orchestration::{
-        context::{FolderScanContext, MovieFolderScanContext, MovieRootPath},
-        job::FolderScanJob,
+        context::{
+            FolderScanContext, MovieFolderScanContext, MovieRootPath,
+            SeriesHint, SeriesRootPath,
+        },
+        job::{FolderScanJob, SeriesResolveJob},
         lease::QueueSelector,
+        series_state::{
+            PostgresSeriesScanStateRepository, SeriesScanStateRepository,
+            SeriesScanStatus,
+        },
     };
     use sqlx::Row;
     use std::collections::HashMap;
@@ -2336,6 +2962,100 @@ mod tests {
         })
     }
 
+    fn series_resolve_payload(
+        library_id: LibraryId,
+        series_root_path: SeriesRootPath,
+        title: &str,
+    ) -> JobPayload {
+        JobPayload::SeriesResolve(SeriesResolveJob {
+            library_id,
+            series_root_path,
+            hint: None,
+            folder_name: title.into(),
+            scan_reason: ScanReason::UserRequested,
+        })
+    }
+
+    async fn seed_deferred_episode(
+        pool: &PgPool,
+        library_id: LibraryId,
+        series_root_path: &SeriesRootPath,
+        suffix: &str,
+    ) -> uuid::Uuid {
+        let job_id = uuid::Uuid::now_v7();
+        let dependency_key = DependencyKey::series_root(series_root_path);
+        sqlx::query(
+            r#"
+            INSERT INTO orchestrator_jobs (
+                id, library_id, kind, payload, priority, state, attempts,
+                available_at, dedupe_key, dependency_key,
+                created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, '{}'::jsonb, $4, 'deferred', 0,
+                NOW(), $5, $6, NOW(), NOW()
+            )
+            "#,
+        )
+        .bind(job_id)
+        .bind(library_id.0)
+        .bind(JobKind::EpisodeMatch as i16)
+        .bind(JobPriority::P1 as i16)
+        .bind(format!("series-terminal-race:{library_id}:{suffix}"))
+        .bind(dependency_key.as_str())
+        .execute(pool)
+        .await
+        .expect("deferred episode row seeded");
+        job_id
+    }
+
+    async fn persisted_job_state(pool: &PgPool, job_id: uuid::Uuid) -> String {
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM orchestrator_jobs WHERE id = $1",
+        )
+        .bind(job_id)
+        .fetch_one(pool)
+        .await
+        .expect("job state loaded")
+    }
+
+    #[test]
+    fn exhausted_series_supersession_requires_newer_discovered_generation() {
+        let lease_started_at = Utc::now();
+        let older = lease_started_at - chrono::Duration::milliseconds(1);
+        let newer = lease_started_at + chrono::Duration::milliseconds(1);
+
+        assert!(is_superseding_exhausted_series_generation(
+            "discovered",
+            newer,
+            lease_started_at,
+        ));
+        assert!(!is_superseding_exhausted_series_generation(
+            "discovered",
+            lease_started_at,
+            lease_started_at,
+        ));
+        assert!(!is_superseding_exhausted_series_generation(
+            "discovered",
+            older,
+            lease_started_at,
+        ));
+        assert!(!is_superseding_exhausted_series_generation(
+            "seeded",
+            newer,
+            lease_started_at,
+        ));
+        assert!(!is_superseding_exhausted_series_generation(
+            "failed",
+            newer,
+            lease_started_at,
+        ));
+        assert!(!is_superseding_exhausted_series_generation(
+            "resolved",
+            newer,
+            lease_started_at,
+        ));
+    }
+
     async fn seed_library(
         pool: &PgPool,
         library_id: LibraryId,
@@ -2357,6 +3077,30 @@ mod tests {
             MediaError::Internal(format!("seed library failed: {err}"))
         })?;
         Ok(())
+    }
+
+    async fn postgres_pool_or_skip(test_name: &str) -> Option<PgPool> {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping {test_name}: DATABASE_URL not set");
+                return None;
+            }
+        };
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping {test_name}: failed to connect to DATABASE_URL ({err})"
+                );
+                return None;
+            }
+        };
+        if let Err(err) = crate::MIGRATOR.run(&pool).await {
+            eprintln!("skipping {test_name}: migrations failed ({err})");
+            return None;
+        }
+        Some(pool)
     }
 
     async fn active_dedupe_count(
@@ -2405,6 +3149,1064 @@ mod tests {
             states.insert(row.try_get("state")?, row.try_get("count")?);
         }
         Ok(states)
+    }
+
+    #[tokio::test]
+    async fn series_dead_letter_requeues_superseding_enrollment() {
+        let Some(pool) = postgres_pool_or_skip(
+            "series_dead_letter_requeues_superseding_enrollment",
+        )
+        .await
+        else {
+            return;
+        };
+        let queue = PostgresQueueService::new(pool.clone())
+            .await
+            .expect("queue service initializes");
+        let states = PostgresSeriesScanStateRepository::new(pool.clone());
+        let library_id = LibraryId::new();
+        let library_root =
+            format!("/queue-series-terminal-race/{}", library_id.as_uuid());
+        seed_library(&pool, library_id, &library_root)
+            .await
+            .expect("library seeded");
+        let series_root_path =
+            SeriesRootPath::try_new(format!("{library_root}/Superseding Show"))
+                .expect("series root");
+        let other_root_path =
+            SeriesRootPath::try_new(format!("{library_root}/Other Show"))
+                .expect("other series root");
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                None,
+            )
+            .await
+            .expect("initial generation enrolled");
+        states
+            .mark_seeded(library_id, series_root_path.clone(), None)
+            .await
+            .expect("resolver attempt seeded");
+
+        let old_correlation = uuid::Uuid::now_v7();
+        let mut old_request = EnqueueRequest::new(
+            JobPriority::P1,
+            series_resolve_payload(
+                library_id,
+                series_root_path.clone(),
+                "Superseding Show",
+            ),
+        );
+        old_request.correlation_id = Some(old_correlation);
+        let old_job = queue
+            .enqueue(old_request)
+            .await
+            .expect("old resolver enqueued");
+        let old_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::SeriesResolve,
+                worker_id: "superseded-series-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P1,
+                }),
+            })
+            .await
+            .expect("resolver dequeue")
+            .expect("resolver leased");
+        assert_eq!(old_lease.job.id, old_job.job_id);
+
+        states
+            .mark_failed(
+                library_id,
+                series_root_path.clone(),
+                "old resolver terminal failure".into(),
+            )
+            .await
+            .expect("old failure persisted");
+        let blocked_job = seed_deferred_episode(
+            &pool,
+            library_id,
+            &series_root_path,
+            "superseded-blocked",
+        )
+        .await;
+        let unrelated_job = seed_deferred_episode(
+            &pool,
+            library_id,
+            &other_root_path,
+            "superseded-unrelated",
+        )
+        .await;
+
+        // Pause point: Failed is durable, but the old lease has not yet been
+        // dead-lettered. Root discovery reopens and merges its correlation onto
+        // that still-active row.
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                None,
+            )
+            .await
+            .expect("fresh generation enrolled");
+        let new_correlation = uuid::Uuid::now_v7();
+        let mut retry_request = EnqueueRequest::new(
+            JobPriority::P0,
+            series_resolve_payload(
+                library_id,
+                series_root_path.clone(),
+                "Superseding Show",
+            ),
+        );
+        retry_request.correlation_id = Some(new_correlation);
+        let merged = queue
+            .enqueue(retry_request)
+            .await
+            .expect("retry enqueue merges while old lease is active");
+        assert_eq!(merged.merged_into, Some(old_job.job_id));
+
+        assert_eq!(
+            queue
+                .dead_letter_with_outcome(
+                    old_lease.lease_id,
+                    Some("old resolver terminal failure".into()),
+                )
+                .await
+                .expect("superseded dead-letter transition"),
+            QueueTransitionOutcome::Requeued
+        );
+        let state = states
+            .get(library_id, &series_root_path)
+            .await
+            .expect("state lookup")
+            .expect("series state exists");
+        assert_eq!(state.status, SeriesScanStatus::Discovered);
+
+        let row = sqlx::query(
+            r#"
+            SELECT state, attempts, lease_id, last_error
+            FROM orchestrator_jobs
+            WHERE id = $1
+            "#,
+        )
+        .bind(old_job.job_id.0)
+        .fetch_one(&pool)
+        .await
+        .expect("requeued resolver loaded");
+        assert_eq!(row.get::<String, _>("state"), "ready");
+        assert_eq!(row.get::<i32, _>("attempts"), 0);
+        assert!(row.get::<Option<uuid::Uuid>, _>("lease_id").is_none());
+        assert!(row.get::<Option<String>, _>("last_error").is_none());
+        assert_eq!(persisted_job_state(&pool, blocked_job).await, "deferred");
+        assert_eq!(persisted_job_state(&pool, unrelated_job).await, "deferred");
+
+        let retry_jobs = queue
+            .durable_job_states(new_correlation, &[])
+            .await
+            .expect("retry enrollment reconciled");
+        assert_eq!(retry_jobs.len(), 1);
+        assert_eq!(retry_jobs[0].job_id, old_job.job_id);
+        assert_eq!(retry_jobs[0].state, JobState::Ready);
+
+        let retry_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::SeriesResolve,
+                worker_id: "fresh-series-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P1,
+                }),
+            })
+            .await
+            .expect("requeued resolver dequeue")
+            .expect("requeued resolver is immediately schedulable");
+        assert_eq!(retry_lease.job.id, old_job.job_id);
+        states
+            .mark_seeded(library_id, series_root_path.clone(), None)
+            .await
+            .expect("fresh attempt seeded");
+        states
+            .mark_failed(
+                library_id,
+                series_root_path,
+                "fresh resolver terminal failure".into(),
+            )
+            .await
+            .expect("fresh terminal failure persisted");
+        assert_eq!(
+            queue
+                .dead_letter_with_outcome(
+                    retry_lease.lease_id,
+                    Some("fresh resolver terminal failure".into()),
+                )
+                .await
+                .expect("fresh terminal result applied"),
+            QueueTransitionOutcome::Applied
+        );
+        assert_eq!(persisted_job_state(&pool, blocked_job).await, "ready");
+        assert_eq!(persisted_job_state(&pool, unrelated_job).await, "deferred");
+    }
+
+    #[tokio::test]
+    async fn series_dead_letter_terminalizes_and_releases_exact_root() {
+        let Some(pool) = postgres_pool_or_skip(
+            "series_dead_letter_terminalizes_and_releases_exact_root",
+        )
+        .await
+        else {
+            return;
+        };
+        let queue = PostgresQueueService::new(pool.clone())
+            .await
+            .expect("queue service initializes");
+        let states = PostgresSeriesScanStateRepository::new(pool.clone());
+        let library_id = LibraryId::new();
+        let library_root =
+            format!("/queue-series-terminal-release/{}", library_id.as_uuid());
+        seed_library(&pool, library_id, &library_root)
+            .await
+            .expect("library seeded");
+        let series_root_path =
+            SeriesRootPath::try_new(format!("{library_root}/Terminal Show"))
+                .expect("series root");
+        let other_root_path = SeriesRootPath::try_new(format!(
+            "{library_root}/Other Terminal Show"
+        ))
+        .expect("other series root");
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                None,
+            )
+            .await
+            .expect("generation enrolled");
+        states
+            .mark_seeded(library_id, series_root_path.clone(), None)
+            .await
+            .expect("resolver seeded");
+
+        let old_job = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P1,
+                series_resolve_payload(
+                    library_id,
+                    series_root_path.clone(),
+                    "Terminal Show",
+                ),
+            ))
+            .await
+            .expect("resolver enqueued");
+        let old_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::SeriesResolve,
+                worker_id: "terminal-series-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P1,
+                }),
+            })
+            .await
+            .expect("resolver dequeue")
+            .expect("resolver leased");
+        states
+            .mark_failed(
+                library_id,
+                series_root_path.clone(),
+                "terminal provider response".into(),
+            )
+            .await
+            .expect("terminal failure persisted");
+        let blocked_job = seed_deferred_episode(
+            &pool,
+            library_id,
+            &series_root_path,
+            "terminal-blocked",
+        )
+        .await;
+        let unrelated_job = seed_deferred_episode(
+            &pool,
+            library_id,
+            &other_root_path,
+            "terminal-unrelated",
+        )
+        .await;
+
+        assert_eq!(
+            queue
+                .dead_letter_with_outcome(
+                    old_lease.lease_id,
+                    Some("terminal provider response".into()),
+                )
+                .await
+                .expect("terminal dead-letter transition"),
+            QueueTransitionOutcome::Applied
+        );
+        assert_eq!(
+            persisted_job_state(&pool, old_job.job_id.0).await,
+            "dead_letter"
+        );
+        assert_eq!(persisted_job_state(&pool, blocked_job).await, "ready");
+        assert_eq!(persisted_job_state(&pool, unrelated_job).await, "deferred");
+
+        // If terminalization wins the race, the later claim observes no active
+        // resolver and creates a genuinely fresh durable job generation.
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                None,
+            )
+            .await
+            .expect("post-terminal generation enrolled");
+        let new_correlation = uuid::Uuid::now_v7();
+        let mut fresh_request = EnqueueRequest::new(
+            JobPriority::P1,
+            series_resolve_payload(
+                library_id,
+                series_root_path,
+                "Terminal Show",
+            ),
+        );
+        fresh_request.correlation_id = Some(new_correlation);
+        let fresh_job = queue
+            .enqueue(fresh_request)
+            .await
+            .expect("fresh resolver enqueued");
+        assert!(fresh_job.accepted);
+        assert_ne!(fresh_job.job_id, old_job.job_id);
+        let enrolled = queue
+            .durable_job_states(new_correlation, &[])
+            .await
+            .expect("fresh enrollment reconciled");
+        assert_eq!(enrolled.len(), 1);
+        assert_eq!(enrolled[0].job_id, fresh_job.job_id);
+    }
+
+    #[tokio::test]
+    async fn exhausted_series_retry_preserves_fresh_enrollment_then_terminalizes()
+     {
+        let Some(pool) = postgres_pool_or_skip(
+            "exhausted_series_retry_preserves_fresh_enrollment_then_terminalizes",
+        )
+        .await
+        else {
+            return;
+        };
+        let retry_config = RetryConfig {
+            max_attempts: 1,
+            ..RetryConfig::default()
+        };
+        let queue =
+            PostgresQueueService::new_with_retry(pool.clone(), retry_config)
+                .await
+                .expect("queue service initializes");
+        let states = PostgresSeriesScanStateRepository::new(pool.clone());
+        let library_id = LibraryId::new();
+        let library_root =
+            format!("/queue-series-exhausted/{}", library_id.as_uuid());
+        seed_library(&pool, library_id, &library_root)
+            .await
+            .expect("library seeded");
+        let series_root_path =
+            SeriesRootPath::try_new(format!("{library_root}/Exhausted Show"))
+                .expect("series root");
+        let other_root_path = SeriesRootPath::try_new(format!(
+            "{library_root}/Other Exhausted Show"
+        ))
+        .expect("other root");
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                None,
+            )
+            .await
+            .expect("generation enrolled");
+        states
+            .mark_seeded(library_id, series_root_path.clone(), None)
+            .await
+            .expect("attempt seeded");
+
+        let resolver = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P1,
+                series_resolve_payload(
+                    library_id,
+                    series_root_path.clone(),
+                    "Exhausted Show",
+                ),
+            ))
+            .await
+            .expect("resolver enqueued");
+        let lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::SeriesResolve,
+                worker_id: "exhausted-series-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P1,
+                }),
+            })
+            .await
+            .expect("resolver dequeue")
+            .expect("resolver leased");
+        let lease_started_at = lease.job.available_at;
+        sqlx::query("UPDATE orchestrator_jobs SET attempts = $1 WHERE id = $2")
+            .bind(i32::from(retry_config.max_attempts))
+            .bind(resolver.job_id.0)
+            .execute(&pool)
+            .await
+            .expect("attempt limit seeded");
+        let blocked_job = seed_deferred_episode(
+            &pool,
+            library_id,
+            &series_root_path,
+            "exhausted-blocked",
+        )
+        .await;
+        let unrelated_job = seed_deferred_episode(
+            &pool,
+            library_id,
+            &other_root_path,
+            "exhausted-unrelated",
+        )
+        .await;
+
+        // Pause between fresh root enrollment and its queue enqueue. Enrollment
+        // must demote the running Seeded generation to Discovered so the old
+        // max-attempt transition can recognize that newer durable claim.
+        let enrolled = states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                None,
+            )
+            .await
+            .expect("fresh root generation enrolled before enqueue");
+        assert_eq!(enrolled.status, SeriesScanStatus::Discovered);
+        assert!(enrolled.updated_at > lease_started_at);
+
+        // Renewal updates orchestrator_jobs.updated_at through the table
+        // trigger. The supersession signal must remain tied to the stable
+        // available_at lease-start marker instead.
+        sqlx::query("SELECT pg_sleep(0.005)")
+            .fetch_one(&pool)
+            .await
+            .expect("database clock advances before renewal");
+        let renewed = queue
+            .renew(LeaseRenewal {
+                lease_id: lease.lease_id,
+                worker_id: "exhausted-series-worker".into(),
+                extend_by: chrono::Duration::seconds(10),
+            })
+            .await
+            .expect("old resolver lease renews after enrollment");
+        assert_eq!(renewed.job.available_at, lease_started_at);
+        assert!(renewed.job.updated_at > enrolled.updated_at);
+        assert_eq!(
+            queue
+                .fail_with_outcome(
+                    renewed.lease_id,
+                    true,
+                    Some("provider unavailable through retry limit".into()),
+                )
+                .await
+                .expect("superseded exhausted retry requeues"),
+            FailOutcome::Requeued
+        );
+        let row = sqlx::query(
+            "SELECT state, attempts, lease_id, last_error FROM orchestrator_jobs WHERE id = $1",
+        )
+        .bind(resolver.job_id.0)
+        .fetch_one(&pool)
+        .await
+        .expect("requeued resolver loaded");
+        assert_eq!(row.get::<String, _>("state"), "ready");
+        assert_eq!(row.get::<i32, _>("attempts"), 0);
+        assert!(row.get::<Option<uuid::Uuid>, _>("lease_id").is_none());
+        assert!(row.get::<Option<String>, _>("last_error").is_none());
+        assert_eq!(persisted_job_state(&pool, blocked_job).await, "deferred");
+        assert_eq!(persisted_job_state(&pool, unrelated_job).await, "deferred");
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("series state exists")
+                .status,
+            SeriesScanStatus::Discovered
+        );
+
+        let fresh_correlation = uuid::Uuid::now_v7();
+        let mut fresh_request = EnqueueRequest::new(
+            JobPriority::P0,
+            series_resolve_payload(
+                library_id,
+                series_root_path.clone(),
+                "Exhausted Show",
+            ),
+        );
+        fresh_request.correlation_id = Some(fresh_correlation);
+        let merged = queue
+            .enqueue(fresh_request)
+            .await
+            .expect("fresh correlation merges onto runnable resolver");
+        assert_eq!(merged.merged_into, Some(resolver.job_id));
+        let fresh_jobs = queue
+            .durable_job_states(fresh_correlation, &[])
+            .await
+            .expect("fresh correlation enrollment loaded");
+        assert_eq!(fresh_jobs.len(), 1);
+        assert_eq!(fresh_jobs[0].job_id, resolver.job_id);
+        assert_eq!(fresh_jobs[0].state, JobState::Ready);
+
+        let fresh_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::SeriesResolve,
+                worker_id: "fresh-exhausted-series-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P0,
+                }),
+            })
+            .await
+            .expect("fresh resolver dequeue")
+            .expect("fresh resolver is immediately schedulable");
+        assert_eq!(fresh_lease.job.id, resolver.job_id);
+        states
+            .mark_seeded(library_id, series_root_path.clone(), None)
+            .await
+            .expect("fresh attempt seeded");
+        sqlx::query("UPDATE orchestrator_jobs SET attempts = $1 WHERE id = $2")
+            .bind(i32::from(retry_config.max_attempts))
+            .bind(resolver.job_id.0)
+            .execute(&pool)
+            .await
+            .expect("fresh attempt limit seeded");
+        assert_eq!(
+            queue
+                .fail_with_outcome(
+                    fresh_lease.lease_id,
+                    true,
+                    Some("provider unavailable through retry limit".into()),
+                )
+                .await
+                .expect("unsuperseded exhausted retry terminalizes"),
+            FailOutcome::Terminal {
+                state: JobState::DeadLetter
+            }
+        );
+        let state = states
+            .get(library_id, &series_root_path)
+            .await
+            .expect("state lookup")
+            .expect("series state exists");
+        assert_eq!(state.status, SeriesScanStatus::Failed);
+        assert_eq!(
+            state.failure_reason.as_deref(),
+            Some("provider unavailable through retry limit")
+        );
+        assert_eq!(
+            persisted_job_state(&pool, resolver.job_id.0).await,
+            "dead_letter"
+        );
+        assert_eq!(persisted_job_state(&pool, blocked_job).await, "ready");
+        assert_eq!(persisted_job_state(&pool, unrelated_job).await, "deferred");
+
+        // A resolver can exhaust its budget before the handler ever calls
+        // mark_seeded. Its initial Discovered state predates the lease and must
+        // not be mistaken for a superseding generation.
+        let unseeded_root_path = SeriesRootPath::try_new(format!(
+            "{library_root}/Unseeded Exhausted Show"
+        ))
+        .expect("unseeded series root");
+        let unseeded_state = states
+            .enroll_resolution_generation(
+                library_id,
+                unseeded_root_path.clone(),
+                None,
+            )
+            .await
+            .expect("unseeded generation enrolled");
+        let unseeded_resolver = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P1,
+                series_resolve_payload(
+                    library_id,
+                    unseeded_root_path.clone(),
+                    "Unseeded Exhausted Show",
+                ),
+            ))
+            .await
+            .expect("unseeded resolver enqueued");
+        let unseeded_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::SeriesResolve,
+                worker_id: "unseeded-exhausted-series-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P1,
+                }),
+            })
+            .await
+            .expect("unseeded resolver dequeue")
+            .expect("unseeded resolver leased");
+        assert!(unseeded_state.updated_at <= unseeded_lease.job.available_at);
+        sqlx::query("UPDATE orchestrator_jobs SET attempts = $1 WHERE id = $2")
+            .bind(i32::from(retry_config.max_attempts))
+            .bind(unseeded_resolver.job_id.0)
+            .execute(&pool)
+            .await
+            .expect("unseeded attempt limit seeded");
+        let unseeded_blocked_job = seed_deferred_episode(
+            &pool,
+            library_id,
+            &unseeded_root_path,
+            "unseeded-exhausted-blocked",
+        )
+        .await;
+        assert_eq!(
+            queue
+                .fail_with_outcome(
+                    unseeded_lease.lease_id,
+                    true,
+                    Some("failed before mark_seeded".into()),
+                )
+                .await
+                .expect("initial discovered generation terminalizes"),
+            FailOutcome::Terminal {
+                state: JobState::DeadLetter
+            }
+        );
+        assert_eq!(
+            states
+                .get(library_id, &unseeded_root_path)
+                .await
+                .expect("unseeded state lookup")
+                .expect("unseeded state exists")
+                .status,
+            SeriesScanStatus::Failed
+        );
+        assert_eq!(
+            persisted_job_state(&pool, unseeded_resolver.job_id.0).await,
+            "dead_letter"
+        );
+        assert_eq!(
+            persisted_job_state(&pool, unseeded_blocked_job).await,
+            "ready"
+        );
+
+        // Episode observation after leasing is not a new root generation. It
+        // must leave the Seeded timestamp untouched so an exhausted resolver
+        // terminalizes instead of being spuriously requeued.
+        let observed_root_path = SeriesRootPath::try_new(format!(
+            "{library_root}/Observed Exhausted Show"
+        ))
+        .expect("observed series root");
+        let original_hint = SeriesHint {
+            title: "Observed Exhausted Show".into(),
+            slug: Some("observed-exhausted-show".into()),
+            year: Some(2024),
+            region: Some("US".into()),
+        };
+        let observed_seeded = states
+            .mark_seeded(
+                library_id,
+                observed_root_path.clone(),
+                Some(original_hint.clone()),
+            )
+            .await
+            .expect("observed generation seeded");
+        let observed_resolver = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P1,
+                series_resolve_payload(
+                    library_id,
+                    observed_root_path.clone(),
+                    "Observed Exhausted Show",
+                ),
+            ))
+            .await
+            .expect("observed resolver enqueued");
+        let observed_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::SeriesResolve,
+                worker_id: "observed-exhausted-series-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P1,
+                }),
+            })
+            .await
+            .expect("observed resolver dequeue")
+            .expect("observed resolver leased");
+        assert!(observed_seeded.updated_at <= observed_lease.job.available_at);
+        sqlx::query("UPDATE orchestrator_jobs SET attempts = $1 WHERE id = $2")
+            .bind(i32::from(retry_config.max_attempts))
+            .bind(observed_resolver.job_id.0)
+            .execute(&pool)
+            .await
+            .expect("observed attempt limit seeded");
+        let observed = states
+            .mark_discovered(
+                library_id,
+                observed_root_path.clone(),
+                Some(SeriesHint {
+                    title: "Episode Observation".into(),
+                    slug: None,
+                    year: Some(2026),
+                    region: None,
+                }),
+            )
+            .await
+            .expect("episode observes leased resolver");
+        assert_eq!(observed.status, SeriesScanStatus::Seeded);
+        assert_eq!(observed.hint.as_ref(), Some(&original_hint));
+        assert_eq!(observed.updated_at, observed_seeded.updated_at);
+        let observed_blocked_job = seed_deferred_episode(
+            &pool,
+            library_id,
+            &observed_root_path,
+            "observed-exhausted-blocked",
+        )
+        .await;
+        assert_eq!(
+            queue
+                .fail_with_outcome(
+                    observed_lease.lease_id,
+                    true,
+                    Some("episode observation is not enrollment".into()),
+                )
+                .await
+                .expect("observed exhausted resolver terminalizes"),
+            FailOutcome::Terminal {
+                state: JobState::DeadLetter
+            }
+        );
+        assert_eq!(
+            states
+                .get(library_id, &observed_root_path)
+                .await
+                .expect("observed state lookup")
+                .expect("observed state exists")
+                .status,
+            SeriesScanStatus::Failed
+        );
+        assert_eq!(
+            persisted_job_state(&pool, observed_resolver.job_id.0).await,
+            "dead_letter"
+        );
+        assert_eq!(
+            persisted_job_state(&pool, observed_blocked_job).await,
+            "ready"
+        );
+    }
+
+    #[tokio::test]
+    async fn series_dead_letter_without_authoritative_state_fails_closed() {
+        let Some(pool) = postgres_pool_or_skip(
+            "series_dead_letter_without_authoritative_state_fails_closed",
+        )
+        .await
+        else {
+            return;
+        };
+        let queue = PostgresQueueService::new(pool.clone())
+            .await
+            .expect("queue service initializes");
+        let library_id = LibraryId::new();
+        let library_root =
+            format!("/queue-series-missing-state/{}", library_id.as_uuid());
+        seed_library(&pool, library_id, &library_root)
+            .await
+            .expect("library seeded");
+        let series_root_path = SeriesRootPath::try_new(format!(
+            "{library_root}/Missing State Show"
+        ))
+        .expect("series root");
+        let resolver = queue
+            .enqueue(EnqueueRequest::new(
+                JobPriority::P1,
+                series_resolve_payload(
+                    library_id,
+                    series_root_path,
+                    "Missing State Show",
+                ),
+            ))
+            .await
+            .expect("resolver enqueued");
+        let lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::SeriesResolve,
+                worker_id: "missing-state-series-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P1,
+                }),
+            })
+            .await
+            .expect("resolver dequeue")
+            .expect("resolver leased");
+
+        let err = queue
+            .dead_letter_with_outcome(
+                lease.lease_id,
+                Some("terminal provider response".into()),
+            )
+            .await
+            .expect_err("missing authoritative state must fail closed");
+        assert!(
+            err.to_string()
+                .contains("missing authoritative series state")
+        );
+        assert_eq!(
+            persisted_job_state(&pool, resolver.job_id.0).await,
+            "leased",
+            "the failed transaction must preserve the durable lease for retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_series_dependency_repair_is_scoped_and_idempotent() {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping: DATABASE_URL not set");
+                return;
+            }
+        };
+
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping: failed to connect to DATABASE_URL ({err})"
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = crate::MIGRATOR.run(&pool).await {
+            eprintln!("skipping: migrations failed ({err})");
+            return;
+        }
+
+        let queue = PostgresQueueService::new(pool.clone())
+            .await
+            .expect("queue service initializes");
+        let library_id = LibraryId::new();
+        let library_root =
+            format!("/queue-series-dependency-repair/{}", library_id.as_uuid());
+        seed_library(&pool, library_id, &library_root)
+            .await
+            .expect("library seeded");
+
+        let resolved_root = format!("{library_root}/Resolved Series");
+        let failed_root = format!("{library_root}/Failed Series");
+        let pending_root = format!("{library_root}/Pending Series");
+        for (root, status) in [
+            (&resolved_root, "resolved"),
+            (&failed_root, "failed"),
+            (&pending_root, "seeded"),
+        ] {
+            sqlx::query(
+                r#"
+                INSERT INTO series_scan_state (
+                    library_id, series_root_path, status
+                ) VALUES ($1, $2, ($3::text)::series_scan_status)
+                "#,
+            )
+            .bind(library_id.0)
+            .bind(root)
+            .bind(status)
+            .execute(&pool)
+            .await
+            .expect("series state seeded");
+        }
+
+        let resolved_key = format!("series_root:{resolved_root}");
+        let failed_key = format!("series_root:{failed_root}");
+        let pending_key = format!("series_root:{pending_root}");
+        let missing_key = format!("series_root:{library_root}/Missing Series");
+        let cases = [
+            (
+                "resolved-episode",
+                JobKind::EpisodeMatch as i16,
+                "deferred",
+                Some(resolved_key.as_str()),
+            ),
+            (
+                "failed-episode",
+                JobKind::EpisodeMatch as i16,
+                "deferred",
+                Some(failed_key.as_str()),
+            ),
+            (
+                "pending-episode",
+                JobKind::EpisodeMatch as i16,
+                "deferred",
+                Some(pending_key.as_str()),
+            ),
+            (
+                "unmatched-episode",
+                JobKind::EpisodeMatch as i16,
+                "deferred",
+                Some(missing_key.as_str()),
+            ),
+            (
+                "resolved-wrong-kind",
+                JobKind::MetadataEnrich as i16,
+                "deferred",
+                Some(resolved_key.as_str()),
+            ),
+            (
+                "already-ready-episode",
+                JobKind::EpisodeMatch as i16,
+                "ready",
+                None,
+            ),
+        ];
+        for (suffix, kind, state, dependency_key) in cases {
+            sqlx::query(
+                r#"
+                INSERT INTO orchestrator_jobs (
+                    id, library_id, kind, payload, priority, state,
+                    dedupe_key, dependency_key, available_at,
+                    created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    $7, $8, NOW() + INTERVAL '1 day', NOW(), NOW()
+                )
+                "#,
+            )
+            .bind(uuid::Uuid::now_v7())
+            .bind(library_id.0)
+            .bind(kind)
+            .bind(serde_json::json!({}))
+            .bind(JobPriority::P1 as i16)
+            .bind(state)
+            .bind(format!("series-dependency-repair:{library_id}:{suffix}"))
+            .bind(dependency_key)
+            .execute(&pool)
+            .await
+            .expect("queue row seeded");
+        }
+
+        assert_eq!(
+            queue
+                .release_terminal_series_dependency(
+                    library_id,
+                    &SeriesRootPath::try_new(pending_root.clone()).unwrap(),
+                )
+                .await
+                .expect("nonterminal scoped release succeeds"),
+            0,
+            "a nonterminal root must not release deferred episode work"
+        );
+        let resolved_root_path =
+            SeriesRootPath::try_new(resolved_root.clone()).unwrap();
+        assert_eq!(
+            queue
+                .release_terminal_series_dependency(
+                    library_id,
+                    &resolved_root_path,
+                )
+                .await
+                .expect("terminal scoped release succeeds"),
+            1,
+            "the scoped operation releases only its exact terminal root"
+        );
+        assert_eq!(
+            queue
+                .release_terminal_series_dependency(
+                    library_id,
+                    &resolved_root_path,
+                )
+                .await
+                .expect("repeated terminal scoped release succeeds"),
+            0,
+            "the scoped operation is idempotent"
+        );
+
+        assert_eq!(
+            queue
+                .repair_terminal_series_dependencies()
+                .await
+                .expect("dependency repair succeeds"),
+            1,
+            "the sweep repairs the remaining failed root only"
+        );
+        assert_eq!(
+            queue
+                .repair_terminal_series_dependencies()
+                .await
+                .expect("repeated dependency repair succeeds"),
+            0,
+            "repeating the repair must be idempotent"
+        );
+
+        let rows = sqlx::query(
+            r#"
+            SELECT dedupe_key, state, dependency_key
+            FROM orchestrator_jobs
+            WHERE library_id = $1
+              AND dedupe_key LIKE 'series-dependency-repair:%'
+            "#,
+        )
+        .bind(library_id.0)
+        .fetch_all(&pool)
+        .await
+        .expect("repaired rows loaded");
+        let states = rows
+            .into_iter()
+            .map(|row| {
+                let dedupe_key: String = row.get("dedupe_key");
+                let suffix = dedupe_key
+                    .rsplit(':')
+                    .next()
+                    .expect("dedupe suffix")
+                    .to_string();
+                let state: String = row.get("state");
+                let dependency_key: Option<String> = row.get("dependency_key");
+                (suffix, (state, dependency_key))
+            })
+            .collect::<HashMap<_, _>>();
+
+        for suffix in ["resolved-episode", "failed-episode"] {
+            assert_eq!(
+                states.get(suffix),
+                Some(&("ready".to_string(), None)),
+                "{suffix} should be released"
+            );
+        }
+        for suffix in [
+            "pending-episode",
+            "unmatched-episode",
+            "resolved-wrong-kind",
+        ] {
+            assert_eq!(
+                states.get(suffix).map(|(state, _)| state.as_str()),
+                Some("deferred"),
+                "{suffix} must remain deferred"
+            );
+        }
+        assert_eq!(
+            states
+                .get("already-ready-episode")
+                .map(|(state, _)| state.as_str()),
+            Some("ready")
+        );
     }
 
     #[tokio::test]

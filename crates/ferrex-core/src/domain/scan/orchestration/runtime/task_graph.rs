@@ -64,6 +64,9 @@ enum WorkerTransition {
     RetryScheduled {
         error: String,
     },
+    Requeued {
+        error: String,
+    },
     TerminalFailed {
         error: String,
     },
@@ -96,6 +99,12 @@ fn worker_transition_from_complete(
 ) -> WorkerTransition {
     match outcome {
         Ok(QueueTransitionOutcome::Applied) => WorkerTransition::Completed,
+        Ok(QueueTransitionOutcome::Requeued) => {
+            WorkerTransition::PersistenceError {
+                operation: "complete",
+                error: "queue requeued a job during completion".into(),
+            }
+        }
         Ok(QueueTransitionOutcome::Missing) => WorkerTransition::Missing {
             operation: "complete",
             error: "durable completion was not applied because the lease was missing"
@@ -115,6 +124,9 @@ fn worker_transition_from_fail(
 ) -> WorkerTransition {
     match outcome {
         Ok(FailOutcome::RetryScheduled) => WorkerTransition::RetryScheduled {
+            error: execution_error,
+        },
+        Ok(FailOutcome::Requeued) => WorkerTransition::Requeued {
             error: execution_error,
         },
         Ok(FailOutcome::Terminal {
@@ -161,6 +173,9 @@ fn worker_transition_from_dead_letter(
         Ok(QueueTransitionOutcome::Applied) => WorkerTransition::DeadLettered {
             error: execution_error,
         },
+        Ok(QueueTransitionOutcome::Requeued) => WorkerTransition::Requeued {
+            error: execution_error,
+        },
         Ok(QueueTransitionOutcome::Missing) => WorkerTransition::Missing {
             operation: "dead_letter",
             error: format!(
@@ -196,6 +211,7 @@ async fn finalize_worker_transition<E>(
     let library_id = lease.job.payload.library_id();
     let dedupe_key: DedupeKey = lease.job.payload.dedupe_key();
     let terminal = transition.is_terminal();
+    let requeued = matches!(&transition, WorkerTransition::Requeued { .. });
 
     let (payload, command) = match transition {
         WorkerTransition::Completed => (
@@ -210,6 +226,20 @@ async fn finalize_worker_transition<E>(
             },
         ),
         WorkerTransition::RetryScheduled { error } => (
+            JobEventPayload::Failed {
+                job_id,
+                kind: job_kind,
+                priority: job_priority,
+                retryable: true,
+            },
+            LibraryActorCommand::JobFailed {
+                job_id,
+                dedupe_key: dedupe_key.clone(),
+                retryable: true,
+                error: Some(error),
+            },
+        ),
+        WorkerTransition::Requeued { error } => (
             JobEventPayload::Failed {
                 job_id,
                 kind: job_kind,
@@ -321,6 +351,11 @@ async fn finalize_worker_transition<E>(
         scheduler.record_completed(reserved_library_id).await;
     } else {
         scheduler.release(reserved_library_id).await;
+        if requeued {
+            scheduler
+                .record_enqueued(job_kind, reserved_library_id, job_priority)
+                .await;
+        }
     }
 
     let sender_opt = {
@@ -411,6 +446,37 @@ where
         }))
         .await;
     Ok(ready_total)
+}
+
+async fn run_housekeeper_cycle<Q>(queue: &Q, scheduler: &WeightedFairScheduler)
+where
+    Q: QueueService + LeaseExpiryScanner + ?Sized,
+{
+    if let Err(err) = queue.scan_expired_leases().await {
+        tracing::warn!("housekeeper scan_expired_leases error: {err}");
+    }
+
+    match queue.repair_terminal_series_dependencies().await {
+        Ok(0) => {}
+        Ok(repaired) => tracing::info!(
+            repaired,
+            "repaired deferred episode jobs with terminal series dependencies"
+        ),
+        Err(err) => tracing::warn!(
+            error = %err,
+            "terminal series dependency repair failed"
+        ),
+    }
+
+    match reconcile_scheduler_ready(queue, scheduler).await {
+        Ok(ready_total) => {
+            tracing::trace!(ready_total, "scheduler ready counts reconciled")
+        }
+        Err(err) => tracing::warn!(
+            error = %err,
+            "periodic scheduler ready reconciliation failed"
+        ),
+    }
 }
 
 async fn observe_scheduler_events<Q>(
@@ -1122,28 +1188,12 @@ impl RuntimeTaskGraph {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
-                        if let Err(err) = queue.scan_expired_leases().await {
-                            tracing::warn!("housekeeper scan_expired_leases error: {err}");
-                        }
-                        match reconcile_scheduler_ready(
-                            queue.as_ref(),
-                            &scheduler,
-                        )
-                        .await
-                        {
-                            Ok(ready_total) => tracing::trace!(
-                                ready_total,
-                                "scheduler ready counts reconciled"
-                            ),
-                            Err(err) => tracing::warn!(
-                                error = %err,
-                                "periodic scheduler ready reconciliation failed"
-                            ),
-                        }
+                        run_housekeeper_cycle(queue.as_ref(), &scheduler).await;
                     }
                 }
             }
-        }).await;
+        })
+        .await;
     }
 
     pub(super) async fn shutdown(
@@ -1388,6 +1438,15 @@ mod tests {
 
     struct ReadyCountQueue {
         counts: Vec<ReadyQueueCount>,
+        call_order: Option<Arc<std::sync::Mutex<Vec<&'static str>>>>,
+    }
+
+    impl ReadyCountQueue {
+        fn record_call(&self, call: &'static str) {
+            if let Some(call_order) = &self.call_order {
+                call_order.lock().expect("call order lock").push(call);
+            }
+        }
     }
 
     #[async_trait]
@@ -1456,8 +1515,22 @@ mod tests {
             panic!("release_dependency is not used by reconciliation tests")
         }
 
+        async fn repair_terminal_series_dependencies(&self) -> Result<u64> {
+            self.record_call("repair_terminal_series_dependencies");
+            Ok(1)
+        }
+
         async fn ready_counts_grouped(&self) -> Result<Vec<ReadyQueueCount>> {
+            self.record_call("ready_counts_grouped");
             Ok(self.counts.clone())
+        }
+    }
+
+    #[async_trait]
+    impl LeaseExpiryScanner for ReadyCountQueue {
+        async fn scan_expired_leases(&self) -> Result<u64> {
+            self.record_call("scan_expired_leases");
+            Ok(0)
         }
     }
 
@@ -1516,6 +1589,7 @@ mod tests {
                 ready: 1,
                 leased: 0,
             }],
+            call_order: None,
         });
         let scheduler = WeightedFairScheduler::new(
             &crate::domain::scan::orchestration::config::QueueConfig::default(),
@@ -1569,5 +1643,46 @@ mod tests {
 
         shutdown.cancel();
         observer.await.expect("observer exits cleanly");
+    }
+
+    #[tokio::test]
+    async fn housekeeper_repairs_terminal_series_dependencies_before_ready_counts()
+     {
+        let library_id = LibraryId::new();
+        let call_order = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let queue = ReadyCountQueue {
+            counts: vec![ReadyQueueCount {
+                kind: JobKind::EpisodeMatch,
+                library_id,
+                priority: JobPriority::P1,
+                ready: 1,
+                leased: 0,
+            }],
+            call_order: Some(call_order.clone()),
+        };
+        let scheduler = WeightedFairScheduler::new(
+            &crate::domain::scan::orchestration::config::QueueConfig::default(),
+            crate::domain::scan::orchestration::config::PriorityWeights::default(),
+        );
+
+        run_housekeeper_cycle(&queue, &scheduler).await;
+
+        assert_eq!(
+            *call_order.lock().expect("call order lock"),
+            vec![
+                "scan_expired_leases",
+                "repair_terminal_series_dependencies",
+                "ready_counts_grouped",
+            ]
+        );
+        assert_eq!(
+            scheduler
+                .snapshot()
+                .await
+                .get(&library_id)
+                .map(|(_, ready)| *ready),
+            Some(1),
+            "the scheduler must observe the repaired ready row in the same cycle"
+        );
     }
 }

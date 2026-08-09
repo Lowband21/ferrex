@@ -273,6 +273,7 @@ pub struct JobRecord {
     pub priority: JobPriority,
     pub state: JobState,
     pub attempts: u16,
+    /// Eligibility time while Ready; stable lease-start marker while Leased.
     pub available_at: DateTime<Utc>,
     pub lease_owner: Option<String>,
     pub lease_expires_at: Option<DateTime<Utc>>,

@@ -325,6 +325,7 @@ where
     E: ScanEventBus + Send + Sync + 'static,
 {
     enqueuer: PipelineEnqueuer<Q, E>,
+    queue: Arc<Q>,
 }
 
 impl<Q, E> Clone for FollowUpEnqueuer<Q, E>
@@ -335,6 +336,7 @@ where
     fn clone(&self) -> Self {
         Self {
             enqueuer: self.enqueuer.clone(),
+            queue: Arc::clone(&self.queue),
         }
     }
 }
@@ -361,9 +363,10 @@ where
         events: Arc<E>,
         correlations: CorrelationCache,
     ) -> Self {
-        let enqueuer = PipelineEnqueuer::new(queue, events, correlations);
+        let enqueuer =
+            PipelineEnqueuer::new(Arc::clone(&queue), events, correlations);
 
-        Self { enqueuer }
+        Self { enqueuer, queue }
     }
 
     async fn enqueue(
@@ -412,6 +415,16 @@ where
             .release_dependency(library_id, dependency_key)
             .await
             .map(|_| ())
+    }
+
+    async fn release_terminal_series_dependency(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+        series_root_path: &crate::domain::scan::orchestration::context::SeriesRootPath,
+    ) -> Result<u64> {
+        self.queue
+            .release_terminal_series_dependency(library_id, series_root_path)
+            .await
     }
 }
 
@@ -1569,10 +1582,32 @@ where
                             episode_hierarchy,
                             dependency_key,
                         );
-                        return self
+                        let status = self
                             .follow_ups
                             .enqueue(parent_correlation, req)
                             .await;
+                        if !matches!(status, DispatchStatus::Success) {
+                            return status;
+                        }
+
+                        // Resolution may have released this dependency after
+                        // the state check above but before the deferred row was
+                        // inserted. Let the queue atomically lock/check the
+                        // authoritative series root and promote the matching
+                        // deferred row. A separate state read here would race a
+                        // fresh resolver enrollment.
+                        if let Err(err) = self
+                            .follow_ups
+                            .release_terminal_series_dependency(
+                                job.library_id,
+                                &episode_hierarchy.series_root_path,
+                            )
+                            .await
+                        {
+                            return classify_media_error(err);
+                        }
+
+                        return DispatchStatus::Success;
                     }
                 }
             }
@@ -1593,26 +1628,22 @@ where
             Err(err) => {
                 let status = classify_media_error(err);
                 if let DispatchStatus::DeadLetter { error } = &status {
-                    let _ = self
-                        .series_coordinator
-                        .record_resolution_failure(job, error.clone())
-                        .await;
                     if let Err(err) = self
                         .series_coordinator
-                        .release_blocked_episode_dependencies(
-                            &self.follow_ups,
-                            job.library_id,
-                            &job.series_root_path,
-                        )
+                        .record_resolution_failure(job, error.clone())
                         .await
                     {
-                        tracing::warn!(
-                            target: "scan::dispatch",
-                            error = %err,
-                            series_root = %job.series_root_path.as_str(),
-                            "failed to release dependency after series resolve dead-letter"
-                        );
+                        // A resolver failure is not durably terminal until the
+                        // authoritative series-root state records it. Retry a
+                        // persistence failure instead of dead-lettering the job
+                        // while episode work remains blocked behind a
+                        // nonterminal root.
+                        return classify_media_error(err);
                     }
+                    // The durable queue owns failed-series dependency release
+                    // when it applies the lease's dead-letter transition. That
+                    // shared transaction can distinguish this terminal
+                    // generation from a root reopened after `mark_failed`.
                 }
                 return status;
             }
@@ -2500,6 +2531,86 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct FailurePersistencePause {
+        failure_persisted: Arc<tokio::sync::Barrier>,
+        resume: Arc<tokio::sync::Barrier>,
+    }
+
+    #[derive(Clone)]
+    struct FailingSeriesResolver {
+        states: Arc<Box<dyn SeriesScanStateRepository>>,
+        fail_failure_persistence: bool,
+        pause_after_failure_persistence: Option<FailurePersistencePause>,
+    }
+
+    impl FailingSeriesResolver {
+        fn new(
+            states: Arc<Box<dyn SeriesScanStateRepository>>,
+            fail_failure_persistence: bool,
+        ) -> Self {
+            Self {
+                states,
+                fail_failure_persistence,
+                pause_after_failure_persistence: None,
+            }
+        }
+
+        fn paused_after_failure_persistence(
+            states: Arc<Box<dyn SeriesScanStateRepository>>,
+            pause: FailurePersistencePause,
+        ) -> Self {
+            Self {
+                states,
+                fail_failure_persistence: false,
+                pause_after_failure_persistence: Some(pause),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SeriesResolverPort for FailingSeriesResolver {
+        async fn resolve(
+            &self,
+            _job: &SeriesResolveJob,
+        ) -> Result<SeriesResolution> {
+            Err(MediaError::InvalidMedia(
+                "series provider rejected resolver input".into(),
+            ))
+        }
+
+        async fn mark_failed(
+            &self,
+            library_id: LibraryId,
+            series_root_path: SeriesRootPath,
+            reason: String,
+        ) -> Result<()> {
+            if self.fail_failure_persistence {
+                return Err(MediaError::Internal(
+                    "series failure persistence unavailable".into(),
+                ));
+            }
+
+            let _ = self
+                .states
+                .mark_failed(library_id, series_root_path, reason)
+                .await?;
+            if let Some(pause) = &self.pause_after_failure_persistence {
+                pause.failure_persisted.wait().await;
+                pause.resume.wait().await;
+            }
+            Ok(())
+        }
+
+        async fn get_state(
+            &self,
+            library_id: LibraryId,
+            series_root_path: &SeriesRootPath,
+        ) -> Result<Option<SeriesScanState>> {
+            self.states.get(library_id, series_root_path).await
+        }
+    }
+
     struct StubIndexActor;
 
     #[async_trait]
@@ -2717,15 +2828,58 @@ mod tests {
         }
     }
 
+    struct ResolveBeforeEpisodeInsert {
+        states: Arc<Box<dyn SeriesScanStateRepository>>,
+        library_id: LibraryId,
+        series_root_path: SeriesRootPath,
+        series_ref: SeriesRef,
+    }
+
+    #[derive(Clone)]
+    struct TerminalReleasePause {
+        terminal_observed: Arc<tokio::sync::Barrier>,
+        resume: Arc<tokio::sync::Barrier>,
+    }
+
     #[derive(Default)]
     struct RecordingQueue {
         enqueued: Mutex<Vec<EnqueueRequest>>,
         released_dependencies: Mutex<Vec<(LibraryId, DependencyKey)>>,
+        resolve_before_episode_insert:
+            Mutex<Option<ResolveBeforeEpisodeInsert>>,
+        series_states: Mutex<Option<Arc<Box<dyn SeriesScanStateRepository>>>>,
+        terminal_release_pause: Mutex<Option<TerminalReleasePause>>,
+        dependency_operation_order: Mutex<Vec<&'static str>>,
     }
 
     impl RecordingQueue {
         async fn enqueued(&self) -> Vec<EnqueueRequest> {
             self.enqueued.lock().await.clone()
+        }
+
+        async fn observe_series_states(
+            &self,
+            states: Arc<Box<dyn SeriesScanStateRepository>>,
+        ) {
+            *self.series_states.lock().await = Some(states);
+        }
+
+        async fn resolve_before_episode_insert(
+            &self,
+            resolution: ResolveBeforeEpisodeInsert,
+        ) {
+            self.observe_series_states(Arc::clone(&resolution.states))
+                .await;
+            *self.resolve_before_episode_insert.lock().await = Some(resolution);
+        }
+
+        async fn pause_terminal_release_after_observation(
+            &self,
+            states: Arc<Box<dyn SeriesScanStateRepository>>,
+            pause: TerminalReleasePause,
+        ) {
+            self.observe_series_states(states).await;
+            *self.terminal_release_pause.lock().await = Some(pause);
         }
     }
 
@@ -2733,12 +2887,41 @@ mod tests {
     impl QueueService for RecordingQueue {
         async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
             request.validate()?;
+            let resolution =
+                if matches!(request.payload, JobPayload::EpisodeMatch(_)) {
+                    self.resolve_before_episode_insert.lock().await.take()
+                } else {
+                    None
+                };
+            let resolver_won = resolution.is_some();
+            if let Some(resolution) = resolution {
+                resolution
+                    .states
+                    .mark_resolved(
+                        resolution.library_id,
+                        resolution.series_root_path,
+                        resolution.series_ref,
+                    )
+                    .await?;
+                // Model the resolver's dependency release winning immediately
+                // before this deferred row becomes durable.
+                self.dependency_operation_order
+                    .lock()
+                    .await
+                    .push("resolver_release_before_insert");
+            }
             let handle = JobHandle::accepted(
                 JobId::new(),
                 &request.payload,
                 request.priority,
             );
             self.enqueued.lock().await.push(request);
+            if resolver_won {
+                self.dependency_operation_order
+                    .lock()
+                    .await
+                    .push("deferred_episode_insert");
+            }
             Ok(handle)
         }
 
@@ -2812,11 +2995,78 @@ mod tests {
             library_id: LibraryId,
             dependency_key: &DependencyKey,
         ) -> Result<u64> {
+            self.dependency_operation_order
+                .lock()
+                .await
+                .push("post_enqueue_release");
             self.released_dependencies
                 .lock()
                 .await
                 .push((library_id, dependency_key.clone()));
             Ok(0)
+        }
+
+        async fn release_terminal_series_dependency(
+            &self,
+            library_id: LibraryId,
+            series_root_path: &SeriesRootPath,
+        ) -> Result<u64> {
+            let Some(states) = self.series_states.lock().await.clone() else {
+                return Ok(0);
+            };
+            let observed_terminal = states
+                .get(library_id, series_root_path)
+                .await?
+                .is_some_and(|state| {
+                    matches!(
+                        state.status,
+                        SeriesScanStatus::Resolved | SeriesScanStatus::Failed
+                    )
+                });
+
+            if observed_terminal {
+                if let Some(pause) =
+                    self.terminal_release_pause.lock().await.take()
+                {
+                    self.dependency_operation_order
+                        .lock()
+                        .await
+                        .push("stale_terminal_observed");
+                    pause.terminal_observed.wait().await;
+                    pause.resume.wait().await;
+                }
+            }
+
+            // Model the PostgreSQL operation's state-row lock/recheck after a
+            // concurrent enrollment wins. The production implementation does
+            // both this validation and promotion in one statement.
+            let terminal = states
+                .get(library_id, series_root_path)
+                .await?
+                .is_some_and(|state| {
+                    matches!(
+                        state.status,
+                        SeriesScanStatus::Resolved | SeriesScanStatus::Failed
+                    )
+                });
+            if !terminal {
+                self.dependency_operation_order
+                    .lock()
+                    .await
+                    .push("atomic_release_rejected");
+                return Ok(0);
+            }
+
+            let dependency_key = DependencyKey::series_root(series_root_path);
+            self.dependency_operation_order
+                .lock()
+                .await
+                .push("atomic_post_enqueue_release");
+            self.released_dependencies
+                .lock()
+                .await
+                .push((library_id, dependency_key));
+            Ok(1)
         }
     }
 
@@ -4320,6 +4570,404 @@ mod tests {
             correlations.take_or_generate(generated_handle.job_id).await;
         assert_eq!(generated_completion, generated_enqueue.meta.correlation_id);
         assert!(correlations.fetch(&generated_handle.job_id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn post_enqueue_recheck_repairs_episode_dependency_lost_wakeup() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000023));
+        let correlation_id =
+            Uuid::from_u128(0x5760000000000000000000000000c023);
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Lost Wakeup Show",
+        )
+        .unwrap();
+        let dependency_key = DependencyKey::series_root(&series_root_path);
+        let series_ref = SeriesRef {
+            id: SeriesID(Uuid::from_u128(0x5760000000000000000000000000a023)),
+            slug: Some("lost-wakeup-show".into()),
+            title: Some("Lost Wakeup Show".into()),
+        };
+
+        let states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let queue = Arc::new(RecordingQueue::default());
+        queue
+            .resolve_before_episode_insert(ResolveBeforeEpisodeInsert {
+                states: Arc::clone(&states),
+                library_id,
+                series_root_path: series_root_path.clone(),
+                series_ref,
+            })
+            .await;
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&states)));
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            events,
+            cursors,
+            Arc::clone(&states),
+            series_resolver,
+            DispatcherActors::new(
+                noop_folder_actor(library_id),
+                Arc::new(StubAnalyzeActor),
+                Arc::new(StubMetadataActor),
+                Arc::new(StubIndexActor),
+                Arc::new(StubImageActor),
+            ),
+            CorrelationCache::default(),
+        );
+
+        let status = dispatcher
+            .dispatch(&lease_for_payload_with_correlation(
+                JobPayload::MediaAnalyze(media_analyze_episode_job(
+                    library_id,
+                    series_root_path.clone(),
+                    "Lost Wakeup Show",
+                    "/library/Lost Wakeup Show/Season 1/S01E01.mkv",
+                    1,
+                )),
+                correlation_id,
+            ))
+            .await;
+        assert_eq!(status, DispatchStatus::Success);
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 1);
+        assert!(matches!(enqueued[0].payload, JobPayload::EpisodeMatch(_)));
+        assert_eq!(enqueued[0].correlation_id, Some(correlation_id));
+        assert_eq!(enqueued[0].dependency_key, Some(dependency_key.clone()));
+        assert_eq!(
+            queue.released_dependencies.lock().await.as_slice(),
+            &[(library_id, dependency_key)],
+            "the atomic post-enqueue repair must repeat the dependency release"
+        );
+        assert_eq!(
+            queue.dependency_operation_order.lock().await.as_slice(),
+            &[
+                "resolver_release_before_insert",
+                "deferred_episode_insert",
+                "atomic_post_enqueue_release",
+            ],
+            "the repair release must happen after the losing deferred insert"
+        );
+        assert!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .unwrap()
+                .is_some_and(|state| state.is_resolved())
+        );
+    }
+
+    #[tokio::test]
+    async fn atomic_post_enqueue_repair_rejects_stale_failed_generation() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000024));
+        let correlation_id =
+            Uuid::from_u128(0x5760000000000000000000000000c024);
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Retry Enrollment Show",
+        )
+        .unwrap();
+        let states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        states
+            .mark_failed(
+                library_id,
+                series_root_path.clone(),
+                "historical failure".into(),
+            )
+            .await
+            .expect("seed historical terminal state");
+
+        let terminal_observed = Arc::new(tokio::sync::Barrier::new(2));
+        let resume = Arc::new(tokio::sync::Barrier::new(2));
+        let queue = Arc::new(RecordingQueue::default());
+        queue
+            .pause_terminal_release_after_observation(
+                Arc::clone(&states),
+                TerminalReleasePause {
+                    terminal_observed: Arc::clone(&terminal_observed),
+                    resume: Arc::clone(&resume),
+                },
+            )
+            .await;
+
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&states)));
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            events,
+            cursors,
+            Arc::clone(&states),
+            series_resolver,
+            DispatcherActors::new(
+                noop_folder_actor(library_id),
+                Arc::new(StubAnalyzeActor),
+                Arc::new(StubMetadataActor),
+                Arc::new(StubIndexActor),
+                Arc::new(StubImageActor),
+            ),
+            CorrelationCache::default(),
+        );
+        let dispatch_root = series_root_path.clone();
+        let dispatch = tokio::spawn(async move {
+            dispatcher
+                .dispatch(&lease_for_payload_with_correlation(
+                    JobPayload::MediaAnalyze(media_analyze_episode_job(
+                        library_id,
+                        dispatch_root,
+                        "Retry Enrollment Show",
+                        "/library/Retry Enrollment Show/Season 1/S01E01.mkv",
+                        1,
+                    )),
+                    correlation_id,
+                ))
+                .await
+        });
+
+        // The queue authority has observed the old terminal state but has not
+        // committed a release. Enroll the retry before allowing its locked
+        // validation/promotion operation to continue.
+        terminal_observed.wait().await;
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                Some(SeriesHint {
+                    title: "Retry Enrollment Show".into(),
+                    slug: Some("retry-enrollment-show".into()),
+                    year: None,
+                    region: None,
+                }),
+            )
+            .await
+            .expect("enroll fresh resolver generation");
+        resume.wait().await;
+
+        assert_eq!(dispatch.await.unwrap(), DispatchStatus::Success);
+        assert!(
+            queue.released_dependencies.lock().await.is_empty(),
+            "stale failure must not release the freshly enrolled generation"
+        );
+        assert_eq!(
+            queue.dependency_operation_order.lock().await.as_slice(),
+            &["stale_terminal_observed", "atomic_release_rejected"]
+        );
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("retry enrollment exists")
+                .status,
+            SeriesScanStatus::Discovered
+        );
+    }
+
+    #[tokio::test]
+    async fn series_resolve_dead_letter_defers_release_to_queue_transition() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000025));
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Dead Letter Retry Show",
+        )
+        .unwrap();
+        let dependency_key = DependencyKey::series_root(&series_root_path);
+        let states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                Some(series_hint("Dead Letter Retry Show")),
+            )
+            .await
+            .expect("enroll initial resolver generation");
+
+        let queue = Arc::new(RecordingQueue::default());
+        queue.observe_series_states(Arc::clone(&states)).await;
+        queue
+            .enqueue(
+                EnqueueRequest::new(
+                    JobPriority::P0,
+                    JobPayload::EpisodeMatch(episode_match_job(
+                        library_id,
+                        series_root_path.clone(),
+                        "Dead Letter Retry Show",
+                        "/library/Dead Letter Retry Show/Season 1/S01E01.mkv",
+                        1,
+                    )),
+                )
+                .with_dependency(dependency_key.clone()),
+            )
+            .await
+            .expect("enqueue deferred episode match");
+
+        let failure_persisted = Arc::new(tokio::sync::Barrier::new(2));
+        let resume = Arc::new(tokio::sync::Barrier::new(2));
+        let series_resolver =
+            Arc::new(FailingSeriesResolver::paused_after_failure_persistence(
+                Arc::clone(&states),
+                FailurePersistencePause {
+                    failure_persisted: Arc::clone(&failure_persisted),
+                    resume: Arc::clone(&resume),
+                },
+            ));
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::new(InProcJobEventBus::new(64)),
+            Arc::new(MemoryCursorRepository::default()),
+            Arc::clone(&states),
+            series_resolver,
+            DispatcherActors::new(
+                noop_folder_actor(library_id),
+                Arc::new(StubAnalyzeActor),
+                Arc::new(StubMetadataActor),
+                Arc::new(StubIndexActor),
+                Arc::new(StubImageActor),
+            ),
+            CorrelationCache::default(),
+        );
+        let dispatch_root = series_root_path.clone();
+        let dispatch = tokio::spawn(async move {
+            dispatcher
+                .dispatch(&lease_for_payload(JobPayload::SeriesResolve(
+                    SeriesResolveJob {
+                        library_id,
+                        series_root_path: dispatch_root,
+                        hint: Some(series_hint("Dead Letter Retry Show")),
+                        folder_name: "Dead Letter Retry Show".into(),
+                        scan_reason: ScanReason::BulkSeed,
+                    },
+                )))
+                .await
+        });
+
+        // The old resolver has durably marked its generation Failed, but has
+        // not started dependency release. Enroll the retry in that window.
+        failure_persisted.wait().await;
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("failed state exists")
+                .status,
+            SeriesScanStatus::Failed
+        );
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                Some(series_hint("Dead Letter Retry Show")),
+            )
+            .await
+            .expect("enroll retry generation");
+        resume.wait().await;
+
+        assert_eq!(
+            dispatch.await.expect("dispatcher task"),
+            DispatchStatus::DeadLetter {
+                error: "series provider rejected resolver input".into(),
+            }
+        );
+        assert!(
+            queue.released_dependencies.lock().await.is_empty(),
+            "the failed generation must not release dependencies for its retry"
+        );
+        assert!(queue.dependency_operation_order.lock().await.is_empty());
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 1);
+        assert_eq!(enqueued[0].dependency_key, Some(dependency_key));
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("retry state exists")
+                .status,
+            SeriesScanStatus::Discovered
+        );
+    }
+
+    #[tokio::test]
+    async fn series_resolve_failure_persistence_error_retries_without_release()
+    {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000026));
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Persistence Failure Show",
+        )
+        .unwrap();
+        let states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                Some(series_hint("Persistence Failure Show")),
+            )
+            .await
+            .expect("enroll resolver generation");
+
+        let queue = Arc::new(RecordingQueue::default());
+        queue.observe_series_states(Arc::clone(&states)).await;
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::new(InProcJobEventBus::new(64)),
+            Arc::new(MemoryCursorRepository::default()),
+            Arc::clone(&states),
+            Arc::new(FailingSeriesResolver::new(Arc::clone(&states), true)),
+            DispatcherActors::new(
+                noop_folder_actor(library_id),
+                Arc::new(StubAnalyzeActor),
+                Arc::new(StubMetadataActor),
+                Arc::new(StubIndexActor),
+                Arc::new(StubImageActor),
+            ),
+            CorrelationCache::default(),
+        );
+
+        let status = dispatcher
+            .dispatch(&lease_for_payload(JobPayload::SeriesResolve(
+                SeriesResolveJob {
+                    library_id,
+                    series_root_path: series_root_path.clone(),
+                    hint: Some(series_hint("Persistence Failure Show")),
+                    folder_name: "Persistence Failure Show".into(),
+                    scan_reason: ScanReason::BulkSeed,
+                },
+            )))
+            .await;
+
+        assert_eq!(
+            status,
+            DispatchStatus::Retry {
+                error: "series failure persistence unavailable".into(),
+            },
+            "the durable-state error must supersede the resolver dead-letter"
+        );
+        assert!(queue.released_dependencies.lock().await.is_empty());
+        assert!(queue.dependency_operation_order.lock().await.is_empty());
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("nonterminal state remains")
+                .status,
+            SeriesScanStatus::Discovered
+        );
     }
 
     #[tokio::test]

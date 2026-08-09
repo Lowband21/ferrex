@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::{
-    error::Result,
+    error::{MediaError, Result},
     types::{LibraryId, ids::SeriesID},
 };
 
@@ -57,7 +57,21 @@ pub trait SeriesScanStateRepository: Send + Sync {
         series_root_path: &SeriesRootPath,
     ) -> Result<Option<SeriesScanState>>;
 
+    /// Record an observational episode discovery. This inserts a missing root
+    /// but never mutates an existing row; only root enrollment may begin a
+    /// fresh resolution generation.
     async fn mark_discovered(
+        &self,
+        library_id: LibraryId,
+        series_root_path: SeriesRootPath,
+        hint: Option<SeriesHint>,
+    ) -> Result<SeriesScanState>;
+
+    /// Enroll a root for a fresh SeriesResolve generation before its job can be
+    /// enqueued. Unlike observational episode discovery, this explicitly marks
+    /// every non-resolved root `Discovered`. That state is the durable freshness
+    /// signal terminalizing workers use to preserve a newer generation.
+    async fn enroll_resolution_generation(
         &self,
         library_id: LibraryId,
         series_root_path: SeriesRootPath,
@@ -102,7 +116,7 @@ impl SeriesScanStateRepository for InMemorySeriesScanStateRepository {
         Ok(guard.get(&(library_id, series_root_path.clone())).cloned())
     }
 
-    async fn mark_discovered(
+    async fn enroll_resolution_generation(
         &self,
         library_id: LibraryId,
         series_root_path: SeriesRootPath,
@@ -133,9 +147,46 @@ impl SeriesScanStateRepository for InMemorySeriesScanStateRepository {
         }
         if !matches!(entry.status, SeriesScanStatus::Resolved) {
             entry.status = SeriesScanStatus::Discovered;
+            entry.series_id = None;
+            entry.resolved_at = None;
+            entry.failed_at = None;
+            entry.failure_reason = None;
         }
         entry.updated_at = now;
         Ok(entry.clone())
+    }
+
+    async fn mark_discovered(
+        &self,
+        library_id: LibraryId,
+        series_root_path: SeriesRootPath,
+        hint: Option<SeriesHint>,
+    ) -> Result<SeriesScanState> {
+        let mut guard = self.states.lock().await;
+        if let Some(existing) =
+            guard.get(&(library_id, series_root_path.clone()))
+        {
+            return Ok(existing.clone());
+        }
+
+        let now = Utc::now();
+        let state = SeriesScanState {
+            library_id,
+            series_root_path: series_root_path.clone(),
+            status: SeriesScanStatus::Discovered,
+            series_id: None,
+            hint,
+            seeded_at: None,
+            last_attempt_at: None,
+            attempts: 0,
+            resolved_at: None,
+            failed_at: None,
+            failure_reason: None,
+            created_at: now,
+            updated_at: now,
+        };
+        guard.insert((library_id, series_root_path), state.clone());
+        Ok(state)
     }
 
     async fn mark_seeded(
@@ -169,6 +220,8 @@ impl SeriesScanStateRepository for InMemorySeriesScanStateRepository {
         }
         if !matches!(entry.status, SeriesScanStatus::Resolved) {
             entry.status = SeriesScanStatus::Seeded;
+            entry.failed_at = None;
+            entry.failure_reason = None;
         }
         entry.last_attempt_at = Some(now);
         entry.attempts = entry.attempts.saturating_add(1);
@@ -273,7 +326,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discovered_hint_is_not_overwritten_by_none() {
+    async fn episode_observation_inserts_missing_root_then_preserves_it() {
         let repo = InMemorySeriesScanStateRepository::default();
         let library_id = lib(1);
         let root = series_root("/demo/Shows/Example");
@@ -289,13 +342,61 @@ mod tests {
             .mark_discovered(library_id, root.clone(), Some(hint.clone()))
             .await
             .expect("mark discovered");
-        assert_eq!(first.hint.as_ref().map(|h| &h.title), Some(&hint.title));
+        assert_eq!(first.status, SeriesScanStatus::Discovered);
+        assert_eq!(first.hint.as_ref(), Some(&hint));
 
+        let replacement_hint = SeriesHint {
+            title: "Replacement".into(),
+            slug: Some("replacement".into()),
+            year: Some(2025),
+            region: Some("CA".into()),
+        };
         let second = repo
-            .mark_discovered(library_id, root.clone(), None)
+            .mark_discovered(library_id, root.clone(), Some(replacement_hint))
             .await
             .expect("mark discovered again");
-        assert_eq!(second.hint.as_ref().map(|h| &h.title), Some(&hint.title));
+        assert_eq!(second.status, first.status);
+        assert_eq!(second.hint, first.hint);
+        assert_eq!(second.created_at, first.created_at);
+        assert_eq!(second.updated_at, first.updated_at);
+    }
+
+    #[tokio::test]
+    async fn episode_observation_preserves_seeded_state() {
+        let repo = InMemorySeriesScanStateRepository::default();
+        let library_id = lib(10);
+        let root = series_root("/demo/Shows/Seeded Observation");
+        let original_hint = SeriesHint {
+            title: "Seeded Observation".into(),
+            slug: Some("seeded-observation".into()),
+            year: Some(2020),
+            region: Some("US".into()),
+        };
+        let seeded = repo
+            .mark_seeded(library_id, root.clone(), Some(original_hint.clone()))
+            .await
+            .expect("series seeded");
+
+        let observed = repo
+            .mark_discovered(
+                library_id,
+                root,
+                Some(SeriesHint {
+                    title: "Spoofed Enrollment".into(),
+                    slug: None,
+                    year: Some(2026),
+                    region: None,
+                }),
+            )
+            .await
+            .expect("episode observes seeded series");
+
+        assert_eq!(observed.status, SeriesScanStatus::Seeded);
+        assert_eq!(observed.hint.as_ref(), Some(&original_hint));
+        assert_eq!(observed.updated_at, seeded.updated_at);
+        assert_eq!(observed.seeded_at, seeded.seeded_at);
+        assert_eq!(observed.last_attempt_at, seeded.last_attempt_at);
+        assert_eq!(observed.attempts, seeded.attempts);
     }
 
     #[tokio::test]
@@ -334,17 +435,18 @@ mod tests {
         let root = series_root("/demo/Shows/Rediscovered");
 
         let series_id = SeriesID(Uuid::from_u128(5));
-        repo.mark_resolved(
-            library_id,
-            root.clone(),
-            SeriesRef {
-                id: series_id,
-                slug: Some("rediscovered".into()),
-                title: Some("Rediscovered".into()),
-            },
-        )
-        .await
-        .expect("mark resolved");
+        let resolved = repo
+            .mark_resolved(
+                library_id,
+                root.clone(),
+                SeriesRef {
+                    id: series_id,
+                    slug: Some("rediscovered".into()),
+                    title: Some("Rediscovered".into()),
+                },
+            )
+            .await
+            .expect("mark resolved");
 
         let after = repo
             .mark_discovered(
@@ -363,6 +465,8 @@ mod tests {
         assert_eq!(after.series_id, Some(series_id));
         assert_eq!(after.status, SeriesScanStatus::Resolved);
         assert!(after.is_resolved());
+        assert_eq!(after.hint, resolved.hint);
+        assert_eq!(after.updated_at, resolved.updated_at);
         assert_eq!(
             repo.get(library_id, &root)
                 .await
@@ -371,6 +475,115 @@ mod tests {
                 .status,
             SeriesScanStatus::Resolved
         );
+    }
+
+    #[tokio::test]
+    async fn root_enrollment_reopens_failure_but_episode_discovery_does_not() {
+        let repo = InMemorySeriesScanStateRepository::default();
+        let library_id = lib(6);
+        let root = series_root("/demo/Shows/Failed Then Rediscovered");
+
+        let failed = repo
+            .mark_failed(
+                library_id,
+                root.clone(),
+                "provider returned 404".into(),
+            )
+            .await
+            .expect("mark failed");
+
+        let rediscovered = repo
+            .mark_discovered(
+                library_id,
+                root.clone(),
+                Some(SeriesHint {
+                    title: "Failed Then Rediscovered".into(),
+                    slug: None,
+                    year: None,
+                    region: None,
+                }),
+            )
+            .await
+            .expect("mark discovered after failure");
+        assert_eq!(rediscovered.status, SeriesScanStatus::Failed);
+        assert_eq!(
+            rediscovered.failure_reason.as_deref(),
+            Some("provider returned 404")
+        );
+        assert_eq!(rediscovered.hint, failed.hint);
+        assert_eq!(rediscovered.updated_at, failed.updated_at);
+
+        let enrolled = repo
+            .enroll_resolution_generation(library_id, root.clone(), None)
+            .await
+            .expect("root enrollment begins a fresh generation");
+        assert_eq!(enrolled.status, SeriesScanStatus::Discovered);
+        assert!(enrolled.series_id.is_none());
+        assert!(enrolled.resolved_at.is_none());
+        assert!(enrolled.failed_at.is_none());
+        assert!(enrolled.failure_reason.is_none());
+
+        let reseeded = repo
+            .mark_seeded(library_id, root, None)
+            .await
+            .expect("enrolled resolver marks its attempt seeded");
+        assert_eq!(reseeded.status, SeriesScanStatus::Seeded);
+        assert!(reseeded.failed_at.is_none());
+        assert!(reseeded.failure_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn root_enrollment_marks_seeded_generation_discovered() {
+        let repo = InMemorySeriesScanStateRepository::default();
+        let library_id = lib(7);
+        let root = series_root("/demo/Shows/Seeded Then Reenrolled");
+
+        let seeded = repo
+            .mark_seeded(library_id, root.clone(), None)
+            .await
+            .expect("attempt seeded");
+        assert_eq!(seeded.status, SeriesScanStatus::Seeded);
+
+        let enrolled = repo
+            .enroll_resolution_generation(library_id, root, None)
+            .await
+            .expect("fresh generation enrolled");
+        assert_eq!(enrolled.status, SeriesScanStatus::Discovered);
+        assert_eq!(enrolled.attempts, seeded.attempts);
+        assert_eq!(enrolled.seeded_at, seeded.seeded_at);
+        assert_eq!(enrolled.last_attempt_at, seeded.last_attempt_at);
+        assert!(enrolled.series_id.is_none());
+        assert!(enrolled.resolved_at.is_none());
+        assert!(enrolled.failed_at.is_none());
+        assert!(enrolled.failure_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn root_enrollment_preserves_resolved_generation() {
+        let repo = InMemorySeriesScanStateRepository::default();
+        let library_id = lib(8);
+        let root = series_root("/demo/Shows/Resolved Then Reenrolled");
+        let series_id = SeriesID(Uuid::from_u128(9));
+        repo.mark_resolved(
+            library_id,
+            root.clone(),
+            SeriesRef {
+                id: series_id,
+                slug: Some("resolved-then-reenrolled".into()),
+                title: Some("Resolved Then Reenrolled".into()),
+            },
+        )
+        .await
+        .expect("series resolved");
+
+        let enrolled = repo
+            .enroll_resolution_generation(library_id, root, None)
+            .await
+            .expect("resolved root observed by enrollment");
+        assert_eq!(enrolled.status, SeriesScanStatus::Resolved);
+        assert_eq!(enrolled.series_id, Some(series_id));
+        assert!(enrolled.resolved_at.is_some());
+        assert!(enrolled.is_resolved());
     }
 }
 
@@ -456,6 +669,96 @@ impl SeriesScanStateRepository for PostgresSeriesScanStateRepository {
         }))
     }
 
+    async fn enroll_resolution_generation(
+        &self,
+        library_id: LibraryId,
+        series_root_path: SeriesRootPath,
+        hint: Option<SeriesHint>,
+    ) -> Result<SeriesScanState> {
+        let (title, slug, year, region) = hint
+            .as_ref()
+            .map(|hint| {
+                (
+                    Some(hint.title.clone()),
+                    hint.slug.clone(),
+                    hint.year.map(|value| value as i16),
+                    hint.region.clone(),
+                )
+            })
+            .unwrap_or((None, None, None, None));
+
+        sqlx::query(
+            r#"
+            INSERT INTO series_scan_state (
+                library_id, series_root_path, status,
+                series_title, series_slug, series_year, series_region,
+                attempts, created_at, updated_at
+            )
+            VALUES (
+                $1, $2, 'discovered'::series_scan_status,
+                $3, $4, $5, $6, 0, NOW(), NOW()
+            )
+            ON CONFLICT (library_id, series_root_path)
+            DO UPDATE SET
+                series_title = COALESCE(
+                    EXCLUDED.series_title,
+                    series_scan_state.series_title
+                ),
+                series_slug = COALESCE(
+                    EXCLUDED.series_slug,
+                    series_scan_state.series_slug
+                ),
+                series_year = COALESCE(
+                    EXCLUDED.series_year,
+                    series_scan_state.series_year
+                ),
+                series_region = COALESCE(
+                    EXCLUDED.series_region,
+                    series_scan_state.series_region
+                ),
+                status = CASE
+                    WHEN series_scan_state.status <> 'resolved'
+                        THEN 'discovered'::series_scan_status
+                    ELSE series_scan_state.status
+                END,
+                series_id = CASE
+                    WHEN series_scan_state.status <> 'resolved' THEN NULL
+                    ELSE series_scan_state.series_id
+                END,
+                resolved_at = CASE
+                    WHEN series_scan_state.status <> 'resolved' THEN NULL
+                    ELSE series_scan_state.resolved_at
+                END,
+                failed_at = CASE
+                    WHEN series_scan_state.status <> 'resolved' THEN NULL
+                    ELSE series_scan_state.failed_at
+                END,
+                failure_reason = CASE
+                    WHEN series_scan_state.status <> 'resolved' THEN NULL
+                    ELSE series_scan_state.failure_reason
+                END,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(library_id.0)
+        .bind(series_root_path.as_str())
+        .bind(title)
+        .bind(slug)
+        .bind(year)
+        .bind(region)
+        .execute(&self.pool)
+        .await?;
+
+        self.get(library_id, &series_root_path)
+            .await?
+            .ok_or_else(|| {
+                MediaError::Internal(format!(
+                    "series resolution enrollment disappeared for {}",
+                    series_root_path.as_str()
+                ))
+            })
+    }
+
     async fn mark_discovered(
         &self,
         library_id: LibraryId,
@@ -474,69 +777,38 @@ impl SeriesScanStateRepository for PostgresSeriesScanStateRepository {
             })
             .unwrap_or((None, None, None, None));
 
-        let row = sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO series_scan_state (
                 library_id, series_root_path, status,
                 series_title, series_slug, series_year, series_region,
                 attempts, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 0, NOW(), NOW())
+            VALUES (
+                $1, $2, 'discovered'::series_scan_status,
+                $3, $4, $5, $6, 0, NOW(), NOW()
+            )
             ON CONFLICT (library_id, series_root_path)
-            DO UPDATE SET
-                series_title = COALESCE(EXCLUDED.series_title, series_scan_state.series_title),
-                series_slug = COALESCE(EXCLUDED.series_slug, series_scan_state.series_slug),
-                series_year = COALESCE(EXCLUDED.series_year, series_scan_state.series_year),
-                series_region = COALESCE(EXCLUDED.series_region, series_scan_state.series_region),
-                status = CASE
-                    WHEN series_scan_state.status = 'resolved' THEN series_scan_state.status
-                    ELSE 'discovered'
-                END,
-                updated_at = NOW()
-            RETURNING library_id, series_root_path, status as "status: SeriesScanStatus",
-                      series_id, series_title, series_slug, series_year, series_region,
-                      seeded_at, last_attempt_at, attempts,
-                      resolved_at, failed_at, failure_reason, created_at, updated_at
+            DO NOTHING
             "#,
-            library_id.0,
-            series_root_path.as_str(),
-            SeriesScanStatus::Discovered as SeriesScanStatus,
-            title,
-            slug,
-            year,
-            region
         )
-        .fetch_one(&self.pool)
+        .bind(library_id.0)
+        .bind(series_root_path.as_str())
+        .bind(title)
+        .bind(slug)
+        .bind(year)
+        .bind(region)
+        .execute(&self.pool)
         .await?;
 
-        Ok(SeriesScanState {
-            library_id,
-            series_root_path: SeriesRootPath::try_new(row.series_root_path)?,
-            status: row.status,
-            series_id: row.series_id.map(SeriesID),
-            hint: if row.series_title.is_some()
-                || row.series_slug.is_some()
-                || row.series_year.is_some()
-                || row.series_region.is_some()
-            {
-                Some(SeriesHint {
-                    title: row.series_title.unwrap_or_default(),
-                    slug: row.series_slug,
-                    year: row.series_year.map(|v| v as u16),
-                    region: row.series_region,
-                })
-            } else {
-                None
-            },
-            seeded_at: row.seeded_at,
-            last_attempt_at: row.last_attempt_at,
-            attempts: row.attempts as u32,
-            resolved_at: row.resolved_at,
-            failed_at: row.failed_at,
-            failure_reason: row.failure_reason,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
+        self.get(library_id, &series_root_path)
+            .await?
+            .ok_or_else(|| {
+                MediaError::Internal(format!(
+                    "observed series state disappeared for {}",
+                    series_root_path.as_str()
+                ))
+            })
     }
 
     async fn mark_seeded(
@@ -577,6 +849,16 @@ impl SeriesScanStateRepository for PostgresSeriesScanStateRepository {
                 seeded_at = COALESCE(series_scan_state.seeded_at, NOW()),
                 last_attempt_at = NOW(),
                 attempts = series_scan_state.attempts + 1,
+                failed_at = CASE
+                    WHEN series_scan_state.status = 'resolved'
+                        THEN series_scan_state.failed_at
+                    ELSE NULL
+                END,
+                failure_reason = CASE
+                    WHEN series_scan_state.status = 'resolved'
+                        THEN series_scan_state.failure_reason
+                    ELSE NULL
+                END,
                 updated_at = NOW()
             RETURNING library_id, series_root_path, status as "status: SeriesScanStatus",
                       series_id, series_title, series_slug, series_year, series_region,

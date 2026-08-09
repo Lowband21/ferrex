@@ -719,6 +719,7 @@ mod tests {
             kind: JobKind::FolderScan,
             media_id: None,
             indexing_change: None,
+            series_identity: None,
             state,
             attempts: 0,
             dedupe_key: format!("scan:test:{job_id}"),

@@ -9,11 +9,12 @@ use uuid::Uuid;
 use crate::error::Result;
 
 use super::{
+    context::SeriesRootPath,
     job::{EnqueueRequest, JobHandle, JobId, JobKind, JobPriority, JobState},
     lease::{DequeueRequest, JobLease, LeaseRenewal},
 };
 use crate::domain::scan::actors::index::IndexingChange;
-use crate::types::{LibraryId, MediaID};
+use crate::types::{LibraryId, MediaID, SeriesID};
 
 /// Aggregated schedulable state grouped by queue dimensions.
 ///
@@ -46,6 +47,10 @@ pub struct DurableJobState {
     pub media_id: Option<MediaID>,
     /// Exact catalog mutation semantics captured in an index-upsert payload.
     pub indexing_change: Option<IndexingChange>,
+    /// Compact series hierarchy extracted while decoding the durable payload.
+    /// Keeping only the identity needed by projections avoids retaining the
+    /// full (and potentially large) job payload in reconciliation snapshots.
+    pub series_identity: Option<DurableSeriesIdentity>,
     pub state: JobState,
     pub attempts: u16,
     pub dedupe_key: String,
@@ -54,6 +59,17 @@ pub struct DurableJobState {
     pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Minimal durable series hierarchy needed to rebuild a dropped bundle event.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurableSeriesIdentity {
+    /// Stable series folder represented by the durable payload hierarchy.
+    pub series_root_path: SeriesRootPath,
+    /// Catalog identity when the payload hierarchy had resolved the series.
+    pub series_id: Option<SeriesID>,
+    /// Logical season number carried by season or episode hierarchy.
+    pub season_number: Option<u16>,
 }
 
 impl DurableJobState {
@@ -77,6 +93,9 @@ impl DurableJobState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum QueueTransitionOutcome {
     Applied,
+    /// The requested terminal transition was superseded by newer durable work
+    /// and the same job row was made runnable again instead.
+    Requeued,
     Missing,
 }
 
@@ -88,7 +107,12 @@ pub enum QueueTransitionOutcome {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FailOutcome {
     RetryScheduled,
-    Terminal { state: JobState },
+    /// A newer durable generation superseded terminalization and the same job
+    /// row is immediately runnable again.
+    Requeued,
+    Terminal {
+        state: JobState,
+    },
     Missing,
 }
 
@@ -153,6 +177,14 @@ pub trait QueueService: Send + Sync {
     ) -> Result<()>;
 
     /// Dead-letter a lease and report whether the durable transition applied.
+    ///
+    /// Implementations that coordinate terminal job state with other durable
+    /// state may return [`QueueTransitionOutcome::Requeued`] when a newer
+    /// generation supersedes this terminal result. Callers must treat that as
+    /// nonterminal retry work and must not publish a dead-letter event.
+    /// PostgreSQL-backed SeriesResolve implementations also own the exact-root
+    /// dependency release in this transition so failed series state, queue
+    /// terminality, and episode promotion share one linearization boundary.
     async fn dead_letter_with_outcome(
         &self,
         lease_id: super::lease::LeaseId,
@@ -186,6 +218,32 @@ pub trait QueueService: Send + Sync {
         library_id: crate::types::LibraryId,
         dependency_key: &super::job::DependencyKey,
     ) -> Result<u64>;
+
+    /// Atomically promote deferred EpisodeMatch rows for one series root only
+    /// when that root is still terminal in authoritative series state.
+    ///
+    /// Durable implementations must serialize this check with fresh resolver
+    /// enrollment; callers must not perform a separate terminal-state read.
+    async fn release_terminal_series_dependency(
+        &self,
+        _library_id: crate::types::LibraryId,
+        _series_root_path: &super::context::SeriesRootPath,
+    ) -> Result<u64> {
+        Ok(0)
+    }
+
+    /// Repair deferred episode jobs whose series dependency is already
+    /// terminal in durable state.
+    ///
+    /// Series resolution and episode enrollment are independent durable
+    /// transitions. If resolution wins immediately before the deferred
+    /// EpisodeMatch row is inserted, the one-shot dependency release cannot
+    /// observe that row. Durable queue implementations should atomically
+    /// promote those stranded rows back to ready. The default keeps
+    /// non-durable queue implementations compatible.
+    async fn repair_terminal_series_dependencies(&self) -> Result<u64> {
+        Ok(0)
+    }
 
     /// Fetch grouped ready and active-lease counts for scheduler reconciliation.
     ///
