@@ -47,7 +47,7 @@ use ferrex_core::domain::scan::orchestration::{
         TranscriptExtractJob, TranscriptExtractTrigger,
     },
     lease::{DequeueRequest, JobLease},
-    queue::QueueService,
+    queue::{DurableJobState, QueueService},
     runtime::{
         InProcJobEventBus, LibraryActorHandle, LibraryCommandExecutor,
         OrchestratorRuntime, OrchestratorRuntimeBuilder,
@@ -130,6 +130,8 @@ pub struct ScanOrchestrator {
     correlations: CorrelationCache,
     unit_of_work: Arc<AppUnitOfWork>,
     maintenance: Mutex<Option<maintenance::MaintenanceSchedulerHandle>>,
+    root_discovery_truncated_sweeps: AtomicU64,
+    root_discovery_deferred_entries: AtomicU64,
 }
 
 impl fmt::Debug for ScanOrchestrator {
@@ -250,6 +252,8 @@ impl ScanOrchestrator {
             correlations,
             unit_of_work,
             maintenance: Mutex::new(None),
+            root_discovery_truncated_sweeps: AtomicU64::new(0),
+            root_discovery_deferred_entries: AtomicU64::new(0),
         })
     }
 
@@ -281,6 +285,17 @@ impl ScanOrchestrator {
         self.events.subscribe_scan()
     }
 
+    pub(crate) async fn durable_job_states(
+        &self,
+        correlation_id: Uuid,
+        job_ids: &[ferrex_core::domain::scan::orchestration::JobId],
+    ) -> Result<Vec<DurableJobState>> {
+        self.runtime
+            .queue()
+            .durable_job_states(correlation_id, job_ids)
+            .await
+    }
+
     pub fn config(&self) -> OrchestratorConfig {
         self.runtime.config().clone()
     }
@@ -291,7 +306,7 @@ impl ScanOrchestrator {
         command: LibraryActorCommand,
     ) -> Result<()> {
         self.runtime
-            .submit_library_command(library_id, command)
+            .submit_library_command_and_wait(library_id, command)
             .await
     }
 
@@ -336,6 +351,49 @@ impl ScanOrchestrator {
         self.watchers.unregister_library(library_id).await;
     }
 
+    /// Stop both filesystem watches and the actor mailbox for a library.
+    pub async fn unregister_library(
+        &self,
+        config: &LibraryActorConfig,
+        watch_for_changes: bool,
+    ) -> Result<()> {
+        let library_id = config.library.id;
+        self.watchers.unregister_library(library_id).await;
+
+        if let Err(shutdown_error) =
+            self.runtime.unregister_library_actor(library_id).await
+        {
+            if watch_for_changes {
+                let roots = config
+                    .root_paths
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, path)| {
+                        (LibraryRootsId(idx as u16), path.clone())
+                    })
+                    .collect();
+                if let Err(restore_error) =
+                    self.watchers.register_library(library_id, roots).await
+                {
+                    return Err(MediaError::Internal(format!(
+                        "actor shutdown failed: {shutdown_error}; watcher restoration failed: {restore_error}"
+                    )));
+                }
+            }
+            return Err(shutdown_error);
+        }
+
+        Ok(())
+    }
+
+    /// Drop scheduler state left behind after PostgreSQL cascades a library's
+    /// durable queue rows.
+    pub async fn forget_library_scheduler_state(&self, library_id: LibraryId) {
+        self.runtime
+            .forget_library_scheduler_state(library_id)
+            .await;
+    }
+
     pub async fn incremental_status(
         &self,
     ) -> Result<IncrementalScanStatusView> {
@@ -374,7 +432,22 @@ impl ScanOrchestrator {
             stale_cursor_libraries: cursor.stale_cursor_libraries,
             stale_cursors: cursor.stale_cursors,
             oldest_cursor_staleness_ms: cursor.oldest_cursor_staleness_ms,
+            root_discovery_truncated_sweeps: self
+                .root_discovery_truncated_sweeps
+                .load(Ordering::Relaxed),
+            root_discovery_deferred_entries: self
+                .root_discovery_deferred_entries
+                .load(Ordering::Relaxed),
         })
+    }
+
+    fn record_root_discovery_truncation(&self, deferred_entries: usize) {
+        self.root_discovery_truncated_sweeps
+            .fetch_add(1, Ordering::Relaxed);
+        self.root_discovery_deferred_entries.fetch_add(
+            u64::try_from(deferred_entries).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
     }
 
     async fn file_watch_health(&self) -> Result<FileWatchHealth> {

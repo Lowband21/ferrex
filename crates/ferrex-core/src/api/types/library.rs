@@ -16,6 +16,8 @@ use crate::types::media::{
 };
 use crate::types::media_id::MediaID;
 
+use super::scan::ScanCommandAcceptedResponse;
+
 /// Lightweight payload of library media used by UI clients
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
@@ -173,6 +175,10 @@ pub struct CreateLibraryRequest {
     pub auto_scan: bool,
     #[serde(default = "default_enabled")]
     pub watch_for_changes: bool,
+    #[serde(default)]
+    pub analyze_on_scan: bool,
+    #[serde(default = "default_max_retry_attempts")]
+    pub max_retry_attempts: u32,
     #[serde(default = "default_movie_ref_batch_size")]
     pub movie_ref_batch_size: u32,
     #[serde(default = "default_start_scan")]
@@ -188,7 +194,31 @@ pub struct UpdateLibraryRequest {
     pub enabled: Option<bool>,
     pub auto_scan: Option<bool>,
     pub watch_for_changes: Option<bool>,
+    pub analyze_on_scan: Option<bool>,
+    pub max_retry_attempts: Option<u32>,
     pub movie_ref_batch_size: Option<u32>,
+}
+
+/// Idempotent request to clear a library's owned data while preserving its
+/// identity and configuration, then start a fresh scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetLibraryRequest {
+    pub operation_id: Uuid,
+}
+
+impl Default for ResetLibraryRequest {
+    fn default() -> Self {
+        Self {
+            operation_id: Uuid::now_v7(),
+        }
+    }
+}
+
+/// Result of a server-side library reset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetLibraryResult {
+    pub library_id: LibraryId,
+    pub scan: Option<ScanCommandAcceptedResponse>,
 }
 
 fn default_scan_interval() -> u32 {
@@ -205,6 +235,10 @@ fn default_start_scan() -> bool {
 
 fn default_movie_ref_batch_size() -> u32 {
     250
+}
+
+fn default_max_retry_attempts() -> u32 {
+    3
 }
 
 #[cfg(test)]
@@ -225,6 +259,8 @@ mod tests {
         assert!(request.auto_scan);
         assert!(request.watch_for_changes);
         assert_eq!(request.scan_interval_minutes, 60);
+        assert!(!request.analyze_on_scan);
+        assert_eq!(request.max_retry_attempts, 3);
     }
 
     #[test]
@@ -236,7 +272,9 @@ mod tests {
                 "paths": ["/mnt/nas/movies"],
                 "auto_scan": false,
                 "watch_for_changes": false,
-                "scan_interval_minutes": 240
+                "scan_interval_minutes": 240,
+                "analyze_on_scan": true,
+                "max_retry_attempts": 7
             }"#,
         )
         .expect("create request should deserialize");
@@ -244,6 +282,8 @@ mod tests {
         assert!(!request.auto_scan);
         assert!(!request.watch_for_changes);
         assert_eq!(request.scan_interval_minutes, 240);
+        assert!(request.analyze_on_scan);
+        assert_eq!(request.max_retry_attempts, 7);
     }
 
     #[test]
@@ -251,12 +291,21 @@ mod tests {
         let request: UpdateLibraryRequest = serde_json::from_str(
             r#"{
                 "auto_scan": false,
-                "watch_for_changes": false
+                "watch_for_changes": false,
+                "analyze_on_scan": true,
+                "max_retry_attempts": 5
             }"#,
         )
         .expect("update request should deserialize");
 
         assert_eq!(request.auto_scan, Some(false));
         assert_eq!(request.watch_for_changes, Some(false));
+        assert_eq!(request.analyze_on_scan, Some(true));
+        assert_eq!(request.max_retry_attempts, Some(5));
+    }
+
+    #[test]
+    fn reset_library_request_generates_an_operation_id() {
+        assert_ne!(ResetLibraryRequest::default().operation_id, Uuid::nil());
     }
 }

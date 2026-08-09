@@ -34,9 +34,10 @@ use crate::domain::scan::orchestration::{
     events::{ScanEvent, ScanEventBus},
     job::{
         AnalyzeScanHierarchy, DependencyKey, EnqueueRequest, EpisodeMatchJob,
-        FolderScanJob, ImageFetchJob, IndexUpsertJob, JobPayload, JobPriority,
-        MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob, ScanReason,
-        SeriesResolveJob, TranscriptExtractJob, TranscriptExtractTrigger,
+        FolderScanJob, ImageFetchJob, IndexUpsertJob, JobHandle, JobPayload,
+        JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
+        ScanReason, SeriesResolveJob, TranscriptExtractJob,
+        TranscriptExtractTrigger,
     },
     lease::JobLease,
     queue::QueueService,
@@ -365,7 +366,12 @@ where
         Self { enqueuer }
     }
 
-    async fn enqueue(&self, request: EnqueueRequest) -> DispatchStatus {
+    async fn enqueue(
+        &self,
+        parent_correlation: Option<Uuid>,
+        mut request: EnqueueRequest,
+    ) -> DispatchStatus {
+        request.correlation_id = parent_correlation;
         match self.enqueuer.enqueue(request).await {
             Ok(_) => DispatchStatus::Success,
             Err(err) => classify_media_error(err),
@@ -374,12 +380,27 @@ where
 
     async fn enqueue_many(
         &self,
+        parent_correlation: Option<Uuid>,
         requests: Vec<EnqueueRequest>,
     ) -> DispatchStatus {
-        match self.enqueuer.enqueue_many(requests).await {
+        match self
+            .enqueue_many_with_handles(parent_correlation, requests)
+            .await
+        {
             Ok(_) => DispatchStatus::Success,
             Err(err) => classify_media_error(err),
         }
+    }
+
+    async fn enqueue_many_with_handles(
+        &self,
+        parent_correlation: Option<Uuid>,
+        mut requests: Vec<EnqueueRequest>,
+    ) -> Result<Vec<JobHandle>> {
+        for request in &mut requests {
+            request.correlation_id = parent_correlation;
+        }
+        self.enqueuer.enqueue_many(requests).await
     }
 
     async fn release_dependency(
@@ -460,6 +481,23 @@ impl FollowUpPlanner {
             scan_reason: media.scan_reason,
         };
         EnqueueRequest::new(analyze_priority, JobPayload::MediaAnalyze(analyze))
+    }
+
+    fn folder_scan_for_discovery(
+        &self,
+        context: &FolderScanContext,
+        reason: ScanReason,
+    ) -> EnqueueRequest {
+        let job = FolderScanJob {
+            context: context.clone(),
+            scan_reason: reason,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        };
+        EnqueueRequest::new(
+            priority_for_reason(&reason),
+            JobPayload::FolderScan(job),
+        )
     }
 
     fn metadata_after_analysis(
@@ -1128,7 +1166,11 @@ where
                         folder_name,
                         job.scan_reason,
                     );
-                    match self.follow_ups.enqueue(req).await {
+                    match self
+                        .follow_ups
+                        .enqueue(lease.job.correlation_id, req)
+                        .await
+                    {
                         DispatchStatus::Success => {}
                         status => return status,
                     }
@@ -1162,7 +1204,11 @@ where
                 discovered_events.push(media.clone());
 
                 let req = self.planner.media_analyze_for_discovery(media);
-                match self.follow_ups.enqueue(req).await {
+                match self
+                    .follow_ups
+                    .enqueue(lease.job.correlation_id, req)
+                    .await
+                {
                     DispatchStatus::Success => {}
                     DispatchStatus::Retry { error } => {
                         tracing::warn!(
@@ -1206,13 +1252,37 @@ where
                 return classify_media_error(err);
             }
 
-            // Emit FolderDiscovered for each child; orchestrator enqueues from events.
-            for child in &children {
+            // Make every child durable before publishing the observational
+            // discovery events. The scan-event broadcast channel is bounded,
+            // so it cannot be the ownership boundary for executable work.
+            let child_requests = children
+                .iter()
+                .map(|child| {
+                    self.planner
+                        .folder_scan_for_discovery(child, job.scan_reason)
+                })
+                .collect();
+            let child_handles = match self
+                .follow_ups
+                .enqueue_many_with_handles(
+                    lease.job.correlation_id,
+                    child_requests,
+                )
+                .await
+            {
+                Ok(handles) => handles,
+                Err(err) => return classify_media_error(err),
+            };
+
+            for (child, handle) in children.iter().zip(child_handles) {
+                let durable_job_id = handle.merged_into.unwrap_or(handle.job_id);
                 if let Err(err) = self
                     .events
                     .publish_scan_event(ScanEvent::FolderDiscovered {
                         context: Box::new(child.clone()),
                         reason: job.scan_reason,
+                        correlation_id: lease.job.correlation_id,
+                        durable_job_id: Some(durable_job_id),
                     })
                     .await
                 {
@@ -1409,20 +1479,24 @@ where
                 error: "folder scan payload routed to media pipeline".into(),
             },
             JobPayload::SeriesResolve(job) => {
-                self.handle_series_resolve(job).await
+                self.handle_series_resolve(lease.job.correlation_id, job)
+                    .await
             }
             JobPayload::MediaAnalyze(job) => {
-                self.handle_media_analyze(job).await
+                self.handle_media_analyze(lease.job.correlation_id, job)
+                    .await
             }
             JobPayload::MetadataEnrich(job) => {
-                self.handle_metadata_enrich(job).await
+                self.handle_metadata_enrich(lease.job.correlation_id, job)
+                    .await
             }
             JobPayload::IndexUpsert(job) => {
                 self.handle_index_upsert(lease, job).await
             }
             JobPayload::ImageFetch(job) => self.handle_image_fetch(job).await,
             JobPayload::EpisodeMatch(job) => {
-                self.handle_episode_match(job).await
+                self.handle_episode_match(lease.job.correlation_id, job)
+                    .await
             }
             JobPayload::TranscriptExtract(job) => {
                 self.handle_transcript_extract(lease, job).await
@@ -1432,6 +1506,7 @@ where
 
     async fn handle_media_analyze(
         &self,
+        parent_correlation: Option<Uuid>,
         job: &MediaAnalyzeJob,
     ) -> DispatchStatus {
         // TODO: Refactor clone
@@ -1481,7 +1556,10 @@ where
                             .metadata_after_resolved_episode_analysis(
                                 job, &analyzed, hierarchy,
                             );
-                        return self.follow_ups.enqueue(req).await;
+                        return self
+                            .follow_ups
+                            .enqueue(parent_correlation, req)
+                            .await;
                     }
                     EpisodeDependencyDecision::Deferred { dependency_key } => {
                         let req = self.planner.episode_match_after_analysis(
@@ -1490,18 +1568,22 @@ where
                             episode_hierarchy,
                             dependency_key,
                         );
-                        return self.follow_ups.enqueue(req).await;
+                        return self
+                            .follow_ups
+                            .enqueue(parent_correlation, req)
+                            .await;
                     }
                 }
             }
         }
 
         let req = self.planner.metadata_after_analysis(job, &analyzed);
-        self.follow_ups.enqueue(req).await
+        self.follow_ups.enqueue(parent_correlation, req).await
     }
 
     async fn handle_series_resolve(
         &self,
+        parent_correlation: Option<Uuid>,
         job: &SeriesResolveJob,
     ) -> DispatchStatus {
         let resolution = match self.series_coordinator.resolve_series(job).await
@@ -1559,11 +1641,12 @@ where
         }
 
         let req = self.planner.index_for_ready(job.library_id, &ready);
-        self.follow_ups.enqueue(req).await
+        self.follow_ups.enqueue(parent_correlation, req).await
     }
 
     async fn handle_metadata_enrich(
         &self,
+        parent_correlation: Option<Uuid>,
         job: &MetadataEnrichJob,
     ) -> DispatchStatus {
         let analyzed = MediaAnalyzed {
@@ -1609,14 +1692,18 @@ where
         if !ready.image_jobs.is_empty() {
             let image_requests = self.planner.image_fetches_for_ready(&ready);
 
-            match self.follow_ups.enqueue_many(image_requests).await {
+            match self
+                .follow_ups
+                .enqueue_many(parent_correlation, image_requests)
+                .await
+            {
                 DispatchStatus::Success => {}
                 status => return status,
             }
         }
 
         let req = self.planner.index_for_ready(job.library_id, &ready);
-        self.follow_ups.enqueue(req).await
+        self.follow_ups.enqueue(parent_correlation, req).await
     }
 
     async fn handle_index_upsert(
@@ -1743,7 +1830,9 @@ where
             TranscriptExtractTrigger::IndexUpsert,
             lease.job.correlation_id,
         );
-        self.follow_ups.enqueue(request).await
+        self.follow_ups
+            .enqueue(lease.job.correlation_id, request)
+            .await
     }
 
     fn transcript_attempt(lease: &JobLease) -> i32 {
@@ -2072,6 +2161,7 @@ where
 
     async fn handle_episode_match(
         &self,
+        parent_correlation: Option<Uuid>,
         job: &EpisodeMatchJob,
     ) -> DispatchStatus {
         let hierarchy = match self
@@ -2084,7 +2174,7 @@ where
         };
 
         let req = self.planner.metadata_after_episode_match(job, hierarchy);
-        self.follow_ups.enqueue(req).await
+        self.follow_ups.enqueue(parent_correlation, req).await
     }
 }
 
@@ -2155,7 +2245,7 @@ mod tests {
     use crate::types::ids::{LibraryId, MovieID, SeriesID};
     use crate::types::library::LibraryType;
     use ferrex_model::details::ExternalIds;
-    use ferrex_model::image::MediaImages;
+    use ferrex_model::image::{ImageSize, MediaImages};
     use ferrex_model::titles::MovieTitle;
     use ferrex_model::urls::{MovieURL, UrlLike};
     use ferrex_model::{
@@ -2163,7 +2253,7 @@ mod tests {
         MovieReference, MovieReferenceBatchSize, VideoMediaType,
     };
     use sqlx::PgPool;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use tokio::sync::Mutex;
     use tokio::time::Duration;
     use uuid::Uuid;
@@ -3031,6 +3121,31 @@ mod tests {
         )
     }
 
+    fn lease_for_payload_with_correlation(
+        payload: JobPayload,
+        correlation_id: Uuid,
+    ) -> JobLease {
+        let mut record = JobRecord::new(payload, JobPriority::P1);
+        record.correlation_id = Some(correlation_id);
+        JobLease::new(
+            record,
+            "test-worker".into(),
+            chrono::Duration::seconds(30),
+        )
+    }
+
+    fn lease_for_enqueue_request(request: &EnqueueRequest) -> JobLease {
+        let mut record =
+            JobRecord::new(request.payload.clone(), request.priority);
+        record.correlation_id = request.correlation_id;
+        record.dependency_key = request.dependency_key.clone();
+        JobLease::new(
+            record,
+            "test-worker".into(),
+            chrono::Duration::seconds(30),
+        )
+    }
+
     fn series_hint(title: &str) -> SeriesHint {
         SeriesHint {
             title: title.to_string(),
@@ -3317,9 +3432,11 @@ mod tests {
             std::fs::set_permissions(&ffprobe_path, perms).unwrap();
         }
 
-        let mut timed_text_config = TimedTextExtractionConfig::default();
-        timed_text_config.ffprobe_path = ffprobe_path;
-        timed_text_config.ffmpeg_path = library_root.join("missing-ffmpeg");
+        let timed_text_config = TimedTextExtractionConfig {
+            ffprobe_path,
+            ffmpeg_path: library_root.join("missing-ffmpeg"),
+            ..TimedTextExtractionConfig::default()
+        };
 
         let dispatcher = DefaultJobDispatcher::new(
             Arc::clone(&queue),
@@ -3354,10 +3471,11 @@ mod tests {
             path_norm: media_path.to_string_lossy().to_string(),
             idempotency_key: "timed-text-runtime-test".to_string(),
         };
-        let lease = JobLease::new(
-            JobRecord::new(JobPayload::IndexUpsert(job), JobPriority::P1),
-            "timed-text-test".to_string(),
-            chrono::Duration::seconds(30),
+        let parent_correlation =
+            Uuid::from_u128(0x6290000000000000000000000000c001);
+        let lease = lease_for_payload_with_correlation(
+            JobPayload::IndexUpsert(job),
+            parent_correlation,
         );
 
         let status = dispatcher.dispatch(&lease).await;
@@ -3366,6 +3484,7 @@ mod tests {
         assert!(transcripts.recorded().await.is_empty());
         let enqueued = queue.enqueued().await;
         assert_eq!(enqueued.len(), 1);
+        assert_eq!(enqueued[0].correlation_id, Some(parent_correlation));
         let JobPayload::TranscriptExtract(transcript_job) =
             enqueued[0].payload.clone()
         else {
@@ -3379,14 +3498,7 @@ mod tests {
             TranscriptExtractTrigger::IndexUpsert
         );
 
-        let transcript_lease = JobLease::new(
-            JobRecord::new(
-                JobPayload::TranscriptExtract(transcript_job),
-                JobPriority::P2,
-            ),
-            "timed-text-test".to_string(),
-            chrono::Duration::seconds(30),
-        );
+        let transcript_lease = lease_for_enqueue_request(&enqueued[0]);
         let status = dispatcher.dispatch(&transcript_lease).await;
 
         assert_eq!(status, DispatchStatus::Success);
@@ -3587,7 +3699,144 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn child_burst_is_durable_before_bounded_discovery_events_lag() {
+        const CHILD_COUNT: usize = 300;
+
+        let parent_correlation =
+            Uuid::from_u128(0x5760000000000000000000000000c022);
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000022));
+        let parent_context = FolderScanContext::Movie(MovieFolderScanContext {
+            library_id,
+            movie_root_path: MovieRootPath::try_new_under_library_root(
+                "/library",
+                "/library/Burst Parent",
+            )
+            .unwrap(),
+        });
+        let children: Vec<_> = (0..CHILD_COUNT)
+            .map(|index| {
+                FolderScanContext::Movie(MovieFolderScanContext {
+                    library_id,
+                    movie_root_path: MovieRootPath::try_new_under_library_root(
+                        "/library",
+                        format!("/library/Child {index:03}"),
+                    )
+                    .unwrap(),
+                })
+            })
+            .collect();
+        let expected_paths: HashSet<_> = children
+            .iter()
+            .map(|child| child.folder_path_norm().to_string())
+            .collect();
+
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(256));
+        let mut scan_rx = events.subscribe_scan();
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&series_states)));
+        let folder_actor = Arc::new(StubFolderActor {
+            plan: FolderListingPlan {
+                directories: children
+                    .iter()
+                    .map(|child| PathBuf::from(child.folder_path_norm()))
+                    .collect(),
+                media_files: vec![],
+                ancillary_files: vec![],
+                generated_listing_hash: "child-burst-listing".into(),
+                total_entries: CHILD_COUNT,
+                folder_missing: false,
+            },
+            discovered: vec![],
+            children: children.clone(),
+            summary: FolderScanSummary {
+                context: parent_context.clone(),
+                discovered_files: 0,
+                enqueued_subfolders: CHILD_COUNT,
+                listing_hash: "child-burst-listing".into(),
+                outcome: FolderScanOutcome::Changed,
+                completed_at: Utc::now(),
+            },
+        }) as Arc<dyn FolderScanActor>;
+        let actors = DispatcherActors::new(
+            folder_actor,
+            Arc::new(StubAnalyzeActor),
+            Arc::new(StubMetadataActor),
+            Arc::new(StubIndexActor),
+            Arc::new(StubImageActor),
+        );
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            cursors,
+            Arc::clone(&series_states),
+            series_resolver,
+            actors,
+            CorrelationCache::default(),
+        );
+        let lease = lease_for_payload_with_correlation(
+            JobPayload::FolderScan(FolderScanJob {
+                context: parent_context,
+                scan_reason: ScanReason::BulkSeed,
+                enqueue_time: Utc::now(),
+                device_id: None,
+            }),
+            parent_correlation,
+        );
+
+        assert_eq!(dispatcher.dispatch(&lease).await, DispatchStatus::Success);
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), CHILD_COUNT);
+        assert!(enqueued.iter().all(|request| {
+            matches!(request.payload, JobPayload::FolderScan(_))
+                && request.correlation_id == Some(parent_correlation)
+        }));
+        let durable_paths: HashSet<_> = enqueued
+            .iter()
+            .filter_map(|request| match &request.payload {
+                JobPayload::FolderScan(job) => {
+                    Some(job.context.folder_path_norm().to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(durable_paths, expected_paths);
+
+        let skipped = match scan_rx.recv().await {
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                skipped
+            }
+            other => {
+                panic!("expected >256 discovery burst to lag, got {other:?}")
+            }
+        };
+        assert!(skipped >= 45);
+
+        let mut observed_marked_discoveries = 0;
+        while let Ok(event) = scan_rx.try_recv() {
+            if let ScanEvent::FolderDiscovered {
+                durable_job_id,
+                correlation_id,
+                ..
+            } = event
+            {
+                assert!(durable_job_id.is_some());
+                assert_eq!(correlation_id, Some(parent_correlation));
+                observed_marked_discoveries += 1;
+            }
+        }
+        assert!(observed_marked_discoveries > 0);
+    }
+
+    #[tokio::test]
     async fn series_root_scan_enqueues_resolve_and_season_discovery() {
+        let parent_correlation =
+            Uuid::from_u128(0x5760000000000000000000000000c020);
         let library_id =
             LibraryId(Uuid::from_u128(0x57600000000000000000000000000001));
         let library_root = "/library";
@@ -3666,12 +3915,15 @@ mod tests {
             correlations.clone(),
         );
 
-        let lease = lease_for_payload(JobPayload::FolderScan(FolderScanJob {
-            context: series_context.clone(),
-            scan_reason: ScanReason::BulkSeed,
-            enqueue_time: Utc::now(),
-            device_id: None,
-        }));
+        let lease = lease_for_payload_with_correlation(
+            JobPayload::FolderScan(FolderScanJob {
+                context: series_context.clone(),
+                scan_reason: ScanReason::BulkSeed,
+                enqueue_time: Utc::now(),
+                device_id: None,
+            }),
+            parent_correlation,
+        );
 
         let status = dispatcher.dispatch(&lease).await;
         assert!(matches!(status, DispatchStatus::Success));
@@ -3684,7 +3936,11 @@ mod tests {
         assert!(matches!(state.status, SeriesScanStatus::Discovered));
 
         let enqueued = queue.enqueued().await;
-        assert_eq!(enqueued.len(), 1, "series root scan enqueues one job");
+        assert_eq!(
+            enqueued.len(),
+            2,
+            "series root scan durably enqueues resolve and season scan"
+        );
         let JobPayload::SeriesResolve(series_job) = &enqueued[0].payload else {
             panic!("expected SeriesResolve follow-up");
         };
@@ -3692,7 +3948,9 @@ mod tests {
         assert_eq!(series_job.series_root_path, series_root_path);
         assert_eq!(series_job.folder_name, "Deterministic Show");
         assert!(matches!(series_job.scan_reason, ScanReason::BulkSeed));
-        assert!(enqueued[0].correlation_id.is_none());
+        assert_eq!(enqueued[0].correlation_id, Some(parent_correlation));
+        assert!(matches!(enqueued[1].payload, JobPayload::FolderScan(_)));
+        assert_eq!(enqueued[1].correlation_id, Some(parent_correlation));
 
         let mut saw_series_resolve_enqueue = false;
         while let Ok(event) = job_rx.try_recv() {
@@ -3719,8 +3977,15 @@ mod tests {
         let mut saw_completion = false;
         while let Ok(event) = scan_rx.try_recv() {
             match event {
-                ScanEvent::FolderDiscovered { context, reason } => {
+                ScanEvent::FolderDiscovered {
+                    context,
+                    reason,
+                    correlation_id,
+                    durable_job_id,
+                } => {
                     assert!(matches!(reason, ScanReason::BulkSeed));
+                    assert_eq!(correlation_id, Some(parent_correlation));
+                    assert!(durable_job_id.is_some());
                     let FolderScanContext::Season(ctx) = *context else {
                         panic!("expected season FolderDiscovered context");
                     };
@@ -3747,6 +4012,203 @@ mod tests {
         assert!(
             saw_season_discovered,
             "season folder discovery should be emitted deterministically"
+        );
+
+        let episode_path = "/library/Deterministic Show/Season 1/S01E01.mkv";
+        let analyze_lease = lease_for_payload_with_correlation(
+            JobPayload::MediaAnalyze(media_analyze_episode_job(
+                library_id,
+                series_root_path.clone(),
+                "Deterministic Show",
+                episode_path,
+                1,
+            )),
+            parent_correlation,
+        );
+        assert_eq!(
+            dispatcher.dispatch(&analyze_lease).await,
+            DispatchStatus::Success
+        );
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 3);
+        assert!(matches!(enqueued[2].payload, JobPayload::EpisodeMatch(_)));
+        assert!(enqueued[2].dependency_key.is_some());
+        assert_eq!(enqueued[2].correlation_id, Some(parent_correlation));
+
+        let resolve_lease = lease_for_enqueue_request(&enqueued[0]);
+        assert_eq!(
+            dispatcher.dispatch(&resolve_lease).await,
+            DispatchStatus::Success
+        );
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 4);
+        assert!(matches!(enqueued[3].payload, JobPayload::IndexUpsert(_)));
+        assert_eq!(enqueued[3].correlation_id, Some(parent_correlation));
+
+        let episode_lease = lease_for_enqueue_request(&enqueued[2]);
+        assert_eq!(
+            dispatcher.dispatch(&episode_lease).await,
+            DispatchStatus::Success
+        );
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 5);
+        assert!(matches!(enqueued[4].payload, JobPayload::MetadataEnrich(_)));
+        assert_eq!(enqueued[4].correlation_id, Some(parent_correlation));
+    }
+
+    #[tokio::test]
+    async fn movie_pipeline_followups_inherit_parent_correlation() {
+        struct MetadataWithImageActor;
+
+        #[async_trait]
+        impl MetadataActor for MetadataWithImageActor {
+            async fn enrich(
+                &self,
+                command: MetadataCommand,
+            ) -> Result<MediaReadyForIndex> {
+                Ok(MediaReadyForIndex {
+                    library_id: command.job.library_id,
+                    media_id: command.job.media_id,
+                    variant: command.job.variant,
+                    hierarchy: command.job.hierarchy.clone(),
+                    node: command.job.node.clone(),
+                    normalized_title: None,
+                    analyzed: command.analyzed,
+                    prepared_at: Utc::now(),
+                    image_jobs: vec![ImageFetchJob {
+                        library_id: command.job.library_id,
+                        iid: Uuid::from_u128(
+                            0x5760000000000000000000000000a021,
+                        ),
+                        imz: ImageSize::poster(),
+                        priority_hint: ImageFetchPriority::Poster,
+                    }],
+                })
+            }
+        }
+
+        let parent_correlation =
+            Uuid::from_u128(0x5760000000000000000000000000c021);
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000021));
+        let library_root = "/library";
+        let movie_root_path = MovieRootPath::try_new_under_library_root(
+            library_root,
+            "/library/Correlated Movie",
+        )
+        .unwrap();
+        let context = FolderScanContext::Movie(MovieFolderScanContext {
+            library_id,
+            movie_root_path: movie_root_path.clone(),
+        });
+        let media_path = "/library/Correlated Movie/movie.mkv";
+        let media_id = MediaID::new(VideoMediaType::Movie);
+        let hierarchy = AnalyzeScanHierarchy::Movie(MovieScanHierarchy {
+            movie_root_path,
+            movie_id: None,
+            extra_tag: None,
+        });
+
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(32));
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&series_states)));
+        let folder_actor = Arc::new(StubFolderActor {
+            plan: FolderListingPlan {
+                directories: vec![],
+                media_files: vec![PathBuf::from(media_path)],
+                ancillary_files: vec![],
+                generated_listing_hash: "correlated-movie-listing".into(),
+                total_entries: 1,
+                folder_missing: false,
+            },
+            discovered: vec![MediaFileDiscovered {
+                library_id,
+                path_norm: media_path.into(),
+                fingerprint: MediaFingerprint::default(),
+                classified_as: MediaKindHint::Movie,
+                media_id,
+                variant: VideoMediaType::Movie,
+                node: ScanNodeKind::MovieFolder,
+                hierarchy,
+                context: context.clone(),
+                scan_reason: ScanReason::BulkSeed,
+            }],
+            children: vec![],
+            summary: FolderScanSummary {
+                context: context.clone(),
+                discovered_files: 1,
+                enqueued_subfolders: 0,
+                listing_hash: "correlated-movie-listing".into(),
+                outcome: FolderScanOutcome::Changed,
+                completed_at: Utc::now(),
+            },
+        }) as Arc<dyn FolderScanActor>;
+        let actors = DispatcherActors::new(
+            folder_actor,
+            Arc::new(StubAnalyzeActor),
+            Arc::new(MetadataWithImageActor),
+            Arc::new(StubIndexActor),
+            Arc::new(StubImageActor),
+        );
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            events,
+            cursors,
+            series_states,
+            series_resolver,
+            actors,
+            CorrelationCache::default(),
+        );
+
+        let folder_lease = lease_for_payload_with_correlation(
+            JobPayload::FolderScan(FolderScanJob {
+                context,
+                scan_reason: ScanReason::BulkSeed,
+                enqueue_time: Utc::now(),
+                device_id: None,
+            }),
+            parent_correlation,
+        );
+        assert_eq!(
+            dispatcher.dispatch(&folder_lease).await,
+            DispatchStatus::Success
+        );
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 1);
+        assert!(matches!(enqueued[0].payload, JobPayload::MediaAnalyze(_)));
+        assert_eq!(enqueued[0].correlation_id, Some(parent_correlation));
+
+        let analyze_lease = lease_for_enqueue_request(&enqueued[0]);
+        assert_eq!(
+            dispatcher.dispatch(&analyze_lease).await,
+            DispatchStatus::Success
+        );
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 2);
+        assert!(matches!(enqueued[1].payload, JobPayload::MetadataEnrich(_)));
+        assert_eq!(enqueued[1].correlation_id, Some(parent_correlation));
+
+        let metadata_lease = lease_for_enqueue_request(&enqueued[1]);
+        assert_eq!(
+            dispatcher.dispatch(&metadata_lease).await,
+            DispatchStatus::Success
+        );
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 4);
+        assert!(matches!(enqueued[2].payload, JobPayload::ImageFetch(_)));
+        assert!(matches!(enqueued[3].payload, JobPayload::IndexUpsert(_)));
+        assert!(
+            enqueued[2..]
+                .iter()
+                .all(|request| request.correlation_id
+                    == Some(parent_correlation))
         );
     }
 

@@ -601,6 +601,8 @@ pub fn scan_event_folder_discovered(
     ScanEvent::FolderDiscovered {
         context: Box::new(context),
         reason,
+        correlation_id: None,
+        durable_job_id: None,
     }
 }
 
@@ -624,6 +626,7 @@ pub fn scan_event_seed_completed(
         correlation_id: None,
         mode,
         queued_folders,
+        enrolled_job_ids: Vec::new(),
         completed_at: Utc::now(),
     })
 }

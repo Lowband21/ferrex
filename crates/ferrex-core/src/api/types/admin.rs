@@ -1,5 +1,65 @@
 use serde::{Deserialize, Serialize};
 
+/// Authenticated administrative database-reset request.
+///
+/// The confirmation value intentionally travels with every request so callers
+/// cannot trigger destructive maintenance through an empty POST.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetDatabaseRequest {
+    /// Reset all users and authentication data.
+    pub reset_users: bool,
+    /// Reset all libraries and their library-owned data.
+    pub reset_libraries: bool,
+    /// Reset media entries. Library deletion currently owns the media cascade.
+    pub reset_media: bool,
+    /// Destructive-operation confirmation phrase.
+    pub confirmation: String,
+}
+
+impl ResetDatabaseRequest {
+    /// Build the full wipe requested by the player dashboard's Clear All Data action.
+    pub fn clear_all_data() -> Self {
+        Self {
+            reset_users: true,
+            reset_libraries: true,
+            reset_media: true,
+            confirmation: "RESET_DATABASE".to_string(),
+        }
+    }
+}
+
+/// Counts returned after an administrative database reset.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetDatabaseResult {
+    /// Number of users deleted.
+    pub users_deleted: usize,
+    /// Number of sessions deleted.
+    pub sessions_deleted: usize,
+    /// Number of roles restored to their default definitions.
+    pub roles_reset: usize,
+    /// Number of libraries deleted.
+    pub libraries_deleted: usize,
+    /// Number of media items deleted directly.
+    pub media_deleted: usize,
+    /// Number of watch-status entries deleted directly.
+    pub watch_status_deleted: usize,
+}
+
+#[cfg(test)]
+mod reset_database_tests {
+    use super::ResetDatabaseRequest;
+
+    #[test]
+    fn clear_all_data_requests_every_destructive_reset() {
+        let request = ResetDatabaseRequest::clear_all_data();
+
+        assert!(request.reset_users);
+        assert!(request.reset_libraries);
+        assert!(request.reset_media);
+        assert_eq!(request.confirmation, "RESET_DATABASE");
+    }
+}
+
 /// Request parameters accepted by the media root browser endpoint.
 ///
 /// `path` is expected to be a relative POSIX-style path anchored at the server's

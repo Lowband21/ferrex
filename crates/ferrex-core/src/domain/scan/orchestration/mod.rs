@@ -108,8 +108,9 @@ pub use maintenance::{
 };
 pub use persistence::{PostgresCursorRepository, PostgresQueueService};
 pub use queue::{
-    LeaseExpiryScanner, QueueInstrumentation, QueueService, QueueSnapshot,
-    QueueSnapshotEntry, ReadyQueueCount,
+    DurableJobState, FailOutcome, LeaseExpiryScanner, QueueInstrumentation,
+    QueueService, QueueSnapshot, QueueSnapshotEntry, QueueTransitionOutcome,
+    ReadyQueueCount,
 };
 pub use runtime::{
     InProcJobEventBus, JobEventStream, LibraryActorHandle,

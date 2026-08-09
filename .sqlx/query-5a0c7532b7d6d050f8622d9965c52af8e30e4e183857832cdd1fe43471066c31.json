@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM tmdb_image_variants",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "5a0c7532b7d6d050f8622d9965c52af8e30e4e183857832cdd1fe43471066c31"
+}

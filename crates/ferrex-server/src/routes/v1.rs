@@ -35,7 +35,8 @@ use crate::{
                 create_library_handler, delete_library_handler,
                 get_libraries_with_media_handler, get_library_handler,
                 get_library_media_handler, get_library_sorted_indices_handler,
-                post_library_filtered_indices_handler, update_library_handler,
+                post_library_filtered_indices_handler, reset_library_handler,
+                update_library_handler,
             },
             handle_movie_batches::{
                 get_movie_reference_batch_bundle_handler,
@@ -463,6 +464,7 @@ fn create_libraries_routes(state: AppState) -> Router<AppState> {
             v1::libraries::ITEM,
             axum::routing::delete(delete_library_handler),
         )
+        .route(v1::libraries::RESET, post(reset_library_handler))
         .route(
             v1::libraries::DISCOVERY,
             get(discovery::get_library_discovery_handler),
@@ -578,15 +580,6 @@ fn create_admin_routes(state: AppState) -> Router<AppState> {
             axum::routing::delete(admin_handlers::revoke_user_session_admin),
         )
         .route(v1::admin::STATS, get(admin_handlers::get_admin_stats))
-        // Development/reset endpoints (admin only)
-        .route(
-            v1::admin::dev::RESET_CHECK,
-            get(dev_handlers::check_reset_status),
-        )
-        .route(
-            v1::admin::dev::RESET_DATABASE,
-            post(dev_handlers::reset_database),
-        )
         .route(MEDIA_ROOT_BROWSER, get(media_root::browse_media_root))
         // Admin session management for PIN authentication
         .route(
@@ -610,13 +603,32 @@ fn create_admin_routes(state: AppState) -> Router<AppState> {
         .route(v1::admin::demo::RESET, post(demo_handlers::reset))
         .route(v1::admin::demo::RESIZE, post(demo_handlers::resize));
 
-    router
+    let admin_router = router
         // route_layer applies inside-out; add admin guard first so auth runs before it
         .route_layer(middleware::from_fn(auth::middleware::admin_middleware))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
-        ))
+        ));
+
+    // Reset handlers enforce the dedicated server:reset_database permission.
+    // Keeping them outside the broad user-admin guard allows a deliberately
+    // delegated reset operator to use the capability without users:* access.
+    let reset_router = Router::new()
+        .route(
+            v1::admin::dev::RESET_CHECK,
+            get(dev_handlers::check_reset_status),
+        )
+        .route(
+            v1::admin::dev::RESET_DATABASE,
+            post(dev_handlers::reset_database),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            auth::middleware::auth_middleware,
+        ));
+
+    admin_router.merge(reset_router)
 }
 
 /// Create role management routes
@@ -647,4 +659,15 @@ fn create_role_routes(state: AppState) -> Router<AppState> {
             state.clone(),
             auth::middleware::auth_middleware,
         ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn library_reset_route_is_valid_axum_syntax() {
+        let _: Router<AppState> = Router::new()
+            .route(v1::libraries::RESET, post(reset_library_handler));
+    }
 }

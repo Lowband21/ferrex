@@ -119,6 +119,14 @@ pub struct IncrementalScanStatusView {
     pub stale_cursor_libraries: u64,
     pub stale_cursors: u64,
     pub oldest_cursor_staleness_ms: Option<u64>,
+    /// Number of maintenance planning passes that deferred eligible root
+    /// folders because the per-library discovery bound was reached.
+    #[serde(default)]
+    pub root_discovery_truncated_sweeps: u64,
+    /// Total eligible root folders deferred by bounded maintenance planning
+    /// since this server process started.
+    #[serde(default)]
+    pub root_discovery_deferred_entries: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +237,8 @@ pub struct MaintenanceConfigView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaseConfigView {
     pub lease_ttl_secs: i64,
+    #[serde(default)]
+    pub dispatch_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,4 +263,31 @@ pub struct BudgetConfigView {
     pub image_fetch_limit: usize,
     #[serde(default)]
     pub transcript_extraction_limit: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IncrementalScanStatusView;
+
+    #[test]
+    fn incremental_scan_metrics_expose_root_discovery_truncation() {
+        let status = IncrementalScanStatusView {
+            root_discovery_truncated_sweeps: 3,
+            root_discovery_deferred_entries: 769,
+            ..IncrementalScanStatusView::default()
+        };
+
+        let encoded = serde_json::to_value(&status).expect("serialize metrics");
+        assert_eq!(encoded["root_discovery_truncated_sweeps"], 3);
+        assert_eq!(encoded["root_discovery_deferred_entries"], 769);
+
+        let mut legacy = encoded;
+        let object = legacy.as_object_mut().expect("metrics object");
+        object.remove("root_discovery_truncated_sweeps");
+        object.remove("root_discovery_deferred_entries");
+        let decoded: IncrementalScanStatusView =
+            serde_json::from_value(legacy).expect("deserialize legacy metrics");
+        assert_eq!(decoded.root_discovery_truncated_sweeps, 0);
+        assert_eq!(decoded.root_discovery_deferred_entries, 0);
+    }
 }

@@ -1537,6 +1537,8 @@ async fn series_bundle_finalization_emits_once_and_feeds_sync_fetch(
                 series_context.clone(),
             )),
             reason: ScanReason::BulkSeed,
+            correlation_id: None,
+            durable_job_id: None,
         },
     )
     .await?;
@@ -1555,6 +1557,8 @@ async fn series_bundle_finalization_emits_once_and_feeds_sync_fetch(
                 season_context.clone(),
             )),
             reason: ScanReason::BulkSeed,
+            correlation_id: None,
+            durable_job_id: None,
         },
     )
     .await?;
@@ -1688,6 +1692,8 @@ async fn series_bundle_finalization_emits_once_and_feeds_sync_fetch(
                 series_context.clone(),
             )),
             reason: ScanReason::BulkSeed,
+            correlation_id: None,
+            durable_job_id: None,
         },
     )
     .await?;
@@ -1698,6 +1704,8 @@ async fn series_bundle_finalization_emits_once_and_feeds_sync_fetch(
                 season_context.clone(),
             )),
             reason: ScanReason::BulkSeed,
+            correlation_id: None,
+            durable_job_id: None,
         },
     )
     .await?;

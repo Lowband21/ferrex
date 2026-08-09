@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH deleted AS (\n            DELETE FROM libraries\n            WHERE id = $1\n            RETURNING\n                id,\n                name,\n                library_type,\n                paths,\n                scan_interval_minutes,\n                enabled,\n                auto_scan,\n                watch_for_changes,\n                analyze_on_scan,\n                max_retry_attempts,\n                movie_ref_batch_size,\n                created_at\n        )\n        INSERT INTO libraries (\n            id,\n            name,\n            library_type,\n            paths,\n            scan_interval_minutes,\n            enabled,\n            auto_scan,\n            watch_for_changes,\n            analyze_on_scan,\n            max_retry_attempts,\n            movie_ref_batch_size,\n            created_at,\n            updated_at\n        )\n        SELECT\n            id,\n            name,\n            library_type,\n            paths,\n            scan_interval_minutes,\n            enabled,\n            auto_scan,\n            watch_for_changes,\n            analyze_on_scan,\n            max_retry_attempts,\n            movie_ref_batch_size,\n            created_at,\n            NOW()\n        FROM deleted\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9dfef18700bd6cccc20d0a8346f402ca48a6ee9461a92db1316168888d5d18b5"
+}

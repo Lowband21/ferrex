@@ -6,6 +6,7 @@ Key points:
 - Worker pools per JobKind (FolderScan, MediaAnalyze, MetadataEnrich, IndexUpsert)
 - Leases: jobs are leased with a TTL and renewed before expiry.
 - Renewals: default TTL is 30s; renew when half elapsed or when <2s remain (renew_min_margin_ms).
+- Execution deadline: each dispatcher attempt is bounded to 30 minutes by default (dispatch_timeout_ms); a timeout stops renewal and becomes a retryable failure.
 - Housekeeping periodically rescans for expired leases and resurrects eligible jobs.
 - Actors (library, folder, etc.) are kept resident to accept commands; they are not removed after Start.
 

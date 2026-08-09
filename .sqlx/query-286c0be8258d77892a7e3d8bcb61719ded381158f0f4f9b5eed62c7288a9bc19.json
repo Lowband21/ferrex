@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_episode_state",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "286c0be8258d77892a7e3d8bcb61719ded381158f0f4f9b5eed62c7288a9bc19"
+}

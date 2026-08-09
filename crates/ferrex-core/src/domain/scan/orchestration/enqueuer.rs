@@ -58,6 +58,12 @@ where
     ) -> Option<Uuid> {
         if handle.accepted {
             request.correlation_id
+        } else if request.correlation_id.is_some() {
+            // Attribute the merge notification to the requesting run. The
+            // existing job can be shared by more than one active run, so its
+            // durable/cached owner remains unchanged and each requester
+            // persists the shared job ID in its own scan-run metadata.
+            request.correlation_id
         } else if let Some(existing) = handle.merged_into {
             self.correlations
                 .fetch(&existing)
@@ -592,6 +598,46 @@ mod tests {
         assert_eq!(
             correlations.fetch(&existing_job).await,
             Some(requested_correlation)
+        );
+    }
+
+    #[tokio::test]
+    async fn correlated_merge_is_routed_to_requester_without_stealing_owner() {
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let correlations = CorrelationCache::default();
+        let existing_job =
+            JobId(Uuid::from_u128(0x88888888888888888888888888888888));
+        let old_correlation =
+            Uuid::from_u128(0x99999999999999999999999999999999);
+        let requested_correlation =
+            Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);
+        correlations.remember(existing_job, old_correlation).await;
+        let pipeline = enqueuer(
+            Arc::clone(&queue),
+            Arc::clone(&publisher),
+            correlations.clone(),
+        );
+        let mut request = image_request(
+            JobPriority::P1,
+            Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb),
+        );
+        request.correlation_id = Some(requested_correlation);
+        queue
+            .push_enqueue_result(JobHandle::merged(
+                existing_job,
+                &request.payload,
+                request.priority,
+            ))
+            .await;
+
+        pipeline.enqueue(request).await.expect("enqueue");
+
+        let events = publisher.events().await;
+        assert_eq!(events[0].meta.correlation_id, requested_correlation);
+        assert_eq!(
+            correlations.fetch(&existing_job).await,
+            Some(old_correlation)
         );
     }
 

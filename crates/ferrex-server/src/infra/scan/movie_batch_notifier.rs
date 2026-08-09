@@ -87,6 +87,15 @@ impl MovieBatchFinalizationNotifiers {
         let _ = notifier.stop_tx.send(true);
         notifier.task.abort();
     }
+
+    /// Stop notifier work immediately when its library has been deleted.
+    pub async fn forget_library(&self, library_id: LibraryId) {
+        let notifier = self.libraries.lock().await.remove(&library_id);
+        if let Some(notifier) = notifier {
+            let _ = notifier.stop_tx.send(true);
+            notifier.task.abort();
+        }
+    }
 }
 
 async fn fetch_last_finalized_batch_id(

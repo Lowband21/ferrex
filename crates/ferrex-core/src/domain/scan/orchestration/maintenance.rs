@@ -112,6 +112,11 @@ pub struct MaintenancePlan {
     pub stale_cursor_count: usize,
     pub new_root_folder_count: usize,
     pub skipped_root_entries: usize,
+    /// Whether root discovery deferred otherwise eligible folders because the
+    /// configured per-pass discovery bound was reached.
+    pub root_discovery_truncated: bool,
+    /// Number of eligible root folders deferred to a later planning pass.
+    pub deferred_root_entries: usize,
     pub errors: Vec<String>,
 }
 
@@ -124,6 +129,8 @@ impl MaintenancePlan {
             stale_cursor_count: 0,
             new_root_folder_count: 0,
             skipped_root_entries: 0,
+            root_discovery_truncated: false,
+            deferred_root_entries: 0,
             errors: Vec::new(),
         }
     }
@@ -199,10 +206,16 @@ pub async fn plan_maintenance_sweep_from_summaries(
     let root_discovery = discover_new_root_folders(
         input.library,
         &known_cursor_paths,
-        input.limits.max_root_entries_per_library,
+        input
+            .limits
+            .max_root_entries_per_library
+            .min(input.limits.max_jobs_per_library),
+        input.now,
     )
     .await;
     plan.skipped_root_entries += root_discovery.skipped_entries;
+    plan.root_discovery_truncated = root_discovery.truncated;
+    plan.deferred_root_entries = root_discovery.deferred_entries;
     plan.errors.extend(root_discovery.errors);
 
     for folder_path_norm in root_discovery.folders {
@@ -384,6 +397,8 @@ fn matching_root(
 struct RootDiscovery {
     folders: Vec<String>,
     skipped_entries: usize,
+    truncated: bool,
+    deferred_entries: usize,
     errors: Vec<String>,
 }
 
@@ -391,11 +406,11 @@ async fn discover_new_root_folders(
     library: &MaintenanceLibrary,
     known_cursor_paths: &HashSet<String>,
     max_root_entries: usize,
+    now: DateTime<Utc>,
 ) -> RootDiscovery {
     let mut discovery = RootDiscovery::default();
-    let mut visited_entries = 0usize;
 
-    'roots: for root in &library.paths {
+    for root in &library.paths {
         let root_norm = match normalize_path(root) {
             Ok(path) => path,
             Err(err) => {
@@ -418,10 +433,6 @@ async fn discover_new_root_folders(
         };
 
         loop {
-            if visited_entries >= max_root_entries {
-                break 'roots;
-            }
-
             let entry = match rd.next_entry().await {
                 Ok(Some(entry)) => entry,
                 Ok(None) => break,
@@ -433,7 +444,6 @@ async fn discover_new_root_folders(
                     continue;
                 }
             };
-            visited_entries += 1;
 
             let name = entry.file_name();
             let name = name.to_string_lossy();
@@ -474,13 +484,53 @@ async fn discover_new_root_folders(
                 }
             };
 
-            if !known_cursor_paths.contains(&path_norm) {
-                discovery.folders.push(path_norm);
-            }
+            discovery.folders.push(path_norm);
         }
     }
 
+    // Directory iteration order is filesystem-specific. Sort the eligible
+    // folders into deterministic partitions, then rotate the active partition
+    // by maintenance epoch. The library UUID supplies a stable offset so large
+    // libraries do not all enumerate the same partition at once. Rotation is
+    // independent of job completion and survives restarts without another
+    // persistence table.
     discovery
+        .folders
+        .retain(|path| !known_cursor_paths.contains(path));
+    discovery.folders.sort_unstable();
+    discovery.folders.dedup();
+    if discovery.folders.len() > max_root_entries {
+        discovery.truncated = true;
+        let total_entries = discovery.folders.len();
+        let page_count = total_entries.div_ceil(max_root_entries);
+        let page_index =
+            root_discovery_partition_index(library, now, page_count);
+        let page_start = page_index.saturating_mul(max_root_entries);
+        let page_end = page_start
+            .saturating_add(max_root_entries)
+            .min(total_entries);
+        discovery.deferred_entries =
+            total_entries.saturating_sub(page_end - page_start);
+        discovery.folders = discovery.folders[page_start..page_end].to_vec();
+    }
+    discovery
+}
+
+fn root_discovery_partition_index(
+    library: &MaintenanceLibrary,
+    now: DateTime<Utc>,
+    page_count: usize,
+) -> usize {
+    if page_count <= 1 {
+        return 0;
+    }
+
+    let interval_seconds = library.scan_interval().num_seconds().max(1);
+    let epoch = now.timestamp().div_euclid(interval_seconds);
+    let page_count_i64 = i64::try_from(page_count).unwrap_or(i64::MAX);
+    let epoch_index = epoch.rem_euclid(page_count_i64) as usize;
+    let stable_offset = (library.id.0.as_u128() % page_count as u128) as usize;
+    (stable_offset + epoch_index) % page_count
 }
 
 #[cfg(test)]
@@ -625,6 +675,55 @@ mod tests {
         };
         assert_eq!(job.scan_reason, ScanReason::MaintenanceSweep);
         assert!(job.context.folder_path_norm().ends_with("New Movie"));
+    }
+
+    #[tokio::test]
+    async fn root_discovery_rotates_beyond_entry_512_without_completed_jobs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        for index in 0..513 {
+            std::fs::create_dir(root.join(format!("Movie {index:04}")))
+                .expect("movie dir");
+        }
+
+        let library = test_library(root, None, false);
+        let repo = FakeCursorRepository::default();
+        let mut first_epoch =
+            DateTime::<Utc>::from_timestamp(0, 0).expect("unix epoch");
+        while root_discovery_partition_index(&library, first_epoch, 2) != 0 {
+            first_epoch += library.scan_interval();
+        }
+        let first = plan_maintenance_sweep(
+            &library,
+            &repo,
+            MaintenancePlanningLimits::new(512, 512),
+            first_epoch,
+        )
+        .await
+        .expect("first plan");
+
+        assert_eq!(first.requests.len(), 512);
+        assert!(first.root_discovery_truncated);
+        assert_eq!(first.deferred_root_entries, 1);
+
+        // Do not write cursors for the first page. The next maintenance epoch
+        // must rotate independently of whether those jobs succeeded.
+        let second = plan_maintenance_sweep(
+            &library,
+            &repo,
+            MaintenancePlanningLimits::new(512, 512),
+            first_epoch + library.scan_interval(),
+        )
+        .await
+        .expect("second plan");
+
+        assert_eq!(second.requests.len(), 1);
+        assert!(second.root_discovery_truncated);
+        assert_eq!(second.deferred_root_entries, 512);
+        let JobPayload::FolderScan(job) = &second.requests[0].payload else {
+            panic!("expected folder scan")
+        };
+        assert!(job.context.folder_path_norm().ends_with("Movie 0512"));
     }
 
     #[tokio::test]

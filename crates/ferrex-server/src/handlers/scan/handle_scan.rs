@@ -667,6 +667,7 @@ pub async fn scan_config_handler(
         },
         lease: LeaseConfigView {
             lease_ttl_secs: cfg.lease.lease_ttl_secs,
+            dispatch_timeout_ms: cfg.lease.dispatch_timeout_ms,
         },
         watch: WatchConfigView {
             debounce_window_ms: cfg.watch.debounce_window_ms,

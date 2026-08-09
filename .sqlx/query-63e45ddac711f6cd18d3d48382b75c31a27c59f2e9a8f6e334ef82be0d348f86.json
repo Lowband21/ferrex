@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_completed_media",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "63e45ddac711f6cd18d3d48382b75c31a27c59f2e9a8f6e334ef82be0d348f86"
+}

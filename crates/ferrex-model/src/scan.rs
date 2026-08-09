@@ -183,7 +183,8 @@ pub mod orchestration {
             /// Cursor-based incremental maintenance scheduler configuration.
             #[cfg_attr(feature = "serde", serde(default))]
             pub maintenance: MaintenanceConfig,
-            /// Lease defaults (TTL, renewal thresholds, housekeeping cadence).
+            /// Lease defaults (TTL, renewal thresholds, execution deadline,
+            /// and housekeeping cadence).
             pub lease: LeaseConfig,
             /// Global concurrency budget configuration for actor workloads.
             pub budget: super::budget::BudgetConfig,
@@ -343,6 +344,9 @@ pub mod orchestration {
         pub struct LeaseConfig {
             /// Default TTL for job leases (seconds).
             pub lease_ttl_secs: i64,
+            /// Maximum time one dispatcher invocation may run before the job
+            /// is released for a retry (milliseconds).
+            pub dispatch_timeout_ms: u64,
             /// Renew when remaining TTL drops below this fraction of the original TTL (e.g. 0.5).
             pub renew_at_fraction: f32,
             /// Minimum margin before expiry to trigger a renewal regardless of fraction (ms).
@@ -355,6 +359,7 @@ pub mod orchestration {
             fn default() -> Self {
                 Self {
                     lease_ttl_secs: 30,
+                    dispatch_timeout_ms: 30 * 60 * 1_000,
                     renew_at_fraction: 0.5,
                     renew_min_margin_ms: 2_000,
                     housekeeper_interval_ms: 15_000,

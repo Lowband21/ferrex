@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO library_maintenance_operations (\n            operation_id,\n            library_id,\n            operation\n        )\n        VALUES ($1, $2, 'reset')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e2b975691701fcbbc33ee1b72e5a3717e3e5c1b32a93416ee6c0f717d520dc5c"
+}

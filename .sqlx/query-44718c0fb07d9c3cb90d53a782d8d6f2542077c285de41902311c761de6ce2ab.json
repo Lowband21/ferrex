@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH mergeable_job AS MATERIALIZED (\n            SELECT id\n            FROM orchestrator_jobs\n            WHERE id = $2\n              AND state IN ('ready','deferred','leased')\n            FOR UPDATE\n        ), enrollment AS (\n            INSERT INTO orchestrator_job_enrollments (correlation_id, job_id)\n            SELECT $1::uuid, id\n            FROM mergeable_job\n            WHERE $1::uuid IS NOT NULL\n            ON CONFLICT (correlation_id, job_id) DO NOTHING\n            RETURNING job_id\n        )\n        SELECT\n            EXISTS(SELECT 1 FROM mergeable_job) AS \"mergeable!\",\n            (SELECT COUNT(*)::bigint FROM enrollment) AS \"enrollment_count!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mergeable!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "enrollment_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "44718c0fb07d9c3cb90d53a782d8d6f2542077c285de41902311c761de6ce2ab"
+}

@@ -23,7 +23,7 @@ use crate::domain::scan::orchestration::{
     events::JobEventPublisher,
     job::{
         DedupeKey, EnqueueRequest, JobHandle, JobId, JobPayload, JobPriority,
-        MetadataEnrichJob, ScanReason,
+        MetadataEnrichJob,
     },
     queue::QueueService,
     scan_cursor::normalize_path,
@@ -321,6 +321,16 @@ where
         }
     }
 
+    fn release_tracked_job(&mut self, dedupe_key: &DedupeKey) {
+        let _ = self.state.release_job(dedupe_key);
+        if let DedupeKey::FolderScan {
+            candidate: MediaCandidate { path_norm, .. },
+        } = dedupe_key
+        {
+            self.state.mark_scan_inactive(path_norm);
+        }
+    }
+
     async fn enqueue_folder_scan(
         &mut self,
         request: EnqueueRequest,
@@ -350,20 +360,6 @@ where
 
         if self.state.is_scan_active(&folder_path) {
             return Ok(vec![LibraryActorEvent::JobThrottled { dedupe_key }]);
-        }
-
-        // For bulk seeding we bypass the in-memory outstanding throttle so we can
-        // enqueue all folders into the persistent queue up-front. The scheduler
-        // will regulate actual execution concurrency.
-        if !matches!(reason, ScanReason::BulkSeed) {
-            let outstanding_limit_reached = self.state.outstanding_jobs.len()
-                >= self.config.max_outstanding_jobs
-                && !self.state.outstanding_jobs.contains_key(&dedupe_key);
-            if outstanding_limit_reached {
-                return Ok(vec![LibraryActorEvent::JobThrottled {
-                    dedupe_key,
-                }]);
-            }
         }
 
         // Record outstanding and mark active; orchestrator will enqueue from the returned event.
@@ -452,9 +448,6 @@ where
         events: Vec<FileSystemEvent>,
         correlation_id: Option<Uuid>,
     ) -> Result<Vec<LibraryActorEvent>> {
-        if self.state.is_bulk_scanning {
-            return Ok(vec![]);
-        }
         let mut responses = Vec::new();
 
         let Some(root_path) = self.config.root_path(root) else {
@@ -480,7 +473,7 @@ where
             })
             .collect();
 
-        let plan = plan_fs_event_burst(FsEventPlanningInput {
+        let mut plan = plan_fs_event_burst(FsEventPlanningInput {
             library: &self.config.library,
             root: planning_root,
             events: planning_events,
@@ -491,6 +484,38 @@ where
             now: Utc::now(),
         })
         .await?;
+
+        // Overflow planning and ordinary change planning can identify the same
+        // folder in one burst. Keep admission atomic and let the durable queue
+        // dedupe across separate commands.
+        let mut planned_folders = HashSet::new();
+        plan.requests.retain(|request| match &request.payload {
+            JobPayload::FolderScan(job) => planned_folders
+                .insert(job.context.folder_path_norm().to_string()),
+            _ => true,
+        });
+
+        // A watcher batch is acknowledged as a unit. Check every target before
+        // recording any of them so an active folder makes the whole batch
+        // retryable instead of silently dropping only the conflicting path.
+        let active_folders: Vec<_> = plan
+            .requests
+            .iter()
+            .filter_map(|request| match &request.payload {
+                JobPayload::FolderScan(job) => {
+                    let folder = job.context.folder_path_norm();
+                    self.state.is_scan_active(folder).then(|| folder.to_owned())
+                }
+                _ => None,
+            })
+            .collect();
+        if !active_folders.is_empty() {
+            return Err(crate::error::MediaError::ConcurrencyLimit(format!(
+                "filesystem event targets already being scanned for library {}: {}",
+                self.config.library.id,
+                active_folders.join(", ")
+            )));
+        }
 
         if plan.dropped_events > 0 {
             warn!(
@@ -542,8 +567,55 @@ where
     ) -> Result<Vec<LibraryActorEvent>> {
         if self.state.is_paused {
             match command {
+                LibraryActorCommand::Start {
+                    mode: StartMode::Maintenance,
+                    correlation_id,
+                } => {
+                    if self.state.is_bulk_scanning
+                        && self.state.current_correlation != correlation_id
+                    {
+                        warn!(
+                            library_id = %self.config.library.id,
+                            current_correlation = ?self.state.current_correlation,
+                            maintenance_correlation = ?correlation_id,
+                            "ignoring stale maintenance transition for newer bulk scan"
+                        );
+                        return Ok(vec![]);
+                    }
+                    // Scan finalization uses Maintenance as the actor's durable
+                    // reset transition. It must work while paused so a
+                    // pause/cancel sequence cannot leave stale active folders
+                    // suppressing every later bulk seed.
+                    self.state.is_paused = false;
+                    self.state.is_bulk_scanning = false;
+                    self.state.current_correlation = correlation_id;
+                    self.state.outstanding_jobs.clear();
+                    self.state.active_folder_scans.clear();
+                    self.state.roots.clear();
+                    for root in self.config.roots() {
+                        self.state.roots.insert(
+                            root.root_id,
+                            LibraryRootState {
+                                last_scan_at: None,
+                                is_watching: true,
+                            },
+                        );
+                    }
+                    Ok(vec![])
+                }
                 LibraryActorCommand::Resume => {
                     self.state.is_paused = false;
+                    for root_state in self.state.roots.values_mut() {
+                        root_state.is_watching = true;
+                    }
+                    Ok(vec![])
+                }
+                LibraryActorCommand::JobCompleted { dedupe_key, .. }
+                | LibraryActorCommand::JobFailed { dedupe_key, .. } => {
+                    // Pausing admission does not pause already leased workers.
+                    // Consume their terminal notifications so Resume cannot
+                    // retain phantom active-folder conflicts.
+                    self.release_tracked_job(&dedupe_key);
                     Ok(vec![])
                 }
                 LibraryActorCommand::Shutdown => {
@@ -552,74 +624,105 @@ where
                     self.state.current_correlation = None;
                     Ok(vec![])
                 }
-                _ => Ok(vec![]), // Ignore other commands when paused
+                LibraryActorCommand::FsEvents { .. } => {
+                    Err(crate::error::MediaError::ConcurrencyLimit(format!(
+                        "filesystem event admission paused for library {}",
+                        self.config.library.id
+                    )))
+                }
+                LibraryActorCommand::Start {
+                    mode: StartMode::Bulk | StartMode::Resume,
+                    ..
+                } => Err(crate::error::MediaError::ConcurrencyLimit(format!(
+                    "scan admission paused for library {}",
+                    self.config.library.id
+                ))),
+                LibraryActorCommand::Pause => Ok(vec![]),
             }
         } else {
             match command {
                 LibraryActorCommand::Start {
                     mode,
                     correlation_id,
-                } => {
-                    self.state.current_correlation = correlation_id;
-                    match mode {
-                        StartMode::Bulk => {
-                            self.state.is_bulk_scanning = true;
-                            // Initialize root states and seed bulk folders
-                            for root in self.config.roots() {
-                                self.state.roots.insert(
-                                    root.root_id,
-                                    LibraryRootState {
-                                        last_scan_at: None,
-                                        is_watching: true,
-                                    },
-                                );
-                            }
-                            self.seed_bulk_folders(mode, correlation_id).await
+                } => match mode {
+                    StartMode::Bulk => {
+                        self.state.current_correlation = correlation_id;
+                        self.state.is_bulk_scanning = true;
+                        // Initialize root states and seed bulk folders
+                        for root in self.config.roots() {
+                            self.state.roots.insert(
+                                root.root_id,
+                                LibraryRootState {
+                                    last_scan_at: None,
+                                    is_watching: true,
+                                },
+                            );
                         }
-                        StartMode::Maintenance | StartMode::Resume => {
-                            self.state.is_bulk_scanning = false;
-                            // Initialize roots for watching only
-                            for root in self.config.roots() {
-                                self.state.roots.insert(
-                                    root.root_id,
-                                    LibraryRootState {
-                                        last_scan_at: None,
-                                        is_watching: true,
-                                    },
-                                );
-                            }
-                            Ok(vec![])
-                        }
+                        self.seed_bulk_folders(mode, correlation_id).await
                     }
-                }
+                    StartMode::Maintenance => {
+                        if self.state.is_bulk_scanning
+                            && self.state.current_correlation != correlation_id
+                        {
+                            warn!(
+                                library_id = %self.config.library.id,
+                                current_correlation = ?self.state.current_correlation,
+                                maintenance_correlation = ?correlation_id,
+                                "ignoring stale maintenance transition for newer bulk scan"
+                            );
+                            return Ok(vec![]);
+                        }
+
+                        let reset_bulk_state = self.state.is_bulk_scanning;
+                        self.state.current_correlation = correlation_id;
+                        self.state.is_bulk_scanning = false;
+                        if reset_bulk_state {
+                            self.state.outstanding_jobs.clear();
+                            self.state.active_folder_scans.clear();
+                        }
+                        // Initialize roots for watching only.
+                        for root in self.config.roots() {
+                            self.state.roots.insert(
+                                root.root_id,
+                                LibraryRootState {
+                                    last_scan_at: None,
+                                    is_watching: true,
+                                },
+                            );
+                        }
+                        Ok(vec![])
+                    }
+                    StartMode::Resume => {
+                        self.state.current_correlation = correlation_id;
+                        self.state.is_bulk_scanning = false;
+                        // Initialize roots for watching only.
+                        for root in self.config.roots() {
+                            self.state.roots.insert(
+                                root.root_id,
+                                LibraryRootState {
+                                    last_scan_at: None,
+                                    is_watching: true,
+                                },
+                            );
+                        }
+                        Ok(vec![])
+                    }
+                },
                 LibraryActorCommand::FsEvents {
                     root,
                     events,
                     correlation_id,
                 } => self.handle_fs_events(root, events, correlation_id).await,
                 LibraryActorCommand::JobCompleted { dedupe_key, .. } => {
-                    let _ = self.state.release_job(&dedupe_key);
-                    if let DedupeKey::FolderScan {
-                        candidate: MediaCandidate { path_norm, .. },
-                    } = &dedupe_key
-                    {
-                        self.state.mark_scan_inactive(path_norm);
-                    }
+                    self.release_tracked_job(&dedupe_key);
                     Ok(vec![])
                 }
                 LibraryActorCommand::JobFailed { dedupe_key, .. } => {
-                    let _ = self.state.release_job(&dedupe_key);
-                    if let DedupeKey::FolderScan {
-                        candidate: MediaCandidate { path_norm, .. },
-                    } = &dedupe_key
-                    {
-                        self.state.mark_scan_inactive(path_norm);
-                    }
+                    self.release_tracked_job(&dedupe_key);
                     Ok(vec![])
                 }
                 LibraryActorCommand::Pause => {
                     self.state.is_paused = true;
-                    self.state.current_correlation = None;
                     for root_state in self.state.roots.values_mut() {
                         root_state.is_watching = false;
                     }
@@ -916,7 +1019,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fs_watch_events_are_ignored_during_bulk_scan() -> Result<()> {
+    async fn fs_watch_events_added_during_bulk_scan_are_enqueued() -> Result<()>
+    {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_path_buf();
         let queue = Arc::new(RecordingQueue::default());
@@ -953,23 +1057,17 @@ mod tests {
             })
             .await?;
 
-        // While a bulk scan is underway watcher bursts are ignored—the bulk seed
-        // has already enqueued every folder, so any queued work here would be
-        // redundant and could reintroduce the incomplete-state bug these guards
-        // were meant to avoid.
-        assert!(
-            responses.iter().all(|event| !matches!(
-                event,
-                LibraryActorEvent::EnqueueFolderScan { .. }
-            )),
-            "fs events during bulk should not enqueue additional scans"
+        assert_eq!(
+            enqueued_folder_paths(&responses),
+            vec![normalize_path(&folder)?],
+            "folders created after bulk enumeration must still be scanned"
         );
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn bulk_seed_and_watcher_burst_share_one_active_folder_scan()
+    async fn watcher_burst_for_active_folder_is_retryable_without_state_change()
     -> Result<()> {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_path_buf();
@@ -1026,21 +1124,74 @@ mod tests {
             )?,
         ];
 
-        let responses = actor
+        let before_outstanding: HashSet<_> =
+            actor.state.outstanding_jobs.keys().cloned().collect();
+        let before_active = actor.state.active_folder_scans.clone();
+        let error = actor
             .handle_command(LibraryActorCommand::FsEvents {
                 root: LibraryRootsId(0),
                 events: burst,
                 correlation_id: Some(scan_id),
             })
-            .await?;
+            .await
+            .expect_err(
+                "an active folder must make the watcher burst retryable",
+            );
 
         assert!(
-            enqueued_folder_paths(&responses).is_empty(),
-            "watcher bursts during bulk must not enqueue duplicate folder scans"
+            matches!(error, MediaError::ConcurrencyLimit(_)),
+            "active folder conflicts should use the retryable concurrency error"
         );
-        assert_eq!(actor.state.outstanding_jobs.len(), 1);
-        assert_eq!(actor.state.active_folder_scans.len(), 1);
-        assert!(actor.state.is_scan_active(&seeded_folder_norm));
+        assert_eq!(
+            actor
+                .state
+                .outstanding_jobs
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>(),
+            before_outstanding
+        );
+        assert_eq!(actor.state.active_folder_scans, before_active);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn watcher_overflow_bypasses_actor_outstanding_limit() -> Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let folder_count = 40usize;
+        for index in 0..folder_count {
+            std::fs::create_dir_all(root.join(format!("movie-{index:03}")))
+                .unwrap();
+        }
+
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut actor = make_actor(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
+        assert!(actor.config.max_outstanding_jobs < folder_count);
+        let library_id = actor.config.library.id;
+
+        let responses = actor
+            .handle_command(LibraryActorCommand::FsEvents {
+                root: LibraryRootsId(0),
+                events: vec![make_event(
+                    &root,
+                    FileSystemEventKind::Overflow,
+                    library_id,
+                    None,
+                )?],
+                correlation_id: None,
+            })
+            .await?;
+
+        assert_eq!(enqueued_folder_paths(&responses).len(), folder_count);
+        assert_eq!(actor.state.outstanding_jobs.len(), folder_count);
+        assert_eq!(actor.state.active_folder_scans.len(), folder_count);
 
         Ok(())
     }
@@ -1093,6 +1244,184 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn maintenance_resets_paused_actor_for_subsequent_bulk_scan()
+    -> Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let seeded_folder = root.join("cancelled-movie");
+        std::fs::create_dir_all(&seeded_folder).unwrap();
+        let seeded_folder_norm = normalize_path(&seeded_folder)?;
+
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut actor =
+            make_actor(Arc::clone(&queue), root, Arc::clone(&publisher));
+        let bulk_correlation = Uuid::now_v7();
+
+        let first_bulk = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Bulk,
+                correlation_id: Some(bulk_correlation),
+            })
+            .await?;
+        assert_eq!(
+            enqueued_folder_paths(&first_bulk),
+            vec![seeded_folder_norm.clone()]
+        );
+
+        actor.handle_command(LibraryActorCommand::Pause).await?;
+        assert!(actor.state.is_paused);
+        assert!(actor.state.is_scan_active(&seeded_folder_norm));
+
+        actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Maintenance,
+                correlation_id: Some(bulk_correlation),
+            })
+            .await?;
+        assert!(!actor.state.is_paused);
+        assert!(!actor.state.is_bulk_scanning);
+        assert!(actor.state.outstanding_jobs.is_empty());
+        assert!(actor.state.active_folder_scans.is_empty());
+        assert!(actor.state.roots.values().all(|root| root.is_watching));
+
+        let second_bulk = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Bulk,
+                correlation_id: Some(Uuid::now_v7()),
+            })
+            .await?;
+        assert_eq!(
+            enqueued_folder_paths(&second_bulk),
+            vec![seeded_folder_norm],
+            "bulk admission must recover after paused scan finalization"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn paused_actor_consumes_terminal_jobs_before_resume() -> Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let seeded_folder = root.join("paused-worker-movie");
+        std::fs::create_dir_all(&seeded_folder).unwrap();
+        let media_file = seeded_folder.join("feature.mkv");
+        std::fs::write(&media_file, b"fixture").unwrap();
+        let seeded_folder_norm = normalize_path(&seeded_folder)?;
+
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut actor =
+            make_actor(Arc::clone(&queue), root, Arc::clone(&publisher));
+        let library_id = actor.config.library.id;
+
+        let _ = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Bulk,
+                correlation_id: Some(Uuid::now_v7()),
+            })
+            .await?;
+        actor.handle_command(LibraryActorCommand::Pause).await?;
+        actor
+            .handle_command(LibraryActorCommand::JobCompleted {
+                job_id: JobId::new(),
+                dedupe_key: DedupeKey::FolderScan {
+                    candidate: MediaCandidate::new(
+                        library_id,
+                        seeded_folder_norm.clone(),
+                    ),
+                },
+            })
+            .await?;
+
+        assert!(actor.state.is_paused);
+        assert!(actor.state.outstanding_jobs.is_empty());
+        assert!(actor.state.active_folder_scans.is_empty());
+
+        actor.handle_command(LibraryActorCommand::Resume).await?;
+        let watcher_events = actor
+            .handle_command(LibraryActorCommand::FsEvents {
+                root: LibraryRootsId(0),
+                events: vec![make_event(
+                    &media_file,
+                    FileSystemEventKind::Modified,
+                    library_id,
+                    None,
+                )?],
+                correlation_id: None,
+            })
+            .await?;
+        assert_eq!(
+            enqueued_folder_paths(&watcher_events),
+            vec![seeded_folder_norm]
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stale_maintenance_does_not_clobber_newer_bulk_scan() -> Result<()>
+    {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let seeded_folder = root.join("newer-bulk-movie");
+        std::fs::create_dir_all(&seeded_folder).unwrap();
+        let seeded_folder_norm = normalize_path(&seeded_folder)?;
+
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut actor =
+            make_actor(Arc::clone(&queue), root, Arc::clone(&publisher));
+        let library_id = actor.config.library.id;
+        let old_bulk = Uuid::now_v7();
+        let new_bulk = Uuid::now_v7();
+
+        let _ = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Bulk,
+                correlation_id: Some(old_bulk),
+            })
+            .await?;
+        actor
+            .handle_command(LibraryActorCommand::JobCompleted {
+                job_id: JobId::new(),
+                dedupe_key: DedupeKey::FolderScan {
+                    candidate: MediaCandidate::new(
+                        library_id,
+                        seeded_folder_norm.clone(),
+                    ),
+                },
+            })
+            .await?;
+
+        let newer_events = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Bulk,
+                correlation_id: Some(new_bulk),
+            })
+            .await?;
+        assert_eq!(
+            enqueued_folder_paths(&newer_events),
+            vec![seeded_folder_norm.clone()]
+        );
+
+        actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Maintenance,
+                correlation_id: Some(old_bulk),
+            })
+            .await?;
+
+        assert!(actor.state.is_bulk_scanning);
+        assert_eq!(actor.state.current_correlation, Some(new_bulk));
+        assert!(actor.state.is_scan_active(&seeded_folder_norm));
+        assert_eq!(actor.state.outstanding_jobs.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn post_bulk_maintenance_start_does_not_duplicate_folder_jobs()
     -> Result<()> {
         let temp = tempfile::tempdir().unwrap();
@@ -1111,11 +1440,12 @@ mod tests {
             Arc::clone(&publisher),
         );
         let library_id = actor.config.library.id;
+        let bulk_correlation = Uuid::now_v7();
 
         let start_events = actor
             .handle_command(LibraryActorCommand::Start {
                 mode: StartMode::Bulk,
-                correlation_id: Some(Uuid::now_v7()),
+                correlation_id: Some(bulk_correlation),
             })
             .await?;
         assert_eq!(
@@ -1140,7 +1470,7 @@ mod tests {
         let first_maintenance = actor
             .handle_command(LibraryActorCommand::Start {
                 mode: StartMode::Maintenance,
-                correlation_id: Some(Uuid::now_v7()),
+                correlation_id: Some(bulk_correlation),
             })
             .await?;
         let duplicate_maintenance = actor
@@ -1182,18 +1512,15 @@ mod tests {
         );
         assert_eq!(actor.state.active_folder_scans.len(), 1);
 
-        let duplicate_responses = actor
+        let duplicate_error = actor
             .handle_command(LibraryActorCommand::FsEvents {
                 root: LibraryRootsId(0),
                 events: burst,
                 correlation_id: None,
             })
-            .await?;
-        assert!(enqueued_folder_paths(&duplicate_responses).is_empty());
-        assert!(duplicate_responses.iter().any(|event| matches!(
-            event,
-            LibraryActorEvent::JobThrottled { .. }
-        )));
+            .await
+            .expect_err("active folder should defer the whole watcher burst");
+        assert!(matches!(duplicate_error, MediaError::ConcurrencyLimit(_)));
         let active_paths: HashSet<_> =
             actor.state.active_folder_scans.iter().cloned().collect();
         assert_eq!(active_paths, HashSet::from([seeded_folder_norm]));

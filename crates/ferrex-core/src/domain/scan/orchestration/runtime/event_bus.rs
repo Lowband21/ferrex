@@ -86,3 +86,44 @@ impl ScanEventStream for InProcJobEventBus {
         self.subscribe_scan()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        domain::scan::orchestration::events::{EventMeta, JobEventPayload},
+        types::LibraryId,
+    };
+    use chrono::Utc;
+
+    #[tokio::test]
+    async fn job_burst_above_256_reports_lag_to_reconciling_consumers() {
+        let bus = InProcJobEventBus::new(256);
+        let mut receiver = bus.subscribe();
+        let library_id = LibraryId::new();
+
+        for sequence in 0..300 {
+            bus.publish(JobEvent {
+                meta: EventMeta::new(
+                    None,
+                    library_id,
+                    format!("burst:{sequence}"),
+                    None,
+                ),
+                payload: JobEventPayload::ThroughputTick {
+                    queue_depths: Vec::new(),
+                    sampled_at: Utc::now(),
+                },
+            })
+            .await
+            .expect("event publish succeeds");
+        }
+
+        match receiver.recv().await {
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                assert!(skipped >= 44);
+            }
+            other => panic!("expected lag after 300 events, got {other:?}"),
+        }
+    }
+}

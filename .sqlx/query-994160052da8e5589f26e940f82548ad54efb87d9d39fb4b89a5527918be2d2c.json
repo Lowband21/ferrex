@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_roles SET granted_by = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "994160052da8e5589f26e940f82548ad54efb87d9d39fb4b89a5527918be2d2c"
+}

@@ -12,14 +12,15 @@ use tracing::{debug, info, trace, warn};
 
 use crate::domain::scan::orchestration::{
     config::RetryConfig,
+    events::stable_path_key,
     job::{
         DependencyKey, EnqueueRequest, JobHandle, JobId, JobKind, JobPayload,
-        JobPriority, ScanReason, TranscriptExtractJob,
+        JobPriority, JobState, ScanReason, TranscriptExtractJob,
     },
     lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
     queue::{
-        LeaseExpiryScanner, QueueInstrumentation, QueueService, QueueSnapshot,
-        ReadyQueueCount,
+        DurableJobState, FailOutcome, LeaseExpiryScanner, QueueInstrumentation,
+        QueueService, QueueSnapshot, QueueTransitionOutcome, ReadyQueueCount,
     },
     scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
 };
@@ -181,6 +182,84 @@ where
     .await?;
 
     Ok(())
+}
+
+async fn enroll_job<'e, E>(
+    executor: E,
+    correlation_id: Option<uuid::Uuid>,
+    job_id: JobId,
+) -> Result<()>
+where
+    E: Executor<'e, Database = sqlx::Postgres>,
+{
+    let Some(correlation_id) = correlation_id else {
+        return Ok(());
+    };
+
+    sqlx::query!(
+        r#"
+        INSERT INTO orchestrator_job_enrollments (correlation_id, job_id)
+        VALUES ($1, $2)
+        ON CONFLICT (correlation_id, job_id) DO NOTHING
+        "#,
+        correlation_id,
+        job_id.0,
+    )
+    .execute(executor)
+    .await
+    .map_err(|err| {
+        MediaError::Internal(format!(
+            "orchestrator job enrollment failed: {err}"
+        ))
+    })?;
+
+    Ok(())
+}
+
+/// Atomically linearize a merge against an active durable job and enroll the
+/// requesting correlation. A terminal transition racing the earlier lookup
+/// wins this check and forces the caller to enqueue a new job generation.
+async fn enroll_active_job<'e, E>(
+    executor: E,
+    correlation_id: Option<uuid::Uuid>,
+    job_id: JobId,
+) -> Result<bool>
+where
+    E: Executor<'e, Database = sqlx::Postgres>,
+{
+    let row = sqlx::query!(
+        r#"
+        WITH mergeable_job AS MATERIALIZED (
+            SELECT id
+            FROM orchestrator_jobs
+            WHERE id = $2
+              AND state IN ('ready','deferred','leased')
+            FOR UPDATE
+        ), enrollment AS (
+            INSERT INTO orchestrator_job_enrollments (correlation_id, job_id)
+            SELECT $1::uuid, id
+            FROM mergeable_job
+            WHERE $1::uuid IS NOT NULL
+            ON CONFLICT (correlation_id, job_id) DO NOTHING
+            RETURNING job_id
+        )
+        SELECT
+            EXISTS(SELECT 1 FROM mergeable_job) AS "mergeable!",
+            (SELECT COUNT(*)::bigint FROM enrollment) AS "enrollment_count!"
+        "#,
+        correlation_id,
+        job_id.0,
+    )
+    .fetch_one(executor)
+    .await
+    .map_err(|err| {
+        MediaError::Internal(format!(
+            "active orchestrator job enrollment failed: {err}"
+        ))
+    })?;
+
+    let _ = row.enrollment_count;
+    Ok(row.mergeable)
 }
 
 impl fmt::Debug for PostgresQueueService {
@@ -491,14 +570,38 @@ impl PostgresQueueService {
         }
     }
 
-    /// Fetch grouped ready counts directly from persistence. Used to prime the
-    /// in-memory scheduler after a cold start.
+    fn parse_state(state: &str) -> Result<JobState> {
+        match state {
+            "ready" => Ok(JobState::Ready),
+            "deferred" => Ok(JobState::Deferred),
+            "leased" => Ok(JobState::Leased),
+            "completed" => Ok(JobState::Completed),
+            "failed" => Ok(JobState::Failed),
+            "dead_letter" => Ok(JobState::DeadLetter),
+            other => Err(MediaError::Internal(format!(
+                "queue returned unknown job state {other}"
+            ))),
+        }
+    }
+
+    /// Fetch grouped schedulable counts directly from persistence. Used to
+    /// prime and repair the in-memory scheduler.
     pub async fn ready_counts_grouped(&self) -> Result<Vec<ReadyQueueCount>> {
         let rows = sqlx::query!(
             r#"
-            SELECT kind, library_id, priority, COUNT(*)::bigint AS ready
+            SELECT
+                kind,
+                library_id,
+                priority,
+                COUNT(*) FILTER (
+                    WHERE state = 'ready' AND available_at <= NOW()
+                )::bigint AS "ready!",
+                COUNT(*) FILTER (
+                    WHERE state = 'leased' AND lease_expires_at > NOW()
+                )::bigint AS "leased!"
             FROM orchestrator_jobs
-            WHERE state = 'ready'
+            WHERE (state = 'ready' AND available_at <= NOW())
+               OR (state = 'leased' AND lease_expires_at > NOW())
             GROUP BY kind, library_id, priority
             "#
         )
@@ -514,12 +617,14 @@ impl PostgresQueueService {
             let kind = JobKind::from_i16(row.kind)?;
 
             let priority = Self::parse_priority(row.priority)?;
-            let ready = row.ready.unwrap_or(0).max(0i64) as usize;
+            let ready = row.ready.max(0i64) as usize;
+            let leased = row.leased.max(0i64) as usize;
             counts.push(ReadyQueueCount {
                 kind,
                 library_id: LibraryId(row.library_id),
                 priority,
                 ready,
+                leased,
             });
         }
 
@@ -605,10 +710,14 @@ impl QueueService for PostgresQueueService {
             "ready"
         };
 
-        // Fast path: if an active job with the same dedupe_key exists, merge without
-        // causing a unique violation. This avoids noisy ERROR logs in Postgres.
-        if let Some(existing) = sqlx::query!(
-            r#"
+        // A merge target may become terminal at any point between discovery
+        // and enrollment. Retry the complete enqueue decision so that race
+        // creates a new generation rather than returning a terminal handle.
+        for _enqueue_attempt in 0..4 {
+            // Fast path: if an active job with the same dedupe_key exists, merge without
+            // causing a unique violation. This avoids noisy ERROR logs in Postgres.
+            if let Some(existing) = sqlx::query!(
+                r#"
             SELECT id, priority, state, attempts
             FROM orchestrator_jobs
             WHERE dedupe_key = $1
@@ -616,100 +725,115 @@ impl QueueService for PostgresQueueService {
             ORDER BY created_at ASC
             LIMIT 1
             "#,
-            &dedupe_key,
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| {
-            MediaError::Internal(format!("enqueue precheck failed: {e}"))
-        })? {
-            let existing_uuid = existing.id;
-            let existing_id =
-                crate::domain::scan::orchestration::job::JobId(existing_uuid);
-            let existing_priority = existing.priority;
-            let existing_state = existing.state;
-            let existing_attempts = existing.attempts;
-            // Try to elevate priority if incoming is higher and the job is not leased
-            if priority_val < existing_priority {
-                let _ = sqlx::query!(
-                    r#"
+                &dedupe_key,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!("enqueue precheck failed: {e}"))
+            })? {
+                let existing_uuid = existing.id;
+                let existing_id =
+                    crate::domain::scan::orchestration::job::JobId(
+                        existing_uuid,
+                    );
+                let existing_priority = existing.priority;
+                let existing_state = existing.state;
+                let existing_attempts = existing.attempts;
+                if !enroll_active_job(&self.pool, correlation_id, existing_id)
+                    .await?
+                {
+                    continue;
+                }
+                // Try to elevate priority if incoming is higher and the job is not leased
+                if priority_val < existing_priority {
+                    let _ = sqlx::query!(
+                        r#"
                     UPDATE orchestrator_jobs
                     SET priority = $1,
                         available_at = LEAST(available_at, NOW()),
                         updated_at = NOW()
                     WHERE id = $2 AND state IN ('ready','deferred')
                     "#,
-                    priority_val,
-                    existing_uuid
-                )
-                .execute(&self.pool)
-                .await;
-            }
-            if correlation_id.is_some() {
-                let _ = sqlx::query!(
-                    r#"
+                        priority_val,
+                        existing_uuid
+                    )
+                    .execute(&self.pool)
+                    .await;
+                }
+                if correlation_id.is_some() {
+                    let _ = sqlx::query!(
+                        r#"
                     UPDATE orchestrator_jobs
                     SET correlation_id = COALESCE(correlation_id, $1),
                         updated_at = NOW()
                     WHERE id = $2
                       AND correlation_id IS NULL
                     "#,
-                    correlation_id,
-                    existing_uuid
-                )
-                .execute(&self.pool)
-                .await;
+                        correlation_id,
+                        existing_uuid
+                    )
+                    .execute(&self.pool)
+                    .await;
+                }
+                if existing_state.as_str() != "leased"
+                    && transcript_payload(&request.payload).is_some()
+                {
+                    replace_pending_transcript_payload(
+                        &self.pool,
+                        existing_uuid,
+                        &payload_json,
+                    )
+                    .await
+                    .map_err(|err| {
+                        MediaError::Internal(format!(
+                            "transcript merge payload update failed: {err}"
+                        ))
+                    })?;
+                }
+                if existing_state.as_str() != "leased"
+                    && let Some(job) = transcript_payload(&request.payload)
+                    && let Err(err) = mark_transcript_queue_status(
+                        &self.pool,
+                        &job,
+                        TranscriptProcessingState::Queued,
+                        existing_attempts,
+                        self.retry_config.max_attempts,
+                        None,
+                        None,
+                        correlation_id,
+                    )
+                    .await
+                {
+                    warn!(error = %err, job = %existing_uuid, "failed to mark transcript job queued");
+                }
+                return Ok(JobHandle::merged(
+                    existing_id,
+                    &request.payload,
+                    request.priority,
+                ));
             }
-            if existing_state.as_str() != "leased"
-                && transcript_payload(&request.payload).is_some()
-            {
-                replace_pending_transcript_payload(
-                    &self.pool,
-                    existing_uuid,
-                    &payload_json,
-                )
-                .await
-                .map_err(|err| {
-                    MediaError::Internal(format!(
-                        "transcript merge payload update failed: {err}"
-                    ))
-                })?;
-            }
-            if existing_state.as_str() != "leased"
-                && let Some(job) = transcript_payload(&request.payload)
-                && let Err(err) = mark_transcript_queue_status(
-                    &self.pool,
-                    &job,
-                    TranscriptProcessingState::Queued,
-                    existing_attempts,
-                    self.retry_config.max_attempts,
-                    None,
-                    None,
-                    correlation_id,
-                )
-                .await
-            {
-                warn!(error = %err, job = %existing_uuid, "failed to mark transcript job queued");
-            }
-            return Ok(JobHandle::merged(
-                existing_id,
-                &request.payload,
-                request.priority,
-            ));
-        }
 
-        // Attempt insert; rely on partial unique index uq_jobs_dedupe_active.
-        // We cannot reference a partial unique index in ON CONFLICT directly, so we
-        // perform a plain INSERT and treat unique violations as merge events.
-        let insert_res = sqlx::query!(
+            // Attempt insert; rely on partial unique index uq_jobs_dedupe_active.
+            // We cannot reference a partial unique index in ON CONFLICT directly, so we
+            // perform a plain INSERT and treat unique violations as merge events.
+            let insert_res = sqlx::query!(
             r#"
-            INSERT INTO orchestrator_jobs (
-                id, library_id, kind, payload, priority, state,
-                attempts, available_at, lease_owner, lease_id, lease_expires_at,
-                dedupe_key, dependency_key, correlation_id, last_error,
-                created_at, updated_at
+            WITH inserted_job AS (
+                INSERT INTO orchestrator_jobs (
+                    id, library_id, kind, payload, priority, state,
+                    attempts, available_at, lease_owner, lease_id, lease_expires_at,
+                    dedupe_key, dependency_key, correlation_id, last_error,
+                    created_at, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, $9, NULL, NOW(), NOW())
+                RETURNING id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, $9, NULL, NOW(), NOW())
+            INSERT INTO orchestrator_job_enrollments (correlation_id, job_id)
+            SELECT $9, id
+            FROM inserted_job
+            WHERE $9 IS NOT NULL
+            ON CONFLICT (correlation_id, job_id) DO NOTHING
             "#,
             job_id.0,
             library_id,
@@ -724,36 +848,36 @@ impl QueueService for PostgresQueueService {
             .execute(&self.pool)
             .await;
 
-        match insert_res {
-            Ok(_) => {
-                trace!("enqueue accepted new job {}", job_id.0);
-                if let Some(job) = transcript_payload(&request.payload)
-                    && let Err(err) = mark_transcript_queue_status(
-                        &self.pool,
-                        &job,
-                        TranscriptProcessingState::Queued,
-                        0,
-                        self.retry_config.max_attempts,
-                        None,
-                        None,
-                        correlation_id,
-                    )
-                    .await
-                {
-                    warn!(error = %err, job = %job_id.0, "failed to mark transcript job queued");
+            match insert_res {
+                Ok(_) => {
+                    trace!("enqueue accepted new job {}", job_id.0);
+                    if let Some(job) = transcript_payload(&request.payload)
+                        && let Err(err) = mark_transcript_queue_status(
+                            &self.pool,
+                            &job,
+                            TranscriptProcessingState::Queued,
+                            0,
+                            self.retry_config.max_attempts,
+                            None,
+                            None,
+                            correlation_id,
+                        )
+                        .await
+                    {
+                        warn!(error = %err, job = %job_id.0, "failed to mark transcript job queued");
+                    }
+                    return Ok(JobHandle::accepted(
+                        job_id,
+                        &request.payload,
+                        request.priority,
+                    ));
                 }
-                return Ok(JobHandle::accepted(
-                    job_id,
-                    &request.payload,
-                    request.priority,
-                ));
-            }
-            Err(sqlx::Error::Database(db_err)) => {
-                // Unique violation => merge
-                let code = db_err.code().map(|c| c.to_string());
-                if code.as_deref() == Some("23505") {
-                    let existing = sqlx::query!(
-                        r#"
+                Err(sqlx::Error::Database(db_err)) => {
+                    // Unique violation => merge
+                    let code = db_err.code().map(|c| c.to_string());
+                    if code.as_deref() == Some("23505") {
+                        let existing = sqlx::query!(
+                            r#"
                         SELECT id, priority, available_at, state, attempts
                         FROM orchestrator_jobs
                         WHERE dedupe_key = $1
@@ -761,25 +885,32 @@ impl QueueService for PostgresQueueService {
                         ORDER BY created_at ASC
                         LIMIT 1
                         "#,
-                        &dedupe_key,
-                    )
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(|e| {
-                        MediaError::Internal(format!(
-                            "enqueue conflict lookup failed: {e}"
-                        ))
-                    })?;
+                            &dedupe_key,
+                        )
+                        .fetch_optional(&self.pool)
+                        .await
+                        .map_err(|e| {
+                            MediaError::Internal(format!(
+                                "enqueue conflict lookup failed: {e}"
+                            ))
+                        })?;
 
-                    if let Some(row) = existing {
-                        let row_id = row.id;
-                        let row_state = row.state;
-                        let row_attempts = row.attempts;
-                        // Elevate priority if incoming is higher (lower numeric value)
-                        let existing_pri = row.priority;
-                        if priority_val < existing_pri {
-                            let update = sqlx::query!(
-                                r#"
+                        if let Some(row) = existing
+                            && enroll_active_job(
+                                &self.pool,
+                                correlation_id,
+                                JobId(row.id),
+                            )
+                            .await?
+                        {
+                            let row_id = row.id;
+                            let row_state = row.state;
+                            let row_attempts = row.attempts;
+                            // Elevate priority if incoming is higher (lower numeric value)
+                            let existing_pri = row.priority;
+                            if priority_val < existing_pri {
+                                let update = sqlx::query!(
+                                    r#"
                                 UPDATE orchestrator_jobs
                                 SET priority = $1,
                                     available_at = LEAST(available_at, NOW()),
@@ -787,37 +918,37 @@ impl QueueService for PostgresQueueService {
                                 WHERE id = $2
                                   AND state IN ('ready','deferred')
                                 "#,
-                                priority_val,
-                                row_id
-                            )
-                            .execute(&self.pool)
-                            .await
-                            .map_err(|e| {
-                                MediaError::Internal(format!(
-                                    "enqueue merge elevation failed: {e}"
-                                ))
-                            })?;
+                                    priority_val,
+                                    row_id
+                                )
+                                .execute(&self.pool)
+                                .await
+                                .map_err(|e| {
+                                    MediaError::Internal(format!(
+                                        "enqueue merge elevation failed: {e}"
+                                    ))
+                                })?;
 
-                            if update.rows_affected() > 0 {
-                                info!(
-                                    "enqueue merged and elevated priority for job {} to {}",
-                                    row_id, priority_val
-                                );
+                                if update.rows_affected() > 0 {
+                                    info!(
+                                        "enqueue merged and elevated priority for job {} to {}",
+                                        row_id, priority_val
+                                    );
+                                } else {
+                                    // Likely leased or moved terminal concurrently; best-effort merge only
+                                    info!(
+                                        "enqueue merge: elevation skipped due to state transition for job {}",
+                                        row_id
+                                    );
+                                }
                             } else {
-                                // Likely leased or moved terminal concurrently; best-effort merge only
                                 info!(
-                                    "enqueue merge: elevation skipped due to state transition for job {}",
+                                    "enqueue merged into existing job {} without priority change",
                                     row_id
                                 );
                             }
-                        } else {
-                            info!(
-                                "enqueue merged into existing job {} without priority change",
-                                row_id
-                            );
-                        }
-                        if correlation_id.is_some() {
-                            let _ = sqlx::query!(
+                            if correlation_id.is_some() {
+                                let _ = sqlx::query!(
                                 r#"
                                 UPDATE orchestrator_jobs
                                 SET correlation_id = COALESCE(correlation_id, $1),
@@ -830,11 +961,12 @@ impl QueueService for PostgresQueueService {
                             )
                             .execute(&self.pool)
                             .await;
-                        }
-                        if row_state.as_str() != "leased"
-                            && transcript_payload(&request.payload).is_some()
-                        {
-                            replace_pending_transcript_payload(
+                            }
+                            if row_state.as_str() != "leased"
+                                && transcript_payload(&request.payload)
+                                    .is_some()
+                            {
+                                replace_pending_transcript_payload(
                                 &self.pool,
                                 row_id,
                                 &payload_json,
@@ -845,45 +977,53 @@ impl QueueService for PostgresQueueService {
                                     "transcript merge payload update failed: {err}"
                                 ))
                             })?;
-                        }
-                        if row_state.as_str() != "leased"
-                            && let Some(job) =
-                                transcript_payload(&request.payload)
-                            && let Err(err) = mark_transcript_queue_status(
-                                &self.pool,
-                                &job,
-                                TranscriptProcessingState::Queued,
-                                row_attempts,
-                                self.retry_config.max_attempts,
-                                None,
-                                None,
-                                correlation_id,
-                            )
-                            .await
-                        {
-                            warn!(error = %err, job = %row_id, "failed to mark transcript job queued");
-                        }
-                        return Ok(JobHandle::merged(
-                            crate::domain::scan::orchestration::job::JobId(
-                                row_id,
-                            ),
-                            &request.payload,
-                            request.priority,
-                        ));
-                    } else {
-                        // No active row found; try a fresh insert once and, on conflict again, return the found ID
-                        let job_id2 =
+                            }
+                            if row_state.as_str() != "leased"
+                                && let Some(job) =
+                                    transcript_payload(&request.payload)
+                                && let Err(err) = mark_transcript_queue_status(
+                                    &self.pool,
+                                    &job,
+                                    TranscriptProcessingState::Queued,
+                                    row_attempts,
+                                    self.retry_config.max_attempts,
+                                    None,
+                                    None,
+                                    correlation_id,
+                                )
+                                .await
+                            {
+                                warn!(error = %err, job = %row_id, "failed to mark transcript job queued");
+                            }
+                            return Ok(JobHandle::merged(
+                                crate::domain::scan::orchestration::job::JobId(
+                                    row_id,
+                                ),
+                                &request.payload,
+                                request.priority,
+                            ));
+                        } else {
+                            // No active row found; try a fresh insert once and, on conflict again, return the found ID
+                            let job_id2 =
                             crate::domain::scan::orchestration::job::JobId::new(
                             );
-                        let retry = sqlx::query!(
+                            let retry = sqlx::query!(
                             r#"
-                            INSERT INTO orchestrator_jobs (
-                                id, library_id, kind, payload, priority, state,
-                                attempts, available_at, lease_owner, lease_id, lease_expires_at,
-                                dedupe_key, dependency_key, correlation_id,
-                                last_error, created_at, updated_at
+                            WITH inserted_job AS (
+                                INSERT INTO orchestrator_jobs (
+                                    id, library_id, kind, payload, priority, state,
+                                    attempts, available_at, lease_owner, lease_id, lease_expires_at,
+                                    dedupe_key, dependency_key, correlation_id,
+                                    last_error, created_at, updated_at
+                                )
+                                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, $9, NULL, NOW(), NOW())
+                                RETURNING id
                             )
-                            VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, $9, NULL, NOW(), NOW())
+                            INSERT INTO orchestrator_job_enrollments (correlation_id, job_id)
+                            SELECT $9, id
+                            FROM inserted_job
+                            WHERE $9 IS NOT NULL
+                            ON CONFLICT (correlation_id, job_id) DO NOTHING
                             "#,
                             job_id2.0,
                             library_id,
@@ -898,13 +1038,13 @@ impl QueueService for PostgresQueueService {
                             .execute(&self.pool)
                             .await;
 
-                        match retry {
-                            Ok(_) => {
-                                info!(
-                                    "enqueue accepted new job {} on retry",
-                                    job_id2.0
-                                );
-                                if let Some(job) =
+                            match retry {
+                                Ok(_) => {
+                                    info!(
+                                        "enqueue accepted new job {} on retry",
+                                        job_id2.0
+                                    );
+                                    if let Some(job) =
                                     transcript_payload(&request.payload)
                                     && let Err(err) =
                                         mark_transcript_queue_status(
@@ -921,21 +1061,21 @@ impl QueueService for PostgresQueueService {
                                 {
                                     warn!(error = %err, job = %job_id2.0, "failed to mark transcript job queued");
                                 }
-                                return Ok(JobHandle::accepted(
-                                    job_id2,
-                                    &request.payload,
-                                    request.priority,
-                                ));
-                            }
-                            Err(sqlx::Error::Database(db_err2))
-                                if db_err2
-                                    .code()
-                                    .map(|c| c.to_string())
-                                    .as_deref()
-                                    == Some("23505") =>
-                            {
-                                // Another concurrent inserter won; fetch and return the winner
-                                let winner = sqlx::query!(
+                                    return Ok(JobHandle::accepted(
+                                        job_id2,
+                                        &request.payload,
+                                        request.priority,
+                                    ));
+                                }
+                                Err(sqlx::Error::Database(db_err2))
+                                    if db_err2
+                                        .code()
+                                        .map(|c| c.to_string())
+                                        .as_deref()
+                                        == Some("23505") =>
+                                {
+                                    // Another concurrent inserter won; fetch and return the winner
+                                    let winner = sqlx::query!(
                                     r#"
                                     SELECT id, state, attempts, correlation_id
                                     FROM orchestrator_jobs
@@ -954,17 +1094,26 @@ impl QueueService for PostgresQueueService {
                                     ))
                                 })?;
 
-                                if let Some(w) = winner {
-                                    let winner_id = w.id;
-                                    let winner_state = w.state;
-                                    let winner_attempts = w.attempts;
-                                    let winner_correlation_id =
-                                        w.correlation_id;
-                                    if winner_state.as_str() != "leased"
-                                        && transcript_payload(&request.payload)
-                                            .is_some()
+                                    if let Some(w) = winner
+                                        && enroll_active_job(
+                                            &self.pool,
+                                            correlation_id,
+                                            JobId(w.id),
+                                        )
+                                        .await?
                                     {
-                                        replace_pending_transcript_payload(
+                                        let winner_id = w.id;
+                                        let winner_state = w.state;
+                                        let winner_attempts = w.attempts;
+                                        let winner_correlation_id =
+                                            w.correlation_id;
+                                        if winner_state.as_str() != "leased"
+                                            && transcript_payload(
+                                                &request.payload,
+                                            )
+                                            .is_some()
+                                        {
+                                            replace_pending_transcript_payload(
                                             &self.pool,
                                             winner_id,
                                             &payload_json,
@@ -975,8 +1124,8 @@ impl QueueService for PostgresQueueService {
                                                 "transcript merge payload update failed: {err}"
                                             ))
                                         })?;
-                                    }
-                                    if winner_state.as_str() != "leased"
+                                        }
+                                        if winner_state.as_str() != "leased"
                                         && let Some(job) =
                                             transcript_payload(&request.payload)
                                         && let Err(err) = mark_transcript_queue_status(
@@ -993,39 +1142,43 @@ impl QueueService for PostgresQueueService {
                                     {
                                         warn!(error = %err, job = %winner_id, "failed to mark transcript job queued");
                                     }
-                                    return Ok(JobHandle::merged(
+                                        return Ok(JobHandle::merged(
                                         crate::domain::scan::orchestration::job::JobId(
                                             winner_id,
                                         ),
                                         &request.payload,
                                         request.priority,
                                     ));
-                                }
+                                    }
 
-                                return Err(MediaError::Internal(
-                                        "enqueue conflict retry: could not resolve existing row".into(),
-                                    ));
-                            }
-                            Err(e) => {
-                                return Err(MediaError::Internal(format!(
-                                    "enqueue retry insert failed: {e}"
-                                )));
+                                    continue;
+                                }
+                                Err(e) => {
+                                    return Err(MediaError::Internal(format!(
+                                        "enqueue retry insert failed: {e}"
+                                    )));
+                                }
                             }
                         }
+                    } else {
+                        return Err(MediaError::Internal(format!(
+                            "enqueue insert failed: {}",
+                            db_err
+                        )));
                     }
-                } else {
+                }
+                Err(e) => {
                     return Err(MediaError::Internal(format!(
-                        "enqueue insert failed: {}",
-                        db_err
+                        "enqueue insert failed: {e}"
                     )));
                 }
             }
-            Err(e) => {
-                return Err(MediaError::Internal(format!(
-                    "enqueue insert failed: {e}"
-                )));
-            }
         }
+
+        Err(MediaError::Internal(
+            "enqueue could not linearize after repeated concurrent terminal transitions"
+                .into(),
+        ))
     }
 
     async fn enqueue_many(
@@ -1047,92 +1200,100 @@ impl QueueService for PostgresQueueService {
             Option<uuid::Uuid>,
         )> = Vec::new();
 
-        for request in requests {
-            request.validate()?;
-            let job_id = crate::domain::scan::orchestration::job::JobId::new();
-            let payload_json =
-                serde_json::to_value(&request.payload).map_err(|e| {
-                    MediaError::Internal(format!(
-                        "failed to serialize job payload: {e}"
-                    ))
-                })?;
-            let library_id = request.payload.library_id().to_uuid();
-            let kind = request.payload.kind();
-            let dedupe_key = request.dedupe_key().to_string();
-            let priority_val: i16 = request.priority as u8 as i16;
-            let correlation_id = request.correlation_id;
-            let dependency_key = request
-                .dependency_key
-                .as_ref()
-                .map(|key| key.as_str().to_string());
-            let state = if dependency_key.is_some() {
-                "deferred"
-            } else {
-                "ready"
-            };
+        'requests: for request in requests {
+            for _enqueue_attempt in 0..4 {
+                request.validate()?;
+                let job_id =
+                    crate::domain::scan::orchestration::job::JobId::new();
+                let payload_json = serde_json::to_value(&request.payload)
+                    .map_err(|e| {
+                        MediaError::Internal(format!(
+                            "failed to serialize job payload: {e}"
+                        ))
+                    })?;
+                let library_id = request.payload.library_id().to_uuid();
+                let kind = request.payload.kind();
+                let dedupe_key = request.dedupe_key().to_string();
+                let priority_val: i16 = request.priority as u8 as i16;
+                let correlation_id = request.correlation_id;
+                let dependency_key = request
+                    .dependency_key
+                    .as_ref()
+                    .map(|key| key.as_str().to_string());
+                let state = if dependency_key.is_some() {
+                    "deferred"
+                } else {
+                    "ready"
+                };
 
-            // Fast-path merge check inside transaction
-            if let Some(existing) = sqlx::query!(
-                r#"
+                // Fast-path merge check inside transaction
+                if let Some(existing) = sqlx::query!(
+                    r#"
                 SELECT id, priority, state, attempts, correlation_id
                 FROM orchestrator_jobs
                 WHERE dedupe_key = $1
                   AND state IN ('ready','deferred','leased')
                 ORDER BY created_at ASC
                 LIMIT 1
+                FOR UPDATE
                 "#,
-                &dedupe_key,
-            )
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "enqueue_many precheck failed: {e}"
-                ))
-            })? {
-                let existing_uuid = existing.id;
-                let existing_id =
-                    crate::domain::scan::orchestration::job::JobId(
-                        existing_uuid,
-                    );
-                let existing_priority = existing.priority;
-                let existing_state = existing.state;
-                let existing_attempts = existing.attempts;
-                let existing_correlation_id = existing.correlation_id;
-                if priority_val < existing_priority {
-                    let _ = sqlx::query!(
-                        r#"
+                    &dedupe_key,
+                )
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "enqueue_many precheck failed: {e}"
+                    ))
+                })? {
+                    let existing_uuid = existing.id;
+                    let existing_id =
+                        crate::domain::scan::orchestration::job::JobId(
+                            existing_uuid,
+                        );
+                    let existing_priority = existing.priority;
+                    let existing_state = existing.state;
+                    let existing_attempts = existing.attempts;
+                    let existing_correlation_id = existing.correlation_id;
+                    if !enroll_active_job(&mut *tx, correlation_id, existing_id)
+                        .await?
+                    {
+                        continue;
+                    }
+                    if priority_val < existing_priority {
+                        let _ = sqlx::query!(
+                            r#"
                         UPDATE orchestrator_jobs
                         SET priority = $1,
                             available_at = LEAST(available_at, NOW()),
                             updated_at = NOW()
                         WHERE id = $2 AND state IN ('ready','deferred')
                         "#,
-                        priority_val,
-                        existing_uuid
-                    )
-                    .execute(&mut *tx)
-                    .await;
-                }
-                if correlation_id.is_some() {
-                    let _ = sqlx::query!(
-                        r#"
+                            priority_val,
+                            existing_uuid
+                        )
+                        .execute(&mut *tx)
+                        .await;
+                    }
+                    if correlation_id.is_some() {
+                        let _ = sqlx::query!(
+                            r#"
                         UPDATE orchestrator_jobs
                         SET correlation_id = COALESCE(correlation_id, $1),
                             updated_at = NOW()
                         WHERE id = $2
                           AND correlation_id IS NULL
                         "#,
-                        correlation_id,
-                        existing_uuid
-                    )
-                    .execute(&mut *tx)
-                    .await;
-                }
-                if existing_state.as_str() != "leased"
-                    && transcript_payload(&request.payload).is_some()
-                {
-                    replace_pending_transcript_payload(
+                            correlation_id,
+                            existing_uuid
+                        )
+                        .execute(&mut *tx)
+                        .await;
+                    }
+                    if existing_state.as_str() != "leased"
+                        && transcript_payload(&request.payload).is_some()
+                    {
+                        replace_pending_transcript_payload(
                         &mut *tx,
                         existing_uuid,
                         &payload_json,
@@ -1143,26 +1304,26 @@ impl QueueService for PostgresQueueService {
                             "enqueue_many transcript merge payload update failed: {err}"
                         ))
                     })?;
-                }
-                if existing_state.as_str() != "leased"
-                    && let Some(job) = transcript_payload(&request.payload)
-                {
-                    transcript_status_updates.push((
-                        job,
-                        existing_attempts,
-                        correlation_id.or(existing_correlation_id),
+                    }
+                    if existing_state.as_str() != "leased"
+                        && let Some(job) = transcript_payload(&request.payload)
+                    {
+                        transcript_status_updates.push((
+                            job,
+                            existing_attempts,
+                            correlation_id.or(existing_correlation_id),
+                        ));
+                    }
+                    out.push(JobHandle::merged(
+                        existing_id,
+                        &request.payload,
+                        request.priority,
                     ));
+                    continue 'requests;
                 }
-                out.push(JobHandle::merged(
-                    existing_id,
-                    &request.payload,
-                    request.priority,
-                ));
-                continue;
-            }
 
-            // Try insert; merge on unique violation
-            let insert_res = sqlx::query!(
+                // Try insert; merge on unique violation
+                let insert_res = sqlx::query!(
                 r#"
                 INSERT INTO orchestrator_jobs (
                     id, library_id, kind, payload, priority, state,
@@ -1171,6 +1332,7 @@ impl QueueService for PostgresQueueService {
                     created_at, updated_at
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, $9, NULL, NOW(), NOW())
+                ON CONFLICT DO NOTHING
                 "#,
                 job_id.0,
                 library_id,
@@ -1185,25 +1347,26 @@ impl QueueService for PostgresQueueService {
                 .execute(&mut *tx)
                 .await;
 
-            match insert_res {
-                Ok(_) => {
-                    info!("enqueue_many accepted new job {}", job_id.0);
-                    if let Some(job) = transcript_payload(&request.payload) {
-                        transcript_status_updates.push((
-                            job,
-                            0,
-                            correlation_id,
+                match insert_res {
+                    Ok(result) if result.rows_affected() > 0 => {
+                        info!("enqueue_many accepted new job {}", job_id.0);
+                        enroll_job(&mut *tx, correlation_id, job_id).await?;
+                        if let Some(job) = transcript_payload(&request.payload)
+                        {
+                            transcript_status_updates.push((
+                                job,
+                                0,
+                                correlation_id,
+                            ));
+                        }
+                        out.push(JobHandle::accepted(
+                            job_id,
+                            &request.payload,
+                            request.priority,
                         ));
+                        continue 'requests;
                     }
-                    out.push(JobHandle::accepted(
-                        job_id,
-                        &request.payload,
-                        request.priority,
-                    ));
-                }
-                Err(sqlx::Error::Database(db_err)) => {
-                    let code = db_err.code().map(|c| c.to_string());
-                    if code.as_deref() == Some("23505") {
+                    Ok(_) => {
                         let existing = sqlx::query!(
                             r#"
                             SELECT id, priority, available_at, state, attempts, correlation_id
@@ -1212,6 +1375,7 @@ impl QueueService for PostgresQueueService {
                               AND state IN ('ready','deferred','leased')
                             ORDER BY created_at ASC
                             LIMIT 1
+                            FOR UPDATE
                             "#,
                             request.dedupe_key().to_string(),
                         )
@@ -1223,7 +1387,14 @@ impl QueueService for PostgresQueueService {
                             ))
                         })?;
 
-                        if let Some(row) = existing {
+                        if let Some(row) = existing
+                            && enroll_active_job(
+                                &mut *tx,
+                                correlation_id,
+                                JobId(row.id),
+                            )
+                            .await?
+                        {
                             let row_id = row.id;
                             let existing_pri = row.priority;
                             let row_state = row.state;
@@ -1297,26 +1468,28 @@ impl QueueService for PostgresQueueService {
                                 &request.payload,
                                 request.priority,
                             ));
+                            continue 'requests;
                         } else {
-                            return Err(MediaError::Internal(
-                                "enqueue_many conflict but no existing job found".into(),
-                            ));
+                            // The conflict winner became terminal before it
+                            // could be enrolled. Retry this request so the next
+                            // iteration inserts a new active generation.
+                            continue;
                         }
-                    } else {
-                        // Unexpected DB error => abort whole batch
+                    }
+                    Err(e) => {
                         drop(tx.rollback().await);
                         return Err(MediaError::Internal(format!(
-                            "enqueue_many insert failed: {db_err}"
+                            "enqueue_many insert failed: {e}"
                         )));
                     }
                 }
-                Err(e) => {
-                    drop(tx.rollback().await);
-                    return Err(MediaError::Internal(format!(
-                        "enqueue_many insert failed: {e}"
-                    )));
-                }
             }
+
+            drop(tx.rollback().await);
+            return Err(MediaError::Internal(
+                "enqueue_many could not linearize after repeated concurrent terminal transitions"
+                    .into(),
+            ));
         }
 
         tx.commit().await.map_err(|e| {
@@ -1387,27 +1560,12 @@ impl QueueService for PostgresQueueService {
                     ORDER BY available_at, attempts, created_at
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
-                ), fallback AS (
-                    SELECT id
-                    FROM orchestrator_jobs
-                    WHERE state = 'ready'
-                      AND kind = $1
-                      AND available_at <= NOW()
-                      AND NOT EXISTS (SELECT 1 FROM next)
-                    ORDER BY available_at, attempts, created_at
-                    FOR UPDATE SKIP LOCKED
-                    LIMIT 1
                 )
                 SELECT j.id, j.payload, j.priority, j.attempts,
                        j.available_at, j.dedupe_key, j.dependency_key,
                        j.correlation_id, j.created_at
                 FROM orchestrator_jobs j
-                JOIN (
-                    SELECT id FROM next
-                    UNION ALL
-                    SELECT id FROM fallback
-                    LIMIT 1
-                ) pick ON pick.id = j.id
+                JOIN next ON next.id = j.id
                 "#,
                 kind,
                 selector.library_id.as_uuid(),
@@ -1649,6 +1807,14 @@ impl QueueService for PostgresQueueService {
     }
 
     async fn complete(&self, lease_id: LeaseId) -> Result<()> {
+        let _ = self.complete_with_outcome(lease_id).await?;
+        Ok(())
+    }
+
+    async fn complete_with_outcome(
+        &self,
+        lease_id: LeaseId,
+    ) -> Result<QueueTransitionOutcome> {
         let res = sqlx::query!(
             r#"
             UPDATE orchestrator_jobs
@@ -1668,8 +1834,10 @@ impl QueueService for PostgresQueueService {
 
         if res.rows_affected() > 0 {
             debug!("completed job with lease {:?}", lease_id.0);
+            Ok(QueueTransitionOutcome::Applied)
+        } else {
+            Ok(QueueTransitionOutcome::Missing)
         }
-        Ok(())
     }
 
     async fn fail(
@@ -1678,6 +1846,16 @@ impl QueueService for PostgresQueueService {
         retryable: bool,
         error: Option<String>,
     ) -> Result<()> {
+        let _ = self.fail_with_outcome(lease_id, retryable, error).await?;
+        Ok(())
+    }
+
+    async fn fail_with_outcome(
+        &self,
+        lease_id: LeaseId,
+        retryable: bool,
+        error: Option<String>,
+    ) -> Result<FailOutcome> {
         let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!("begin fail tx failed: {e}"))
         })?;
@@ -1700,7 +1878,7 @@ impl QueueService for PostgresQueueService {
 
         let Some(row) = row else {
             drop(tx);
-            return Ok(());
+            return Ok(FailOutcome::Missing);
         };
 
         let row_id = row.id;
@@ -1814,7 +1992,7 @@ impl QueueService for PostgresQueueService {
                 delay_ms,
                 library_under_pressure
             );
-            Ok(())
+            Ok(FailOutcome::RetryScheduled)
         } else {
             // Terminal: dead-letter or failed
             let new_state = if retryable { "dead_letter" } else { "failed" };
@@ -1845,8 +2023,8 @@ impl QueueService for PostgresQueueService {
                 MediaError::Internal(format!("fail tx commit failed: {e}"))
             })?;
 
-            if let Some(job) = transcript_job {
-                if let Err(err) = mark_transcript_queue_status(
+            if let Some(job) = transcript_job
+                && let Err(err) = mark_transcript_queue_status(
                     &self.pool,
                     &job,
                     TranscriptProcessingState::Failed,
@@ -1857,16 +2035,21 @@ impl QueueService for PostgresQueueService {
                     row_correlation_id,
                 )
                 .await
-                {
-                    warn!(error = %err, job = %row_id, "failed to mark transcript terminal failure status");
-                }
+            {
+                warn!(error = %err, job = %row_id, "failed to mark transcript terminal failure status");
             }
 
             warn!(
                 "job {} moved to {} after attempts {}",
                 row_id, new_state, attempts_before
             );
-            Ok(())
+            Ok(FailOutcome::Terminal {
+                state: if retryable {
+                    JobState::DeadLetter
+                } else {
+                    JobState::Failed
+                },
+            })
         }
     }
 
@@ -1875,6 +2058,15 @@ impl QueueService for PostgresQueueService {
         lease_id: LeaseId,
         error: Option<String>,
     ) -> Result<()> {
+        let _ = self.dead_letter_with_outcome(lease_id, error).await?;
+        Ok(())
+    }
+
+    async fn dead_letter_with_outcome(
+        &self,
+        lease_id: LeaseId,
+        error: Option<String>,
+    ) -> Result<QueueTransitionOutcome> {
         let row = sqlx::query!(
             r#"
             SELECT id, attempts, payload, correlation_id
@@ -1934,8 +2126,10 @@ impl QueueService for PostgresQueueService {
                 }
             }
             warn!("job with lease {:?} moved to dead_letter", lease_id.0);
+            Ok(QueueTransitionOutcome::Applied)
+        } else {
+            Ok(QueueTransitionOutcome::Missing)
         }
-        Ok(())
     }
 
     async fn cancel_job(&self, job_id: JobId) -> Result<()> {
@@ -2010,6 +2204,66 @@ impl QueueService for PostgresQueueService {
             MediaError::Internal(format!("queue_depth query failed: {e}"))
         })?;
         Ok(row.count as usize)
+    }
+
+    async fn durable_job_states(
+        &self,
+        correlation_id: uuid::Uuid,
+        job_ids: &[JobId],
+    ) -> Result<Vec<DurableJobState>> {
+        let job_ids: Vec<uuid::Uuid> =
+            job_ids.iter().map(|job_id| job_id.0).collect();
+        let rows = sqlx::query!(
+            r#"
+            SELECT job.id, job.kind, job.state, job.attempts, job.payload,
+                   job.dedupe_key, job.correlation_id, job.last_error,
+                   job.created_at, job.updated_at
+            FROM orchestrator_jobs job
+            WHERE job.id = ANY($2::uuid[])
+               OR EXISTS (
+                    SELECT 1
+                    FROM orchestrator_job_enrollments enrollment
+                    WHERE enrollment.correlation_id = $1
+                      AND enrollment.job_id = job.id
+               )
+            ORDER BY job.created_at ASC, job.id ASC
+            "#,
+            correlation_id,
+            &job_ids,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!(
+                "durable job reconciliation query failed: {err}"
+            ))
+        })?;
+
+        let mut states = Vec::with_capacity(rows.len());
+        for row in rows {
+            let payload: JobPayload = serde_json::from_value(row.payload)
+                .map_err(|err| {
+                    MediaError::Internal(format!(
+                        "durable job payload decode failed: {err}"
+                    ))
+                })?;
+            let kind = JobKind::from_i16(row.kind)?;
+
+            states.push(DurableJobState {
+                job_id: JobId(row.id),
+                kind,
+                state: Self::parse_state(&row.state)?,
+                attempts: row.attempts.max(0) as u16,
+                dedupe_key: row.dedupe_key,
+                correlation_id: row.correlation_id,
+                path_key: stable_path_key(&payload),
+                last_error: row.last_error,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            });
+        }
+
+        Ok(states)
     }
 
     async fn release_dependency(
@@ -2173,6 +2427,35 @@ mod tests {
         let queue = PostgresQueueService::new(pool.clone())
             .await
             .expect("queue service initializes");
+        let missing_lease = LeaseId::new();
+        assert_eq!(
+            queue
+                .complete_with_outcome(missing_lease)
+                .await
+                .expect("missing completion is reported"),
+            QueueTransitionOutcome::Missing
+        );
+        assert_eq!(
+            queue
+                .fail_with_outcome(
+                    missing_lease,
+                    true,
+                    Some("missing retry".into()),
+                )
+                .await
+                .expect("missing failure is reported"),
+            FailOutcome::Missing
+        );
+        assert_eq!(
+            queue
+                .dead_letter_with_outcome(
+                    missing_lease,
+                    Some("missing dead letter".into()),
+                )
+                .await
+                .expect("missing dead letter is reported"),
+            QueueTransitionOutcome::Missing
+        );
         let library_id = LibraryId::new();
         let library_root = format!("/queue-dedupe/{}", library_id.as_uuid());
         seed_library(&pool, library_id, &library_root)
@@ -2231,10 +2514,20 @@ mod tests {
             .expect("ready dequeue succeeds")
             .expect("ready job leased");
         assert_eq!(ready_lease.job.id, ready.job_id);
-        queue
-            .complete(ready_lease.lease_id)
-            .await
-            .expect("ready job completed");
+        assert_eq!(
+            queue
+                .complete_with_outcome(ready_lease.lease_id)
+                .await
+                .expect("ready job completed"),
+            QueueTransitionOutcome::Applied
+        );
+        assert_eq!(
+            queue
+                .complete_with_outcome(ready_lease.lease_id)
+                .await
+                .expect("repeated completion is reported"),
+            QueueTransitionOutcome::Missing
+        );
         assert_eq!(
             active_dedupe_count(&pool, &ready.dedupe_key)
                 .await
@@ -2332,28 +2625,262 @@ mod tests {
             Some(1)
         );
 
-        queue
-            .complete(lease.lease_id)
+        assert_eq!(
+            queue
+                .dead_letter_with_outcome(
+                    lease.lease_id,
+                    Some("terminal test".into()),
+                )
+                .await
+                .expect("leased job dead-lettered"),
+            QueueTransitionOutcome::Applied
+        );
+        let terminal_race_correlation = uuid::Uuid::now_v7();
+        assert!(
+            !enroll_active_job(
+                &pool,
+                Some(terminal_race_correlation),
+                leased.job_id,
+            )
             .await
-            .expect("leased job completed");
+            .expect("terminal merge enrollment is checked"),
+            "a terminal lookup target must not satisfy a new enqueue"
+        );
+        let mut terminal_reenqueue_request = EnqueueRequest::new(
+            JobPriority::P1,
+            folder_scan_payload(
+                library_id,
+                &library_root,
+                &format!("{library_root}/leased-movie"),
+            ),
+        );
+        terminal_reenqueue_request.correlation_id =
+            Some(terminal_race_correlation);
         let reenqueue_after_terminal = queue
-            .enqueue(EnqueueRequest::new(
-                JobPriority::P1,
-                folder_scan_payload(
-                    library_id,
-                    &library_root,
-                    &format!("{library_root}/leased-movie"),
-                ),
-            ))
+            .enqueue(terminal_reenqueue_request)
             .await
             .expect("terminal re-enqueue succeeds");
         assert!(reenqueue_after_terminal.accepted);
         assert_ne!(reenqueue_after_terminal.job_id, leased.job_id);
+        let terminal_race_jobs = queue
+            .durable_job_states(terminal_race_correlation, &[])
+            .await
+            .expect("terminal race enrollment is queryable");
+        assert_eq!(terminal_race_jobs.len(), 1);
+        assert_eq!(
+            terminal_race_jobs[0].job_id, reenqueue_after_terminal.job_id,
+            "the new correlation must enroll only the runnable generation"
+        );
         assert_eq!(
             active_dedupe_count(&pool, &leased.dedupe_key)
                 .await
                 .expect("terminal count query succeeds"),
             1
+        );
+
+        let retry_payload = folder_scan_payload(
+            library_id,
+            &library_root,
+            &format!("{library_root}/retry-outcome"),
+        );
+        queue
+            .enqueue(EnqueueRequest::new(JobPriority::P3, retry_payload))
+            .await
+            .expect("retry outcome job enqueue succeeds");
+        let retry_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::FolderScan,
+                worker_id: "retry-outcome-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P3,
+                }),
+            })
+            .await
+            .expect("retry outcome dequeue succeeds")
+            .expect("retry outcome job is leased");
+        assert_eq!(
+            queue
+                .fail_with_outcome(
+                    retry_lease.lease_id,
+                    true,
+                    Some("retryable".into()),
+                )
+                .await
+                .expect("retry outcome persists"),
+            FailOutcome::RetryScheduled
+        );
+
+        let failed_payload = folder_scan_payload(
+            library_id,
+            &library_root,
+            &format!("{library_root}/failed-outcome"),
+        );
+        queue
+            .enqueue(EnqueueRequest::new(JobPriority::P2, failed_payload))
+            .await
+            .expect("failed outcome job enqueue succeeds");
+        let failed_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::FolderScan,
+                worker_id: "failed-outcome-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P2,
+                }),
+            })
+            .await
+            .expect("failed outcome dequeue succeeds")
+            .expect("failed outcome job is leased");
+        assert_eq!(
+            queue
+                .fail_with_outcome(
+                    failed_lease.lease_id,
+                    false,
+                    Some("non-retryable".into()),
+                )
+                .await
+                .expect("failed outcome persists"),
+            FailOutcome::Terminal {
+                state: JobState::Failed
+            }
+        );
+
+        let exhausted_payload = folder_scan_payload(
+            library_id,
+            &library_root,
+            &format!("{library_root}/exhausted-outcome"),
+        );
+        queue
+            .enqueue(EnqueueRequest::new(JobPriority::P3, exhausted_payload))
+            .await
+            .expect("exhausted outcome job enqueue succeeds");
+        let exhausted_lease = queue
+            .dequeue(DequeueRequest {
+                kind: JobKind::FolderScan,
+                worker_id: "exhausted-outcome-worker".into(),
+                lease_ttl: chrono::Duration::seconds(30),
+                selector: Some(QueueSelector {
+                    library_id,
+                    priority: JobPriority::P3,
+                }),
+            })
+            .await
+            .expect("exhausted outcome dequeue succeeds")
+            .expect("exhausted outcome job is leased");
+        sqlx::query("UPDATE orchestrator_jobs SET attempts = $1 WHERE id = $2")
+            .bind(i32::from(queue.retry_config.max_attempts))
+            .bind(exhausted_lease.job.id.0)
+            .execute(&pool)
+            .await
+            .expect("exhausted attempt count seeded");
+        assert_eq!(
+            queue
+                .fail_with_outcome(
+                    exhausted_lease.lease_id,
+                    true,
+                    Some("retry limit reached".into()),
+                )
+                .await
+                .expect("exhausted outcome persists"),
+            FailOutcome::Terminal {
+                state: JobState::DeadLetter
+            }
+        );
+
+        // A scan that merges onto active work durably enrolls each resolved
+        // job under the new run without changing or broadly expanding the
+        // older correlation.
+        let old_correlation = uuid::Uuid::now_v7();
+        let new_correlation = uuid::Uuid::now_v7();
+        let lineage_root_payload = folder_scan_payload(
+            library_id,
+            &library_root,
+            &format!("{library_root}/lineage-root"),
+        );
+        let mut old_root_request =
+            EnqueueRequest::new(JobPriority::P1, lineage_root_payload.clone());
+        old_root_request.correlation_id = Some(old_correlation);
+        let old_root = queue
+            .enqueue(old_root_request)
+            .await
+            .expect("old correlated root enqueue succeeds");
+
+        let mut merged_root_request =
+            EnqueueRequest::new(JobPriority::P1, lineage_root_payload);
+        merged_root_request.correlation_id = Some(new_correlation);
+        let merged_root = queue
+            .enqueue(merged_root_request)
+            .await
+            .expect("new run merges onto old root");
+        assert_eq!(merged_root.merged_into, Some(old_root.job_id));
+
+        let shared_child_payload = folder_scan_payload(
+            library_id,
+            &library_root,
+            &format!("{library_root}/shared-lineage-child"),
+        );
+        let mut old_shared_child_request =
+            EnqueueRequest::new(JobPriority::P1, shared_child_payload.clone());
+        old_shared_child_request.correlation_id = Some(old_correlation);
+        let old_shared_child = queue
+            .enqueue(old_shared_child_request)
+            .await
+            .expect("old shared child enqueue succeeds");
+
+        let mut unrelated_sibling_request = EnqueueRequest::new(
+            JobPriority::P1,
+            folder_scan_payload(
+                library_id,
+                &library_root,
+                &format!("{library_root}/unrelated-old-sibling"),
+            ),
+        );
+        unrelated_sibling_request.correlation_id = Some(old_correlation);
+        let unrelated_sibling = queue
+            .enqueue(unrelated_sibling_request)
+            .await
+            .expect("unrelated old-correlation sibling enqueue succeeds");
+
+        let mut accepted_child_request = EnqueueRequest::new(
+            JobPriority::P1,
+            folder_scan_payload(
+                library_id,
+                &library_root,
+                &format!("{library_root}/new-lineage-child"),
+            ),
+        );
+        accepted_child_request.correlation_id = Some(new_correlation);
+        let mut merged_child_request =
+            EnqueueRequest::new(JobPriority::P1, shared_child_payload);
+        merged_child_request.correlation_id = Some(new_correlation);
+        let descendants = queue
+            .enqueue_many(vec![accepted_child_request, merged_child_request])
+            .await
+            .expect("new run descendant batch enqueue succeeds");
+        assert!(descendants[0].accepted);
+        assert_eq!(descendants[1].merged_into, Some(old_shared_child.job_id));
+
+        let reconciled = queue
+            .durable_job_states(new_correlation, &[])
+            .await
+            .expect("merged run durable reconciliation succeeds");
+        let reconciled_ids: std::collections::HashSet<_> =
+            reconciled.iter().map(|job| job.job_id).collect();
+        assert!(reconciled_ids.contains(&old_root.job_id));
+        assert!(
+            reconciled_ids.contains(&descendants[0].job_id),
+            "accepted descendants must be durably enrolled"
+        );
+        assert!(
+            reconciled_ids.contains(&old_shared_child.job_id),
+            "merged descendants must be durably enrolled"
+        );
+        assert!(
+            !reconciled_ids.contains(&unrelated_sibling.job_id),
+            "tracked merged root must not enroll unrelated old-correlation siblings"
         );
 
         sqlx::query("DELETE FROM libraries WHERE id = $1")

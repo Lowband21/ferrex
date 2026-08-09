@@ -32,7 +32,7 @@ use ferrex_core::{
             context::{
                 FolderScanContext, MovieFolderScanContext, MovieRootPath,
             },
-            job::{EnqueueRequest, JobPayload, JobPriority},
+            job::{EnqueueRequest, JobKind, JobPayload, JobPriority},
             persistence::{PostgresCursorRepository, PostgresQueueService},
             scan_cursor::{
                 ScanCursor, ScanCursorId, ScanCursorRepository, normalize_path,
@@ -296,7 +296,7 @@ async fn orchestrator_start_primes_persisted_ready_jobs_once() -> Result<()> {
 
     let scheduler = orchestrator.runtime().scheduler();
     let reservation = scheduler
-        .reserve()
+        .reserve(JobKind::FolderScan)
         .await
         .expect("persisted ready job should be scheduled after startup");
     assert_eq!(reservation.library_id, library_id);
@@ -310,7 +310,7 @@ async fn orchestrator_start_primes_persisted_ready_jobs_once() -> Result<()> {
     scheduler.record_completed(library_id).await;
 
     assert!(
-        scheduler.reserve().await.is_none(),
+        scheduler.reserve(JobKind::FolderScan).await.is_none(),
         "startup must prime persisted ready jobs once, without phantom reservations"
     );
 

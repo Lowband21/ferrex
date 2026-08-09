@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM intelligence_artifacts",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "fbf3849da2c49f9ed0517ea90496be7e3e0b049662532af318eae887d7ba5661"
+}

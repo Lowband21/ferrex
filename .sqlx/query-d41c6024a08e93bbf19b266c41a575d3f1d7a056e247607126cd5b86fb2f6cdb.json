@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_watch_progress",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "d41c6024a08e93bbf19b266c41a575d3f1d7a056e247607126cd5b86fb2f6cdb"
+}
