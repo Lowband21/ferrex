@@ -12,7 +12,8 @@ use super::{
     job::{EnqueueRequest, JobHandle, JobId, JobKind, JobPriority, JobState},
     lease::{DequeueRequest, JobLease, LeaseRenewal},
 };
-use crate::types::ids::LibraryId;
+use crate::domain::scan::actors::index::IndexingChange;
+use crate::types::{LibraryId, MediaID};
 
 /// Aggregated schedulable state grouped by queue dimensions.
 ///
@@ -39,6 +40,12 @@ pub struct ReadyQueueCount {
 pub struct DurableJobState {
     pub job_id: JobId,
     pub kind: JobKind,
+    /// Stable catalog identity carried by durable media jobs. This lets
+    /// observers reconstruct a lost live projection without parsing dedupe
+    /// strings or relying on the bounded broadcast event.
+    pub media_id: Option<MediaID>,
+    /// Exact catalog mutation semantics captured in an index-upsert payload.
+    pub indexing_change: Option<IndexingChange>,
     pub state: JobState,
     pub attempts: u16,
     pub dedupe_key: String,

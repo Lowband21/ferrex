@@ -7,8 +7,8 @@ use ferrex_core::{
     error::MediaError,
     traits::prelude::MediaIDLike,
     types::{
-        LibraryId, Media, MediaEvent, MediaID, MovieBatchId, ScanEventMetadata,
-        ScanProgressEvent, SeriesID,
+        LibraryId, Media, MediaEvent, MediaID, MovieBatchId, MovieReference,
+        ScanEventMetadata, ScanProgressEvent, SeriesID,
     },
 };
 use sha2::Digest;
@@ -28,7 +28,12 @@ pub struct CatalogEventProjection {
 struct CatalogEventProjectionInner {
     unit_of_work: Arc<AppUnitOfWork>,
     media_bus: Arc<MediaEventBus>,
-    seen_media: Mutex<HashSet<uuid::Uuid>>,
+    state: Mutex<CatalogEventProjectionState>,
+}
+
+#[derive(Debug, Default)]
+struct CatalogEventProjectionState {
+    seen_media: HashSet<uuid::Uuid>,
 }
 
 impl fmt::Debug for CatalogEventProjection {
@@ -72,7 +77,7 @@ impl CatalogEventProjection {
             inner: Arc::new(CatalogEventProjectionInner {
                 unit_of_work,
                 media_bus,
-                seen_media: Mutex::new(HashSet::new()),
+                state: Mutex::new(CatalogEventProjectionState::default()),
             }),
         }
     }
@@ -112,21 +117,67 @@ impl CatalogEventProjection {
                 path_norm: outcome.path_norm.clone(),
             })?;
 
-        let first_seen = {
-            let mut seen = self.inner.seen_media.lock().await;
-            seen.insert(outcome.media_id.to_uuid())
-        };
+        // Keep state mutation and publication under the same lock. The movie
+        // batch finalization path uses this lock as an ordering barrier, so a
+        // batch can never be published between marking a movie as added and
+        // publishing its `MovieAdded` event.
+        let mut state = self.inner.state.lock().await;
+        let first_seen = state.seen_media.insert(outcome.media_id.to_uuid());
+        let event =
+            Self::indexed_media_event(media, outcome.change, first_seen);
 
-        Ok(Self::indexed_media_event(media, &outcome, first_seen)
-            .map(|event| self.publish_event(event)))
+        Ok(event.map(|event| self.publish_event(event)))
+    }
+
+    /// Rebuild a missing live catalog projection from durable job identity.
+    ///
+    /// Completed index jobs can outlive the bounded scan-event broadcast that
+    /// normally carries their [`IndexingOutcome`]. Rehydrating the canonical
+    /// media reference makes PostgreSQL authoritative, while the shared state
+    /// lock preserves the same per-item-before-batch ordering as the live path.
+    pub async fn publish_reconciled_indexed_media(
+        &self,
+        library_id: LibraryId,
+        path_norm: &str,
+        media_id: MediaID,
+        change: IndexingChange,
+    ) -> Result<Option<MediaEventFrame>, CatalogEventProjectionError> {
+        if self
+            .inner
+            .state
+            .lock()
+            .await
+            .seen_media
+            .contains(&media_id.to_uuid())
+        {
+            return Ok(None);
+        }
+
+        let media = self.load_media(media_id).await.ok_or_else(|| {
+            CatalogEventProjectionError::MissingMedia {
+                library_id,
+                path_norm: path_norm.to_string(),
+            }
+        })?;
+
+        let mut state = self.inner.state.lock().await;
+        if state.seen_media.contains(&media_id.to_uuid()) {
+            return Ok(None);
+        }
+
+        let first_seen = state.seen_media.insert(media_id.to_uuid());
+        let event = Self::indexed_media_event(media, change, first_seen);
+
+        Ok(event.map(|event| self.publish_event(event)))
     }
 
     pub async fn publish_movie_batch_finalized(
         &self,
         library_id: LibraryId,
         batch_id: MovieBatchId,
-    ) -> Result<MediaEventFrame, CatalogEventProjectionError> {
-        self.upsert_movie_batch_hash(&library_id, batch_id)
+    ) -> Result<Option<MediaEventFrame>, CatalogEventProjectionError> {
+        let movies = self
+            .upsert_movie_batch_hash(&library_id, batch_id)
             .await
             .map_err(|source| {
                 CatalogEventProjectionError::MovieBatchVersionHash {
@@ -136,9 +187,20 @@ impl CatalogEventProjection {
                 }
             })?;
 
-        Ok(self.publish_event(Self::movie_batch_finalized_event(
-            library_id, batch_id,
-        )))
+        // Batch persistence happens before the scan-event consumer is
+        // guaranteed to have drained every queued `Indexed` outcome. Treat the
+        // per-item stream as the ordering authority: defer the marker until all
+        // members were projected by the live path or confirmed-lag recovery.
+        // This lock also prevents a marker from interleaving with a live
+        // per-item publication.
+        let state = self.inner.state.lock().await;
+        let Some(event) = Self::movie_batch_finalization_event_if_ready(
+            &state, &movies, library_id, batch_id,
+        ) else {
+            return Ok(None);
+        };
+
+        Ok(Some(self.publish_event(event)))
     }
 
     pub async fn publish_series_bundle_finalized(
@@ -197,10 +259,10 @@ impl CatalogEventProjection {
 
     fn indexed_media_event(
         media: Media,
-        outcome: &IndexingOutcome,
+        requested_change: IndexingChange,
         first_seen: bool,
     ) -> Option<MediaEvent> {
-        let change = match outcome.change {
+        let change = match requested_change {
             IndexingChange::Created if first_seen => IndexingChange::Created,
             _ => IndexingChange::Updated,
         };
@@ -230,6 +292,18 @@ impl CatalogEventProjection {
             library_id,
             batch_id,
         }
+    }
+
+    fn movie_batch_finalization_event_if_ready(
+        state: &CatalogEventProjectionState,
+        movies: &[MovieReference],
+        library_id: LibraryId,
+        batch_id: MovieBatchId,
+    ) -> Option<MediaEvent> {
+        movies
+            .iter()
+            .all(|movie| state.seen_media.contains(&movie.id.to_uuid()))
+            .then(|| Self::movie_batch_finalized_event(library_id, batch_id))
     }
 
     fn series_bundle_finalized_event(
@@ -299,7 +373,7 @@ impl CatalogEventProjection {
         &self,
         library_id: &LibraryId,
         batch_id: MovieBatchId,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<MovieReference>> {
         let movies = self
             .inner
             .unit_of_work
@@ -332,7 +406,7 @@ impl CatalogEventProjection {
             )
             .await?;
 
-        Ok(())
+        Ok(response.movies)
     }
 
     async fn upsert_series_bundle_hash(
@@ -449,7 +523,7 @@ impl CatalogEventProjection {
 
 #[cfg(test)]
 mod tests {
-    use super::CatalogEventProjection;
+    use super::{CatalogEventProjection, CatalogEventProjectionState};
     use crate::infra::scan::scan_manager::ScanEventKind;
     use chrono::Utc;
     use ferrex_core::{
@@ -590,6 +664,23 @@ mod tests {
         }
     }
 
+    fn movie_reference_in_batch(
+        library_id: LibraryId,
+        batch_id: MovieBatchId,
+        index: u64,
+    ) -> MovieReference {
+        let mut movie = movie_reference();
+        let movie_id = MovieID::new();
+        movie.id = movie_id;
+        movie.library_id = library_id;
+        movie.batch_id = Some(batch_id);
+        movie.tmdb_id = 1_000 + index;
+        movie.title = format!("Projected Movie {index}").into();
+        movie.file.media_id = MediaID::Movie(movie_id);
+        movie.file.library_id = library_id;
+        movie
+    }
+
     fn series_reference() -> Series {
         let now = Utc::now();
         Series {
@@ -674,7 +765,7 @@ mod tests {
 
         let first = CatalogEventProjection::indexed_media_event(
             Media::Movie(Box::new(movie.clone())),
-            &movie_outcome,
+            movie_outcome.change,
             true,
         )
         .expect("movie event");
@@ -682,7 +773,7 @@ mod tests {
 
         let repeated = CatalogEventProjection::indexed_media_event(
             Media::Movie(Box::new(movie)),
-            &movie_outcome,
+            movie_outcome.change,
             false,
         )
         .expect("movie event");
@@ -696,7 +787,7 @@ mod tests {
         );
         let first_series = CatalogEventProjection::indexed_media_event(
             Media::Series(Box::new(series)),
-            &series_outcome,
+            series_outcome.change,
             true,
         )
         .expect("series event");
@@ -714,7 +805,7 @@ mod tests {
 
         let event = CatalogEventProjection::indexed_media_event(
             Media::Movie(Box::new(movie)),
-            &movie_outcome,
+            movie_outcome.change,
             true,
         )
         .expect("movie event");
@@ -728,7 +819,7 @@ mod tests {
         );
         let event = CatalogEventProjection::indexed_media_event(
             Media::Series(Box::new(series)),
-            &series_outcome,
+            series_outcome.change,
             true,
         )
         .expect("series event");
@@ -763,6 +854,54 @@ mod tests {
             series.sse_event_type().event_name(),
             "media.series_bundle_finalized"
         );
+    }
+
+    #[test]
+    fn movie_batch_finalization_waits_without_synthesizing_additions() {
+        let library_id = LibraryId::new();
+        let batch_id = MovieBatchId(3);
+        let movies = (0..100)
+            .map(|index| movie_reference_in_batch(library_id, batch_id, index))
+            .collect::<Vec<_>>();
+
+        let mut state = CatalogEventProjectionState::default();
+        for movie in movies.iter().take(3) {
+            state.seen_media.insert(movie.id.to_uuid());
+        }
+
+        let pending =
+            CatalogEventProjection::movie_batch_finalization_event_if_ready(
+                &state, &movies, library_id, batch_id,
+            );
+
+        assert!(pending.is_none());
+        assert_eq!(state.seen_media.len(), 3);
+
+        state
+            .seen_media
+            .extend(movies.iter().map(|movie| movie.id.to_uuid()));
+        let finalized =
+            CatalogEventProjection::movie_batch_finalization_event_if_ready(
+                &state, &movies, library_id, batch_id,
+            );
+
+        assert!(matches!(
+            finalized,
+            Some(MediaEvent::MovieBatchFinalized {
+                library_id: event_library_id,
+                batch_id: event_batch_id,
+            }) if event_library_id == library_id && event_batch_id == batch_id
+        ));
+        assert_eq!(state.seen_media.len(), 100);
+
+        let repeated =
+            CatalogEventProjection::movie_batch_finalization_event_if_ready(
+                &state, &movies, library_id, batch_id,
+            );
+        assert!(matches!(
+            repeated,
+            Some(MediaEvent::MovieBatchFinalized { .. })
+        ));
     }
 
     #[test]

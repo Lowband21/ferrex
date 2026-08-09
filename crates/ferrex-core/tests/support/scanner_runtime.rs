@@ -576,6 +576,7 @@ pub fn index_upsert_job_from_ready(
         node: ready.node.clone(),
         idempotency_key: format!("index:{}:{path_norm}", ready.library_id),
         path_norm,
+        change: IndexingChange::Created,
     }
 }
 

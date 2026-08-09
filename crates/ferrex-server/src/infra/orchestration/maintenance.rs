@@ -717,6 +717,8 @@ mod tests {
         DurableJobState {
             job_id,
             kind: JobKind::FolderScan,
+            media_id: None,
+            indexing_change: None,
             state,
             attempts: 0,
             dedupe_key: format!("scan:test:{job_id}"),

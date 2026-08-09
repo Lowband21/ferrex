@@ -12,7 +12,7 @@ use crate::database::repository_ports::{
 };
 use crate::domain::scan::actors::image_fetch::ImageFetchActor;
 use crate::domain::scan::actors::index::{
-    IndexCommand, IndexerActor, IndexingOutcome,
+    IndexCommand, IndexerActor, IndexingChange, IndexingOutcome,
 };
 use crate::domain::scan::actors::metadata::{
     MediaReadyForIndex, MetadataActor, MetadataCommand,
@@ -584,6 +584,7 @@ impl FollowUpPlanner {
                 "index:{}:{}",
                 source_library_id, ready.analyzed.path_norm
             ),
+            change: IndexingChange::Created,
         };
 
         // Bias index upserts to complete the item flow promptly.
@@ -3470,6 +3471,7 @@ mod tests {
             node: ScanNodeKind::MovieFolder,
             path_norm: media_path.to_string_lossy().to_string(),
             idempotency_key: "timed-text-runtime-test".to_string(),
+            change: IndexingChange::Created,
         };
         let parent_correlation =
             Uuid::from_u128(0x6290000000000000000000000000c001);

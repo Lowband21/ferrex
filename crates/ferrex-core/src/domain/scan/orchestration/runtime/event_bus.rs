@@ -30,13 +30,21 @@ impl fmt::Debug for InProcJobEventBus {
 
 impl InProcJobEventBus {
     pub fn new(capacity: usize) -> Self {
-        let (sender, _) = broadcast::channel(capacity);
-        let (scan_sender, _) = broadcast::channel(capacity);
+        Self::with_capacities(capacity, capacity)
+    }
+
+    /// Build the job lifecycle and scan-domain streams with independent
+    /// capacities. Job lifecycle notifications are recoverable from the
+    /// durable queue, while scan-domain events include live catalog
+    /// projections and therefore need enough headroom for normal scan bursts.
+    pub fn with_capacities(job_capacity: usize, scan_capacity: usize) -> Self {
+        let (sender, _) = broadcast::channel(job_capacity);
+        let (scan_sender, _) = broadcast::channel(scan_capacity);
         Self {
             sender,
             scan_sender,
-            job_channel_capacity: capacity,
-            scan_channel_capacity: capacity,
+            job_channel_capacity: job_capacity,
+            scan_channel_capacity: scan_capacity,
         }
     }
 
@@ -124,6 +132,61 @@ mod tests {
                 assert!(skipped >= 44);
             }
             other => panic!("expected lag after 300 events, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn scan_stream_capacity_is_independent_from_job_reconciliation_stream()
+     {
+        let bus = InProcJobEventBus::with_capacities(8, 512);
+        let mut job_receiver = bus.subscribe();
+        let mut scan_receiver = bus.subscribe_scan();
+        let library_id = LibraryId::new();
+
+        for sequence in 0..300 {
+            bus.publish(JobEvent {
+                meta: EventMeta::new(
+                    None,
+                    library_id,
+                    format!("burst:{sequence}"),
+                    None,
+                ),
+                payload: JobEventPayload::ThroughputTick {
+                    queue_depths: Vec::new(),
+                    sampled_at: Utc::now(),
+                },
+            })
+            .await
+            .expect("job event publish succeeds");
+
+            bus.publish_scan_event(ScanEvent::SeedCompleted(
+                crate::domain::scan::orchestration::events::ScanSeedSummary {
+                    library_id,
+                    correlation_id: None,
+                    mode: crate::domain::scan::orchestration::events::ScanSeedMode::Bulk,
+                    queued_folders: sequence,
+                    enrolled_job_ids: Vec::new(),
+                    completed_at: Utc::now(),
+                },
+            ))
+            .await
+            .expect("scan event publish succeeds");
+        }
+
+        assert!(matches!(
+            job_receiver.recv().await,
+            Err(broadcast::error::RecvError::Lagged(_))
+        ));
+
+        for expected in 0..300 {
+            let event = scan_receiver
+                .recv()
+                .await
+                .expect("scan-domain burst remains buffered");
+            let ScanEvent::SeedCompleted(summary) = event else {
+                panic!("expected seed-completed scan event");
+            };
+            assert_eq!(summary.queued_folders, expected);
         }
     }
 }

@@ -2248,10 +2248,18 @@ impl QueueService for PostgresQueueService {
                     ))
                 })?;
             let kind = JobKind::from_i16(row.kind)?;
+            let (media_id, indexing_change) = match &payload {
+                JobPayload::IndexUpsert(job) => {
+                    (Some(job.media_id), Some(job.change))
+                }
+                _ => (None, None),
+            };
 
             states.push(DurableJobState {
                 job_id: JobId(row.id),
                 kind,
+                media_id,
+                indexing_change,
                 state: Self::parse_state(&row.state)?,
                 attempts: row.attempts.max(0) as u16,
                 dedupe_key: row.dedupe_key,

@@ -162,7 +162,10 @@ impl ScanOrchestrator {
             config.budget.transcript_extraction_limit = transcript_concurrency;
         }
 
-        let events = Arc::new(InProcJobEventBus::new(256));
+        // Job lifecycle state is recovered from PostgreSQL on lag. Scan-domain
+        // events also drive live per-item catalog projection, so isolate that
+        // stream and give it enough headroom for large discovery bursts.
+        let events = Arc::new(InProcJobEventBus::with_capacities(256, 8192));
         let correlations = CorrelationCache::default();
         let actors = Arc::new(ActorSystem::new(
             Arc::clone(&tmdb),

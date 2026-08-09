@@ -14,6 +14,7 @@ use ferrex_core::{
         orchestration::{
             DurableJobState, JobEvent, LibraryActorCommand, LibraryScanRun,
             LibraryScanRunProgressUpdate, NewLibraryScanRun, StartMode,
+            context::SeriesRootPath,
             events::{JobEventPayload, ScanEvent, ScanSeedSummary},
             job::{JobId, JobKind, JobState},
             scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
@@ -3589,6 +3590,8 @@ mod tests {
         DurableJobState {
             job_id,
             kind: JobKind::FolderScan,
+            media_id: None,
+            indexing_change: None,
             state,
             attempts,
             dedupe_key: dedupe_key.into(),
@@ -3776,6 +3779,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn catalog_lag_gate_waits_for_seed_and_terminal_index_jobs() {
+        let correlation_id = Uuid::now_v7();
+        let gate = DurableReconciliationGate::default();
+        gate.require_catalog_projection_recovery([correlation_id])
+            .await;
+
+        assert!(gate.requires_catalog_projection(correlation_id).await);
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(correlation_id, false, true)
+                .await
+        );
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(correlation_id, true, false)
+                .await
+        );
+        assert!(gate.is_required(correlation_id).await);
+        assert!(gate.requires_catalog_projection(correlation_id).await);
+
+        assert!(
+            gate.clear_after_seeded_snapshot(correlation_id, true, true)
+                .await
+        );
+        assert!(gate.allows_terminal(correlation_id).await);
+        assert!(!gate.requires_catalog_projection(correlation_id).await);
+    }
+
+    #[test]
+    fn catalog_lag_recovery_remains_pending_while_index_job_is_active() {
+        let correlation_id = Uuid::now_v7();
+        let now = Utc::now();
+        let mut active_index = durable_job(
+            correlation_id,
+            JobId::new(),
+            "index:active",
+            JobState::Leased,
+            0,
+            "/library/active.mkv",
+            now,
+        );
+        active_index.kind = JobKind::IndexUpsert;
+        active_index.media_id = Some(ferrex_core::types::MediaID::new(
+            ferrex_core::types::VideoMediaType::Movie,
+        ));
+        active_index.indexing_change = Some(
+            ferrex_core::domain::scan::actors::index::IndexingChange::Created,
+        );
+
+        assert!(!ScanRunAggregatorInner::catalog_index_jobs_terminal(
+            std::slice::from_ref(&active_index)
+        ));
+
+        active_index.state = JobState::Completed;
+        assert!(ScanRunAggregatorInner::catalog_index_jobs_terminal(&[
+            active_index
+        ]));
+    }
+
+    #[tokio::test]
     async fn retryable_failure_gate_waits_for_authoritative_queue_outcome() {
         let correlation_id = Uuid::now_v7();
         let job_id = JobId::new();
@@ -3915,6 +3978,7 @@ mod tests {
                 .clear_after_seeded_snapshot(
                     correlation_id,
                     run.seed_completed().await,
+                    true,
                 )
                 .await
         );
@@ -3974,6 +4038,7 @@ mod tests {
             gate.clear_after_seeded_snapshot(
                 correlation_id,
                 run.seed_completed().await,
+                true,
             )
             .await
         );
@@ -4915,6 +4980,106 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].library_id, retained_library);
     }
+
+    fn ready_series_bundle_entry(
+        library_id: LibraryId,
+        series_id: ferrex_core::types::SeriesID,
+        series_root_path: SeriesRootPath,
+    ) -> SeriesBundleTrackerEntry {
+        use ferrex_core::domain::scan::{
+            actors::FolderScanSummary,
+            orchestration::{
+                AnalyzeScanHierarchy,
+                context::{
+                    FolderScanContext, SeriesFolderScanContext, SeriesLink,
+                    SeriesRef, SeriesScanHierarchy,
+                },
+            },
+        };
+
+        let context = FolderScanContext::Series(SeriesFolderScanContext {
+            library_id,
+            series_root_path: series_root_path.clone(),
+        });
+        let mut entry = SeriesBundleTrackerEntry::new(Instant::now());
+        entry.tracker.observe_folder_discovered(&context);
+        entry
+            .tracker
+            .observe_folder_scan_completed(&FolderScanSummary {
+                context,
+                discovered_files: 0,
+                enqueued_subfolders: 0,
+                listing_hash: "series-root".into(),
+                outcome: FolderScanOutcome::Changed,
+                completed_at: Utc::now(),
+            });
+        entry.tracker.observe_indexed(&IndexingOutcome {
+            library_id,
+            path_norm: series_root_path.as_str().to_owned(),
+            media_id: ferrex_core::types::MediaID::Series(series_id),
+            hierarchy: AnalyzeScanHierarchy::Series(SeriesScanHierarchy {
+                series_root_path,
+                series: SeriesLink::Resolved(SeriesRef {
+                    id: series_id,
+                    slug: Some("claim-race".into()),
+                    title: Some("Claim Race".into()),
+                }),
+            }),
+            indexed_at: Utc::now(),
+            upserted: true,
+            media: None,
+            change: ferrex_core::domain::scan::actors::index::IndexingChange::Created,
+        });
+        entry
+    }
+
+    #[tokio::test]
+    async fn concurrent_series_bundle_finalizers_claim_once() {
+        let library_id = LibraryId::new();
+        let series_id = ferrex_core::types::SeriesID(Uuid::now_v7());
+        let series_root_path =
+            SeriesRootPath::try_new("/library/Claim Race").unwrap();
+        let entry = Arc::new(Mutex::new(ready_series_bundle_entry(
+            library_id,
+            series_id,
+            series_root_path.clone(),
+        )));
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+
+        let first = {
+            let entry = Arc::clone(&entry);
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(async move {
+                barrier.wait().await;
+                entry.lock().await.claim_next_finalization().is_some()
+            })
+        };
+        let second = {
+            let entry = Arc::clone(&entry);
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(async move {
+                barrier.wait().await;
+                entry.lock().await.claim_next_finalization().is_some()
+            })
+        };
+
+        barrier.wait().await;
+        let (first, second) = tokio::join!(first, second);
+        let claims = usize::from(first.unwrap()) + usize::from(second.unwrap());
+        assert_eq!(claims, 1, "only one worker may claim the same bundle");
+
+        let mut guard = entry.lock().await;
+        guard.settle_finalization(&series_root_path, false);
+        assert!(
+            guard.claim_next_finalization().is_some(),
+            "a failed publication must release its claim for polling retries"
+        );
+        guard.settle_finalization(&series_root_path, true);
+        assert!(
+            guard.claim_next_finalization().is_none(),
+            "a published bundle must remain finalized"
+        );
+    }
 }
 
 #[derive(Clone)]
@@ -4940,12 +5105,23 @@ struct DurableReconciliationGate {
 #[derive(Default)]
 struct DurableReconciliationRequirements {
     required: HashSet<Uuid>,
+    catalog_projection_required: HashSet<Uuid>,
     retryable_failures: HashMap<Uuid, HashSet<JobId>>,
 }
 
 impl DurableReconciliationGate {
     async fn require_all(&self, correlations: impl IntoIterator<Item = Uuid>) {
         self.state.lock().await.required.extend(correlations);
+    }
+
+    async fn require_catalog_projection_recovery(
+        &self,
+        correlations: impl IntoIterator<Item = Uuid>,
+    ) {
+        let correlations = correlations.into_iter().collect::<Vec<_>>();
+        let mut state = self.state.lock().await;
+        state.required.extend(correlations.iter().copied());
+        state.catalog_projection_required.extend(correlations);
     }
 
     async fn require_retryable_failure(
@@ -4970,9 +5146,18 @@ impl DurableReconciliationGate {
         !self.is_required(correlation_id).await
     }
 
+    async fn requires_catalog_projection(&self, correlation_id: Uuid) -> bool {
+        self.state
+            .lock()
+            .await
+            .catalog_projection_required
+            .contains(&correlation_id)
+    }
+
     async fn reconciled(&self, correlation_id: Uuid) {
         let mut state = self.state.lock().await;
         state.required.remove(&correlation_id);
+        state.catalog_projection_required.remove(&correlation_id);
         state.retryable_failures.remove(&correlation_id);
     }
 
@@ -4980,8 +5165,9 @@ impl DurableReconciliationGate {
         &self,
         correlation_id: Uuid,
         seed_completed: bool,
+        catalog_projection_complete: bool,
     ) -> bool {
-        if !seed_completed {
+        if !seed_completed || !catalog_projection_complete {
             return false;
         }
         self.reconciled(correlation_id).await;
@@ -5032,6 +5218,7 @@ impl DurableReconciliationGate {
 #[derive(Debug)]
 struct SeriesBundleTrackerEntry {
     tracker: SeriesBundleTracker,
+    finalizations_in_flight: HashSet<SeriesRootPath>,
     last_touched_at: Instant,
     last_polled_at: Instant,
 }
@@ -5040,6 +5227,7 @@ impl SeriesBundleTrackerEntry {
     fn new(now: Instant) -> Self {
         Self {
             tracker: SeriesBundleTracker::default(),
+            finalizations_in_flight: HashSet::new(),
             last_touched_at: now,
             last_polled_at: now,
         }
@@ -5047,6 +5235,30 @@ impl SeriesBundleTrackerEntry {
 
     fn touch(&mut self, now: Instant) {
         self.last_touched_at = now;
+    }
+
+    fn claim_next_finalization(&mut self) -> Option<SeriesBundleFinalization> {
+        self.tracker
+            .finalization_candidates()
+            .into_iter()
+            .find(|candidate| {
+                self.finalizations_in_flight
+                    .insert(candidate.series_root_path.clone())
+            })
+    }
+
+    fn settle_finalization(
+        &mut self,
+        series_root_path: &SeriesRootPath,
+        published: bool,
+    ) {
+        if !self.finalizations_in_flight.remove(series_root_path) {
+            return;
+        }
+
+        if published {
+            self.tracker.mark_finalized(series_root_path);
+        }
     }
 }
 
@@ -5081,9 +5293,14 @@ impl ScanRunAggregator {
     }
 
     fn spawn_worker(&self) {
-        let inner = Arc::clone(&self.inner);
+        let job_progress = Arc::clone(&self.inner);
         spawn(async move {
-            ScanRunAggregatorInner::run(inner).await;
+            ScanRunAggregatorInner::run_job_progress(job_progress).await;
+        });
+
+        let scan_events = Arc::clone(&self.inner);
+        spawn(async move {
+            ScanRunAggregatorInner::run_scan_events(scan_events).await;
         });
     }
 
@@ -5130,16 +5347,14 @@ impl ScanRunAggregator {
 }
 
 impl ScanRunAggregatorInner {
-    async fn run(self: Arc<Self>) {
+    async fn run_job_progress(self: Arc<Self>) {
         use tokio::sync::broadcast::error::RecvError;
 
         let mut receiver = self.orchestrator.subscribe_job_events();
-        let mut domain_rx = self.orchestrator.subscribe_scan_events();
         let mut ticker = interval(Duration::from_millis(500));
 
         loop {
             tokio::select! {
-                biased;
                 result = receiver.recv() => {
                     match result {
                         Ok(event) => self.handle_job_event(event).await,
@@ -5151,20 +5366,29 @@ impl ScanRunAggregatorInner {
                         Err(RecvError::Closed) => break,
                     }
                 }
-                result = domain_rx.recv() => {
-                    match result {
-                        Ok(event) => self.handle_scan_event(event).await,
-                        Err(RecvError::Lagged(skipped)) => {
-                            warn!("domain event stream lagged {skipped} events");
-                            self.mark_all_runs_reconciliation_required().await;
-                            self.reconcile_all_runs("scan_event_lag").await;
-                        }
-                        Err(RecvError::Closed) => break,
-                    }
-                }
                 _ = ticker.tick() => {
                     self.check_quiescence().await;
                 }
+            }
+        }
+    }
+
+    async fn run_scan_events(self: Arc<Self>) {
+        use tokio::sync::broadcast::error::RecvError;
+
+        let mut receiver = self.orchestrator.subscribe_scan_events();
+        loop {
+            match receiver.recv().await {
+                Ok(event) => self.handle_scan_event(event).await,
+                Err(RecvError::Lagged(skipped)) => {
+                    warn!("domain event stream lagged {skipped} events");
+                    // Keep PostgreSQL authoritative for terminal progress, but
+                    // never block catalog projection behind that durable read.
+                    // The independent progress worker will reconcile this gate
+                    // on its next quiescence tick.
+                    self.mark_all_runs_catalog_reconciliation_required().await;
+                }
+                Err(RecvError::Closed) => break,
             }
         }
     }
@@ -5246,6 +5470,14 @@ impl ScanRunAggregatorInner {
         self.reconciliation_gate.require_all(correlations).await;
     }
 
+    async fn mark_all_runs_catalog_reconciliation_required(&self) {
+        let correlations: Vec<Uuid> =
+            self.runs.read().await.keys().copied().collect();
+        self.reconciliation_gate
+            .require_catalog_projection_recovery(correlations)
+            .await;
+    }
+
     async fn reconcile_all_runs(&self, reason: &'static str) {
         let runs: Vec<Arc<ScanRun>> = {
             let guard = self.runs.read().await;
@@ -5310,6 +5542,16 @@ impl ScanRunAggregatorInner {
             )));
         }
 
+        let catalog_projection_complete = if self
+            .reconciliation_gate
+            .requires_catalog_projection(run.correlation_id())
+            .await
+        {
+            self.reconcile_catalog_projections(run, &jobs).await
+        } else {
+            true
+        };
+
         tracing::debug!(
             scan = %run.scan_id(),
             library = %run.library_id(),
@@ -5325,6 +5567,7 @@ impl ScanRunAggregatorInner {
             .clear_after_seeded_snapshot(
                 run.correlation_id(),
                 run.seed_completed().await,
+                catalog_projection_complete,
             )
             .await
         {
@@ -5336,6 +5579,90 @@ impl ScanRunAggregatorInner {
             );
         }
         Ok(())
+    }
+
+    async fn reconcile_catalog_projections(
+        &self,
+        run: &Arc<ScanRun>,
+        jobs: &[DurableJobState],
+    ) -> bool {
+        let mut complete = Self::catalog_index_jobs_terminal(jobs);
+        for job in jobs.iter().filter(|job| {
+            job.kind == JobKind::IndexUpsert && job.state == JobState::Completed
+        }) {
+            let Some(media_id) = job.media_id else {
+                warn!(
+                    scan = %run.scan_id(),
+                    library = %run.library_id(),
+                    job = %job.job_id.0,
+                    "completed index job omitted durable media identity"
+                );
+                complete = false;
+                continue;
+            };
+            let Some(change) = job.indexing_change else {
+                warn!(
+                    scan = %run.scan_id(),
+                    library = %run.library_id(),
+                    job = %job.job_id.0,
+                    "completed index job omitted durable catalog change semantics"
+                );
+                complete = false;
+                continue;
+            };
+            let Some(path_norm) =
+                job.path_key.as_ref().and_then(subject_key_path)
+            else {
+                warn!(
+                    scan = %run.scan_id(),
+                    library = %run.library_id(),
+                    job = %job.job_id.0,
+                    "completed index job omitted durable path identity"
+                );
+                complete = false;
+                continue;
+            };
+
+            match self
+                .catalog_events
+                .publish_reconciled_indexed_media(
+                    run.library_id(),
+                    path_norm,
+                    media_id,
+                    change,
+                )
+                .await
+            {
+                Ok(Some(frame)) => {
+                    tracing::debug!(
+                        scan = %run.scan_id(),
+                        library = %run.library_id(),
+                        job = %job.job_id.0,
+                        sequence = frame.sequence,
+                        "recovered catalog projection from durable index job"
+                    );
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    complete = false;
+                    warn!(
+                        scan = %run.scan_id(),
+                        library = %run.library_id(),
+                        job = %job.job_id.0,
+                        error = %err,
+                        "failed to recover catalog projection from durable index job"
+                    );
+                }
+            }
+        }
+
+        complete
+    }
+
+    fn catalog_index_jobs_terminal(jobs: &[DurableJobState]) -> bool {
+        jobs.iter()
+            .filter(|job| job.kind == JobKind::IndexUpsert)
+            .all(DurableJobState::is_terminal)
     }
 
     async fn poll_series_bundle_finalizations(&self) {
@@ -5379,6 +5706,7 @@ impl ScanRunAggregatorInner {
         let mut guard = self.series_bundles.lock().await;
         guard.retain(|library_id, entry| {
             active_libraries.contains(library_id)
+                || !entry.finalizations_in_flight.is_empty()
                 || now.duration_since(entry.last_touched_at)
                     < SERIES_BUNDLE_TRACKER_IDLE_TTL
         });
@@ -5756,31 +6084,44 @@ impl ScanRunAggregatorInner {
     }
 
     async fn try_emit_series_bundle_finalized(&self, library_id: LibraryId) {
-        let candidates: Vec<SeriesBundleFinalization> = {
-            let guard = self.series_bundles.lock().await;
-            guard
-                .get(&library_id)
-                .map(|entry| entry.tracker.finalization_candidates())
-                .unwrap_or_default()
-        };
+        loop {
+            // The job-progress and scan-domain workers can both make the same
+            // bundle eligible at nearly the same time. Claim the candidate
+            // while holding the tracker mutex so only one worker can publish
+            // it across the asynchronous database/event projection below.
+            let finalization = {
+                let mut guard = self.series_bundles.lock().await;
+                guard
+                    .get_mut(&library_id)
+                    .and_then(SeriesBundleTrackerEntry::claim_next_finalization)
+            };
+            let Some(finalization) = finalization else {
+                break;
+            };
 
-        for finalization in candidates {
             let receivers = self.catalog_events.receiver_count();
-            let Some(frame) = self
+            let frame = self
                 .catalog_events
                 .publish_series_bundle_finalized(
                     finalization.library_id,
                     finalization.series_id,
                 )
-                .await
-            else {
-                continue;
-            };
+                .await;
 
             let mut guard = self.series_bundles.lock().await;
             if let Some(entry) = guard.get_mut(&library_id) {
-                entry.tracker.mark_finalized(&finalization.series_root_path);
+                entry.settle_finalization(
+                    &finalization.series_root_path,
+                    frame.is_some(),
+                );
             }
+            drop(guard);
+
+            let Some(frame) = frame else {
+                // Publication failures are retried by the periodic poll. Do
+                // not immediately reclaim the same candidate in a tight loop.
+                break;
+            };
 
             info!(
                 library = %finalization.library_id,
