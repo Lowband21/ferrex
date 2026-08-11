@@ -687,7 +687,7 @@ impl SeriesScanStateRepository for PostgresSeriesScanStateRepository {
             })
             .unwrap_or((None, None, None, None));
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO series_scan_state (
                 library_id, series_root_path, status,
@@ -739,13 +739,13 @@ impl SeriesScanStateRepository for PostgresSeriesScanStateRepository {
                 END,
                 updated_at = NOW()
             "#,
+            library_id.0,
+            series_root_path.as_str(),
+            title,
+            slug,
+            year,
+            region,
         )
-        .bind(library_id.0)
-        .bind(series_root_path.as_str())
-        .bind(title)
-        .bind(slug)
-        .bind(year)
-        .bind(region)
         .execute(&self.pool)
         .await?;
 
@@ -777,7 +777,7 @@ impl SeriesScanStateRepository for PostgresSeriesScanStateRepository {
             })
             .unwrap_or((None, None, None, None));
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO series_scan_state (
                 library_id, series_root_path, status,
@@ -791,13 +791,13 @@ impl SeriesScanStateRepository for PostgresSeriesScanStateRepository {
             ON CONFLICT (library_id, series_root_path)
             DO NOTHING
             "#,
+            library_id.0,
+            series_root_path.as_str(),
+            title,
+            slug,
+            year,
+            region,
         )
-        .bind(library_id.0)
-        .bind(series_root_path.as_str())
-        .bind(title)
-        .bind(slug)
-        .bind(year)
-        .bind(region)
         .execute(&self.pool)
         .await?;
 

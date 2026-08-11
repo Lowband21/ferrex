@@ -5,7 +5,7 @@ use crate::error::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::from_value;
-use sqlx::{Executor, PgPool, Row};
+use sqlx::{Executor, PgPool};
 use std::fmt;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use tracing::{debug, info, trace, warn};
@@ -718,7 +718,7 @@ impl PostgresQueueService {
         library_id: LibraryId,
         series_root_path: &SeriesRootPath,
     ) -> Result<u64> {
-        let updated = sqlx::query(
+        let updated = sqlx::query!(
             r#"
             WITH terminal_series AS MATERIALIZED (
                 SELECT library_id, series_root_path
@@ -740,10 +740,10 @@ impl PostgresQueueService {
               AND job.dependency_key =
                   'series_root:' || series.series_root_path
             "#,
+            JobKind::EpisodeMatch as i16,
+            library_id.0,
+            series_root_path.as_str(),
         )
-        .bind(JobKind::EpisodeMatch as i16)
-        .bind(library_id.0)
-        .bind(series_root_path.as_str())
         .execute(&self.pool)
         .await
         .map_err(|error| {
@@ -766,7 +766,7 @@ impl PostgresQueueService {
     /// enrollment, so a historical failed snapshot cannot release the new
     /// generation after enrollment has begun.
     pub async fn repair_terminal_series_dependencies(&self) -> Result<u64> {
-        let updated = sqlx::query(
+        let updated = sqlx::query!(
             r#"
             WITH terminal_series AS MATERIALIZED (
                 SELECT series.library_id, series.series_root_path
@@ -795,8 +795,8 @@ impl PostgresQueueService {
               AND job.dependency_key =
                   'series_root:' || series.series_root_path
             "#,
+            JobKind::EpisodeMatch as i16,
         )
-        .bind(JobKind::EpisodeMatch as i16)
         .execute(&self.pool)
         .await
         .map_err(|e| {
@@ -872,7 +872,7 @@ async fn finalize_terminal_series_failure(
     record_failure: bool,
 ) -> Result<u64> {
     if record_failure {
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE series_scan_state
             SET status = 'failed'::series_scan_status,
@@ -883,10 +883,10 @@ async fn finalize_terminal_series_failure(
               AND series_root_path = $2
               AND status <> 'resolved'::series_scan_status
             "#,
+            library_id.0,
+            series_root_path.as_str(),
+            failure_reason.unwrap_or("series resolution retry limit reached"),
         )
-        .bind(library_id.0)
-        .bind(series_root_path.as_str())
-        .bind(failure_reason.unwrap_or("series resolution retry limit reached"))
         .execute(&mut **tx)
         .await
         .map_err(|e| {
@@ -897,7 +897,7 @@ async fn finalize_terminal_series_failure(
     }
 
     let dependency_key = DependencyKey::series_root(series_root_path);
-    let released = sqlx::query(
+    let released = sqlx::query!(
         r#"
         UPDATE orchestrator_jobs
         SET state = 'ready',
@@ -909,10 +909,10 @@ async fn finalize_terminal_series_failure(
           AND library_id = $2
           AND dependency_key = $3
         "#,
+        JobKind::EpisodeMatch as i16,
+        library_id.0,
+        dependency_key.as_str(),
     )
-    .bind(JobKind::EpisodeMatch as i16)
-    .bind(library_id.0)
-    .bind(dependency_key.as_str())
     .execute(&mut **tx)
     .await
     .map_err(|e| {
@@ -1900,7 +1900,7 @@ impl QueueService for PostgresQueueService {
         // While a row is leased, `available_at` is its stable lease-start
         // marker. Lease renewal deliberately leaves it unchanged; every path
         // that returns a row to Ready assigns a new availability timestamp.
-        let updated = sqlx::query(
+        let updated = sqlx::query_scalar!(
             r#"
             UPDATE orchestrator_jobs
             SET state='leased',
@@ -1913,11 +1913,11 @@ impl QueueService for PostgresQueueService {
             WHERE id = $4 AND state = 'ready'
             RETURNING available_at
             "#,
+            &request.worker_id,
+            lease_id.0,
+            expires_at,
+            row.id,
         )
-        .bind(&request.worker_id)
-        .bind(lease_id.0)
-        .bind(expires_at)
-        .bind(row.id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -1929,12 +1929,7 @@ impl QueueService for PostgresQueueService {
             drop(tx);
             return Ok(None);
         };
-        let lease_started_at: chrono::DateTime<Utc> =
-            updated.try_get("available_at").map_err(|e| {
-                MediaError::Internal(format!(
-                    "dequeue lease-start timestamp decode failed: {e}"
-                ))
-            })?;
+        let lease_started_at: chrono::DateTime<Utc> = updated;
 
         // Build JobRecord from the selected row and new lease fields
         let payload: JobPayload =
@@ -2139,30 +2134,21 @@ impl QueueService for PostgresQueueService {
         // identity first so a terminal transition can follow the same global
         // series-state -> queue-row lock order as dependency release and the
         // direct dead-letter transition below.
-        let terminal_series_identity = if let Some(candidate) = sqlx::query(
+        let terminal_series_identity = if let Some(candidate) = sqlx::query!(
             r#"
             SELECT attempts, payload
             FROM orchestrator_jobs
             WHERE lease_id = $1::uuid AND state = 'leased'
             "#,
+            lease_id.0,
         )
-        .bind(lease_id.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
             MediaError::Internal(format!("fail identity read failed: {e}"))
         })? {
-            let attempts: i32 = candidate.try_get("attempts").map_err(|e| {
-                MediaError::Internal(format!(
-                    "fail identity attempts decode failed: {e}"
-                ))
-            })?;
-            let payload: serde_json::Value =
-                candidate.try_get("payload").map_err(|e| {
-                    MediaError::Internal(format!(
-                        "fail identity payload decode failed: {e}"
-                    ))
-                })?;
+            let attempts = candidate.attempts;
+            let payload = candidate.payload;
             let payload: JobPayload =
                 serde_json::from_value(payload).map_err(|e| {
                     MediaError::Internal(format!(
@@ -2187,17 +2173,17 @@ impl QueueService for PostgresQueueService {
 
         let locked_series_state =
             if let Some((library_id, root)) = &terminal_series_identity {
-                sqlx::query_as::<_, (String, chrono::DateTime<Utc>)>(
+                sqlx::query!(
                     r#"
-                SELECT status::text, updated_at
+                SELECT status::text AS "status!", updated_at
                 FROM series_scan_state
                 WHERE library_id = $1
                   AND series_root_path = $2
                 FOR UPDATE
                 "#,
+                    library_id.0,
+                    root.as_str(),
                 )
-                .bind(library_id.0)
-                .bind(root.as_str())
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(|e| {
@@ -2205,6 +2191,7 @@ impl QueueService for PostgresQueueService {
                         "fail terminal series-state lock failed: {e}"
                     ))
                 })?
+                .map(|row| (row.status, row.updated_at))
             } else {
                 None
             };
@@ -2265,10 +2252,10 @@ impl QueueService for PostgresQueueService {
                     root.as_str()
                 )));
             };
-            let lease_started_at: chrono::DateTime<Utc> = sqlx::query_scalar(
+            let lease_started_at: chrono::DateTime<Utc> = sqlx::query_scalar!(
                 "SELECT available_at FROM orchestrator_jobs WHERE id = $1",
+                row_id,
             )
-            .bind(row_id)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| {
@@ -2281,7 +2268,7 @@ impl QueueService for PostgresQueueService {
                 *series_updated_at,
                 lease_started_at,
             ) {
-                let requeued = sqlx::query(
+                let requeued = sqlx::query!(
                     r#"
                     UPDATE orchestrator_jobs
                     SET state = 'ready',
@@ -2297,9 +2284,9 @@ impl QueueService for PostgresQueueService {
                       AND lease_id = $2::uuid
                       AND state = 'leased'
                     "#,
+                    row_id,
+                    lease_id.0,
                 )
-                .bind(row_id)
-                .bind(lease_id.0)
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| {
@@ -2509,14 +2496,14 @@ impl QueueService for PostgresQueueService {
         // Read only enough identity to establish the global lock order for a
         // SeriesResolve transition. The lease is revalidated under lock below;
         // this first read never authorizes a state change by itself.
-        let candidate_payload = sqlx::query_scalar::<_, serde_json::Value>(
+        let candidate_payload = sqlx::query_scalar!(
             r#"
             SELECT payload
             FROM orchestrator_jobs
             WHERE lease_id = $1::uuid AND state = 'leased'
             "#,
+            lease_id.0,
         )
-        .bind(lease_id.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
@@ -2550,17 +2537,17 @@ impl QueueService for PostgresQueueService {
         // avoids a queue->series inversion with the housekeeper.
         let series_status =
             if let Some((library_id, series_root_path)) = &series_identity {
-                sqlx::query_scalar::<_, String>(
+                sqlx::query_scalar!(
                     r#"
-                SELECT status::text
+                SELECT status::text AS "status!"
                 FROM series_scan_state
                 WHERE library_id = $1
                   AND series_root_path = $2
                 FOR UPDATE
                 "#,
+                    library_id.0,
+                    series_root_path.as_str(),
                 )
-                .bind(library_id.0)
-                .bind(series_root_path.as_str())
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(|e| {
@@ -2572,15 +2559,15 @@ impl QueueService for PostgresQueueService {
                 None
             };
 
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             SELECT id, attempts, payload, correlation_id
             FROM orchestrator_jobs
             WHERE lease_id = $1::uuid AND state = 'leased'
             FOR UPDATE
             "#,
+            lease_id.0,
         )
-        .bind(lease_id.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -2590,26 +2577,10 @@ impl QueueService for PostgresQueueService {
         let Some(row) = row else {
             return Ok(QueueTransitionOutcome::Missing);
         };
-        let row_id: uuid::Uuid = row.try_get("id").map_err(|e| {
-            MediaError::Internal(format!("dead_letter id decode failed: {e}"))
-        })?;
-        let attempts: i32 = row.try_get("attempts").map_err(|e| {
-            MediaError::Internal(format!(
-                "dead_letter attempts decode failed: {e}"
-            ))
-        })?;
-        let row_payload: serde_json::Value =
-            row.try_get("payload").map_err(|e| {
-                MediaError::Internal(format!(
-                    "dead_letter payload row decode failed: {e}"
-                ))
-            })?;
-        let row_correlation_id: Option<uuid::Uuid> =
-            row.try_get("correlation_id").map_err(|e| {
-                MediaError::Internal(format!(
-                    "dead_letter correlation decode failed: {e}"
-                ))
-            })?;
+        let row_id = row.id;
+        let attempts = row.attempts;
+        let row_payload = row.payload;
+        let row_correlation_id = row.correlation_id;
         let locked_job: JobPayload =
             serde_json::from_value(row_payload.clone()).map_err(|e| {
                 MediaError::Internal(format!(
@@ -2639,7 +2610,7 @@ impl QueueService for PostgresQueueService {
 
             if matches!(series_status.as_deref(), Some("discovered" | "seeded"))
             {
-                let requeued = sqlx::query(
+                let requeued = sqlx::query!(
                     r#"
                     UPDATE orchestrator_jobs
                     SET state = 'ready',
@@ -2655,9 +2626,9 @@ impl QueueService for PostgresQueueService {
                       AND lease_id = $2::uuid
                       AND state = 'leased'
                     "#,
+                    row_id,
+                    lease_id.0,
                 )
-                .bind(row_id)
-                .bind(lease_id.0)
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| {
@@ -2683,7 +2654,7 @@ impl QueueService for PostgresQueueService {
             }
         }
 
-        let transitioned = sqlx::query(
+        let transitioned = sqlx::query!(
             r#"
             UPDATE orchestrator_jobs
             SET state = 'dead_letter',
@@ -2696,10 +2667,10 @@ impl QueueService for PostgresQueueService {
               AND lease_id = $2::uuid
               AND state = 'leased'
             "#,
+            row_id,
+            lease_id.0,
+            error.clone(),
         )
-        .bind(row_id)
-        .bind(lease_id.0)
-        .bind(error.clone())
         .execute(&mut *tx)
         .await
         .map_err(|e| {

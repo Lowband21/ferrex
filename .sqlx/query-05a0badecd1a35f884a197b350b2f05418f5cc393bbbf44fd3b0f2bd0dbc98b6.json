@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE series_scan_state\n            SET status = 'failed'::series_scan_status,\n                failed_at = NOW(),\n                failure_reason = $3,\n                updated_at = NOW()\n            WHERE library_id = $1\n              AND series_root_path = $2\n              AND status <> 'resolved'::series_scan_status\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "05a0badecd1a35f884a197b350b2f05418f5cc393bbbf44fd3b0f2bd0dbc98b6"
+}

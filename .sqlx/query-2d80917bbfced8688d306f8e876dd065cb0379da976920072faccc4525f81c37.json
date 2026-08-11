@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT payload\n            FROM orchestrator_jobs\n            WHERE lease_id = $1::uuid AND state = 'leased'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2d80917bbfced8688d306f8e876dd065cb0379da976920072faccc4525f81c37"
+}
