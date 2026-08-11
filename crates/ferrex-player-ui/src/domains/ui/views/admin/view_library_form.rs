@@ -212,7 +212,7 @@ pub fn view_library_form<'a>(
             text("Minimum 1 minute; disable automatic sweeps with the checkbox below")
                 .size(12)
                 .color(theme::MediaServerTheme::TEXT_DIMMED),
-            text_input("60", &form_data.scan_interval_minutes)
+            text_input("15", &form_data.scan_interval_minutes)
                 .on_input(|s| {
                     SettingsUiMessage::UpdateLibraryFormScanInterval(s).into()
                 })

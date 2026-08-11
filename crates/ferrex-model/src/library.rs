@@ -11,6 +11,13 @@ use crate::media::Media;
 
 use super::ids::{LibraryId, MovieReferenceBatchSize};
 
+/// Default cadence for bounded automatic library maintenance.
+///
+/// Filesystem watchers normally discover new media immediately. This interval
+/// is the fallback for missed notifications and filesystems without reliable
+/// native events.
+pub const DEFAULT_SCAN_INTERVAL_MINUTES: u32 = 15;
+
 /// Read-only operations for library-like types
 pub trait LibraryLike {
     fn needs_scan(&self) -> bool;
@@ -189,7 +196,7 @@ impl LibraryLikeMut for Library {
             name,
             library_type,
             paths,
-            scan_interval_minutes: 60,
+            scan_interval_minutes: DEFAULT_SCAN_INTERVAL_MINUTES,
             last_scan: None,
             enabled: true,
             auto_scan: true,
@@ -257,6 +264,26 @@ pub struct LibraryScanResult {
     pub deleted_files: usize,
     pub errors: Vec<String>,
     pub duration_seconds: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_library_uses_incremental_discovery_default() {
+        let library = <Library as LibraryLikeMut>::new(
+            "Movies".to_string(),
+            LibraryType::Movies,
+            vec![PathBuf::from("/media/movies")],
+        );
+
+        assert_eq!(
+            library.scan_interval_minutes,
+            DEFAULT_SCAN_INTERVAL_MINUTES
+        );
+        assert_eq!(DEFAULT_SCAN_INTERVAL_MINUTES, 15);
+    }
 }
 
 #[cfg(feature = "rkyv")]

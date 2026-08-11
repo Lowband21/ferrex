@@ -8,7 +8,7 @@ use ferrex_core::{
     },
     types::{ids::LibraryId, library::LibraryType},
 };
-use ferrex_model::MovieReferenceBatchSize;
+use ferrex_model::{DEFAULT_SCAN_INTERVAL_MINUTES, MovieReferenceBatchSize};
 use iced::Task;
 use serde_json::json;
 use std::path::PathBuf;
@@ -282,7 +282,8 @@ pub fn handle_show_library_form(
                 name: String::new(),
                 library_type: "Movies".to_string(),
                 paths: String::new(),
-                scan_interval_minutes: "60".to_string(),
+                scan_interval_minutes: DEFAULT_SCAN_INTERVAL_MINUTES
+                    .to_string(),
                 enabled: true,
                 auto_scan: true,
                 watch_for_changes: true,
@@ -494,7 +495,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
             scan_interval_minutes: form_data
                 .scan_interval_minutes
                 .parse()
-                .unwrap_or(60),
+                .unwrap_or(DEFAULT_SCAN_INTERVAL_MINUTES),
             last_scan: None,
             enabled: form_data.enabled,
             media: None,

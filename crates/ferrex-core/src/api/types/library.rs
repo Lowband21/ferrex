@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::types::details::LibraryReference;
 use crate::types::ids::LibraryId;
 use crate::types::ids::{MovieBatchId, SeriesID};
-use crate::types::library::LibraryType;
+use crate::types::library::{DEFAULT_SCAN_INTERVAL_MINUTES, LibraryType};
 use crate::types::media::{
     EpisodeReference, Media, MovieReference, SeasonReference, Series,
 };
@@ -222,7 +222,7 @@ pub struct ResetLibraryResult {
 }
 
 fn default_scan_interval() -> u32 {
-    60
+    DEFAULT_SCAN_INTERVAL_MINUTES
 }
 
 fn default_enabled() -> bool {
@@ -258,7 +258,7 @@ mod tests {
 
         assert!(request.auto_scan);
         assert!(request.watch_for_changes);
-        assert_eq!(request.scan_interval_minutes, 60);
+        assert_eq!(request.scan_interval_minutes, 15);
         assert!(!request.analyze_on_scan);
         assert_eq!(request.max_retry_attempts, 3);
     }

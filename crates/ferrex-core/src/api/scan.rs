@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
-use ferrex_model::{MediaID, scan::scanner::settings};
+use ferrex_model::{
+    DEFAULT_SCAN_INTERVAL_MINUTES, MediaID, scan::scanner::settings,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -84,7 +86,7 @@ impl Default for IncrementalScanPolicyView {
         Self {
             default_auto_scan: true,
             default_watch_for_changes: true,
-            default_scan_interval_minutes: 60,
+            default_scan_interval_minutes: DEFAULT_SCAN_INTERVAL_MINUTES,
             watch_strategy: "auto".to_string(),
             poll_interval_ms: 30_000,
             debounce_window_ms: 250,

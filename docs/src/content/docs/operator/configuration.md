@@ -114,7 +114,7 @@ just start --mode tailscale
 
 ## Scanner / Incremental Scans
 
-Scanner settings can be supplied in `scanner.toml`, `scanner.json`, `config/scanner.toml`, `config/scanner.json`, `SCANNER_CONFIG_PATH`, or inline JSON via `SCANNER_CONFIG_JSON`. Existing installs that do not provide a scanner config keep safe defaults: libraries auto-scan every 60 minutes, filesystem watching is enabled per library, and the watcher uses `auto` strategy. On Linux, `auto` selects polling immediately for CIFS/SMB3 and NFS mounts; other filesystems use native notifications with polling fallback.
+Scanner settings can be supplied in `scanner.toml`, `scanner.json`, `config/scanner.toml`, `config/scanner.json`, `SCANNER_CONFIG_PATH`, or inline JSON via `SCANNER_CONFIG_JSON`. New libraries default to bounded automatic maintenance every 15 minutes, filesystem watching is enabled per library, and the watcher uses `auto` strategy. Watch events remain the primary low-latency path; the shorter maintenance interval is the fallback for missed notifications and newly added top-level media folders. Existing libraries keep their persisted interval until an operator updates them. On Linux, `auto` selects polling immediately for CIFS/SMB3 and NFS mounts; other filesystems use native notifications with polling fallback.
 
 Library create/update API payloads can override per-library policy:
 
@@ -123,7 +123,7 @@ Library create/update API payloads can override per-library policy:
   "name": "Movies",
   "library_type": "Movies",
   "paths": ["/media/movies"],
-  "scan_interval_minutes": 60,
+  "scan_interval_minutes": 15,
   "auto_scan": true,
   "watch_for_changes": true
 }
