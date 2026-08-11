@@ -167,7 +167,7 @@ rkyv = { version = "0.8.17", default-features = false, features = [
 rancor = { version = "0.1.1", default-features = false, features = ["alloc"] }
 
 # Error handling
-anyhow = "1.0"
+anyhow = "1.0.103"
 thiserror = "2.0"
 
 # Logging
