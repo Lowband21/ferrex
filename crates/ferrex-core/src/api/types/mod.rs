@@ -45,8 +45,8 @@ pub use library::{
     FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,
     ManualMatchRequest, MovieReferenceBatchBlob,
     MovieReferenceBatchBundleResponse, MovieReferenceBatchResponse,
-    SeriesBundleBlob, SeriesBundleBundleResponse, SeriesBundleResponse,
-    UpdateLibraryRequest,
+    ResetLibraryRequest, ResetLibraryResult, SeriesBundleBlob,
+    SeriesBundleBundleResponse, SeriesBundleResponse, UpdateLibraryRequest,
 };
 pub use media::{
     ImageData, ImageManifestItem, ImageManifestRequest, ImageManifestResponse,
@@ -92,8 +92,8 @@ pub mod player {
         FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,
         ManualMatchRequest, MovieReferenceBatchBlob,
         MovieReferenceBatchBundleResponse, MovieReferenceBatchResponse,
-        SeriesBundleBlob, SeriesBundleBundleResponse, SeriesBundleResponse,
-        UpdateLibraryRequest,
+        ResetLibraryRequest, ResetLibraryResult, SeriesBundleBlob,
+        SeriesBundleBundleResponse, SeriesBundleResponse, UpdateLibraryRequest,
     };
     pub use super::media::{
         ImageData, ImageManifestItem, ImageManifestRequest,

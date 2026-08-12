@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE orchestrator_jobs\n            SET state='leased',\n                lease_owner=$1,\n                lease_id=$2,\n                lease_expires_at=$3,\n                attempts = COALESCE(attempts, 0),\n                available_at=NOW(),\n                updated_at=NOW()\n            WHERE id = $4 AND state = 'ready'\n            RETURNING available_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "available_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "52cd80ec4daa9afb1c62b58e6250ad1a19fa3c6f12740513a01837abb81a30d9"
+}

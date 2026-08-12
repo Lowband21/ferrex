@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM collection_shelf_placements",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "ddcb9088f8c30cc37e3416ea1115864f20a4b060475af6b8455978e10db9c7bd"
+}

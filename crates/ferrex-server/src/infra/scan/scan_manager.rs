@@ -12,10 +12,11 @@ use ferrex_core::{
             LibraryRootsId, index::IndexingOutcome,
         },
         orchestration::{
-            JobEvent, LibraryActorCommand, LibraryScanRun,
+            DurableJobState, JobEvent, LibraryActorCommand, LibraryScanRun,
             LibraryScanRunProgressUpdate, NewLibraryScanRun, StartMode,
+            context::SeriesRootPath,
             events::{JobEventPayload, ScanEvent, ScanSeedSummary},
-            job::{JobId, JobKind},
+            job::{JobId, JobKind, JobState},
             scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
             series::{SeriesBundleFinalization, SeriesBundleTracker},
         },
@@ -48,7 +49,7 @@ use std::{
 use tokio::{
     spawn,
     sync::{Mutex, RwLock, broadcast},
-    time::interval,
+    time::{MissedTickBehavior, interval},
 };
 
 use tracing::{info, instrument, warn};
@@ -68,6 +69,8 @@ const DEFAULT_QUIESCENCE: Duration = Duration::from_secs(3);
 const STALLED_SCAN_TIMEOUT_MULTIPLIER: u32 = 5;
 const SERIES_BUNDLE_TRACKER_IDLE_TTL: Duration = Duration::from_secs(10 * 60);
 const SERIES_BUNDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const DURABLE_RECONCILIATION_INITIAL_BACKOFF: Duration = Duration::from_secs(5);
+const DURABLE_RECONCILIATION_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 fn subject_key_path(key: &SubjectKey) -> Option<&str> {
     match key {
@@ -223,6 +226,20 @@ impl ScanControlPlane {
         Arc::clone(&self.inner.orchestrator)
     }
 
+    /// Forget process-local state after a library and its durable scan rows
+    /// have been deleted successfully.
+    ///
+    /// PostgreSQL owns deletion of the durable queue and scan-run rows. This
+    /// removes their in-memory projections so they cannot remain visible as
+    /// active scans or consume scheduler reservations.
+    pub async fn forget_library(&self, library_id: LibraryId) {
+        self.inner.progress.forget_library(library_id).await;
+        self.inner
+            .orchestrator
+            .forget_library_scheduler_state(library_id)
+            .await;
+    }
+
     pub fn subscribe_media_events(
         &self,
     ) -> broadcast::Receiver<MediaEventFrame> {
@@ -298,22 +315,29 @@ impl ScanControlPlane {
 
         if disposition == ScanStartDisposition::Created {
             run.begin().await;
+        }
 
-            if let Err(err) = self
-                .inner
-                .orchestrator
-                .command_library(
-                    durable.library_id,
-                    LibraryActorCommand::Start {
-                        mode: start_mode_from_scan_run_mode(durable.mode),
-                        correlation_id: Some(durable.correlation_id),
-                    },
-                )
-                .await
-            {
-                run.fail_with_reason("start_command_failed").await;
-                return Err(ScanControlError::internal(err.to_string()));
+        // Seed ownership is serialized per run and acknowledged only after the
+        // actor has made the complete seed batch durable. Reused concurrent
+        // starts therefore cannot dispatch duplicate Start commands.
+        if let Err(err) =
+            ensure_run_seeded(&run, &self.inner.orchestrator).await
+        {
+            let finalized = run.fail_with_reason("start_command_failed").await;
+            if finalized && run.start_mode() == StartMode::Bulk {
+                let _ = self
+                    .inner
+                    .orchestrator
+                    .command_library(
+                        durable.library_id,
+                        LibraryActorCommand::Start {
+                            mode: StartMode::Maintenance,
+                            correlation_id: Some(run.correlation_id()),
+                        },
+                    )
+                    .await;
             }
+            return Err(ScanControlError::internal(err.to_string()));
         }
 
         let snapshot = run.snapshot().await?;
@@ -436,8 +460,21 @@ impl ScanControlPlane {
             .progress
             .lookup_for_library(scan_id, library_id)
             .await?;
-        let requested_correlation_id = Uuid::now_v7();
-        run.pause(requested_correlation_id).await?;
+        let _transition = run.seed_transition.lock().await;
+        run.validate_pause().await?;
+        self.inner
+            .orchestrator
+            .command_library(library_id, LibraryActorCommand::Pause)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+        if let Err(err) = run.pause().await {
+            let _ = self
+                .inner
+                .orchestrator
+                .command_library(library_id, LibraryActorCommand::Resume)
+                .await;
+            return Err(err);
+        }
         let snapshot = run.snapshot().await?;
         let mode = scan_run_mode_from_start_mode(run.start_mode());
         let run_key = mode.run_key(run.library_id());
@@ -462,8 +499,40 @@ impl ScanControlPlane {
             .progress
             .lookup_for_library(scan_id, library_id)
             .await?;
-        let requested_correlation_id = Uuid::now_v7();
-        run.resume(requested_correlation_id).await?;
+        let _transition = run.seed_transition.lock().await;
+        run.validate_resume().await?;
+        self.inner
+            .orchestrator
+            .command_library(library_id, LibraryActorCommand::Resume)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+        if let Err(err) = run.resume().await {
+            let _ = self
+                .inner
+                .orchestrator
+                .command_library(library_id, LibraryActorCommand::Pause)
+                .await;
+            return Err(err);
+        }
+        if let Err(err) = seed_run_locked(&run, &self.inner.orchestrator).await
+        {
+            let finalized =
+                run.fail_with_reason("resume_seed_command_failed").await;
+            if finalized && run.start_mode() == StartMode::Bulk {
+                let _ = self
+                    .inner
+                    .orchestrator
+                    .command_library(
+                        library_id,
+                        LibraryActorCommand::Start {
+                            mode: StartMode::Maintenance,
+                            correlation_id: Some(run.correlation_id()),
+                        },
+                    )
+                    .await;
+            }
+            return Err(ScanControlError::internal(err.to_string()));
+        }
         let snapshot = run.snapshot().await?;
         let mode = scan_run_mode_from_start_mode(run.start_mode());
         let run_key = mode.run_key(run.library_id());
@@ -488,8 +557,29 @@ impl ScanControlPlane {
             .progress
             .lookup_for_library(scan_id, library_id)
             .await?;
-        let requested_correlation_id = Uuid::now_v7();
-        run.cancel(requested_correlation_id).await?;
+        let _transition = run.seed_transition.lock().await;
+        let finalized = run.cancel().await?;
+        if finalized
+            && run.start_mode() == StartMode::Bulk
+            && let Err(err) = self
+                .inner
+                .orchestrator
+                .command_library(
+                    library_id,
+                    LibraryActorCommand::Start {
+                        mode: StartMode::Maintenance,
+                        correlation_id: Some(run.correlation_id()),
+                    },
+                )
+                .await
+        {
+            warn!(
+                library = %library_id,
+                scan = %scan_id,
+                error = %err,
+                "scan canceled but library actor did not return to maintenance"
+            );
+        }
         let snapshot = run.snapshot().await?;
         let mode = scan_run_mode_from_start_mode(run.start_mode());
         let run_key = mode.run_key(run.library_id());
@@ -599,6 +689,50 @@ impl ScanRunProgressArchive {
             events.remove(&evicted_scan_id);
         }
     }
+
+    async fn forget_library(&self, library_id: LibraryId) {
+        let forgotten_scan_ids: HashSet<Uuid> = {
+            let mut history = self.history.write().await;
+            let scan_ids = history
+                .iter()
+                .filter(|entry| entry.library_id == library_id)
+                .map(|entry| entry.scan_id)
+                .collect();
+            history.retain(|entry| entry.library_id != library_id);
+            scan_ids
+        };
+
+        if !forgotten_scan_ids.is_empty() {
+            self.final_events
+                .write()
+                .await
+                .retain(|scan_id, _| !forgotten_scan_ids.contains(scan_id));
+        }
+    }
+}
+
+async fn forget_active_library_runs(
+    active_by_scan_id: &RwLock<HashMap<Uuid, Arc<ScanRun>>>,
+    active_by_run_key: &RwLock<HashMap<String, Arc<ScanRun>>>,
+    library_id: LibraryId,
+) -> HashSet<Uuid> {
+    let removed_correlations = {
+        let mut by_scan_id = active_by_scan_id.write().await;
+        let correlations = by_scan_id
+            .values()
+            .filter(|run| run.library_id() == library_id)
+            .map(|run| run.correlation_id())
+            .collect();
+        by_scan_id.retain(|_, run| run.library_id() != library_id);
+        correlations
+    };
+
+    active_by_run_key
+        .write()
+        .await
+        .retain(|_, run| run.library_id() != library_id);
+
+    removed_correlations
 }
 
 impl ScanRunProgressTracker {
@@ -681,6 +815,52 @@ impl ScanRunProgressTracker {
 
             let run = self.register_durable_run(durable).await;
             run.seed_rehydrated_progress().await;
+
+            // A paused row remains paused across restart. If it was paused
+            // before its seed completed, Resume owns the eventual seed claim.
+            if run.lifecycle_status().await == ScanLifecycleStatus::Paused {
+                if let Err(err) = self
+                    .inner
+                    .orchestrator
+                    .command_library(
+                        run.library_id(),
+                        LibraryActorCommand::Pause,
+                    )
+                    .await
+                {
+                    warn!(
+                        library = %run.library_id(),
+                        scan = %run.scan_id(),
+                        error = %err,
+                        "failed to restore paused library actor during rehydration"
+                    );
+                }
+            } else if let Err(err) =
+                ensure_run_seeded(&run, &self.inner.orchestrator).await
+            {
+                warn!(
+                    library = %run.library_id(),
+                    scan = %run.scan_id(),
+                    error = %err,
+                    "failed to replay interrupted scan seed during rehydration"
+                );
+                let finalized = run
+                    .fail_with_reason("rehydrated_start_command_failed")
+                    .await;
+                if finalized && run.start_mode() == StartMode::Bulk {
+                    let _ = self
+                        .inner
+                        .orchestrator
+                        .command_library(
+                            run.library_id(),
+                            LibraryActorCommand::Start {
+                                mode: StartMode::Maintenance,
+                                correlation_id: Some(run.correlation_id()),
+                            },
+                        )
+                        .await;
+                }
+            }
             restored += 1;
         }
 
@@ -699,6 +879,28 @@ impl ScanRunProgressTracker {
             }
         }
         snapshots
+    }
+
+    async fn forget_library(&self, library_id: LibraryId) {
+        let removed_correlations = forget_active_library_runs(
+            &self.inner.active_by_scan_id,
+            &self.inner.active_by_run_key,
+            library_id,
+        )
+        .await;
+
+        self.inner.aggregator.forget_library(library_id).await;
+        self.inner
+            .movie_batch_notifiers
+            .forget_library(library_id)
+            .await;
+        self.inner.archive.forget_library(library_id).await;
+
+        info!(
+            library = %library_id,
+            active_runs_removed = removed_correlations.len(),
+            "forgot deleted library scan progress"
+        );
     }
 
     async fn history(&self, limit: usize) -> Vec<ScanHistoryEntry> {
@@ -873,6 +1075,13 @@ impl ScanLifecycleStatus {
     }
 }
 
+fn lifecycle_allows_seed(status: &ScanLifecycleStatus) -> bool {
+    matches!(
+        status,
+        ScanLifecycleStatus::Pending | ScanLifecycleStatus::Running
+    )
+}
+
 fn start_mode_from_scan_run_mode(mode: ScanRunMode) -> StartMode {
     match mode {
         ScanRunMode::Manual => StartMode::Bulk,
@@ -938,6 +1147,8 @@ struct ScanRun {
     events: Mutex<VecDeque<ScanBroadcastFrame>>,
     start_mode: StartMode,
     log: Mutex<ScanLogWatermark>,
+    seed_transition: Mutex<()>,
+    finalization: Mutex<bool>,
 }
 
 #[derive(Debug)]
@@ -961,10 +1172,12 @@ struct ScanRunState {
     last_activity_at: Option<DateTime<Utc>>,
     quiescence_started_at: Option<DateTime<Utc>>,
     last_error: Option<String>,
+    tracked_job_ids: HashSet<JobId>,
     item_states: HashMap<String, ScanItemState>,
     folder_outcomes_by_path: HashMap<String, FolderScanOutcome>,
     historical_cursor_count: u64,
     seed_completed: bool,
+    durable_rebuild_pending: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1133,16 +1346,20 @@ impl ScanRun {
                 last_activity_at: Some(durable.updated_at),
                 quiescence_started_at: None,
                 last_error: durable.last_error,
+                tracked_job_ids: durable.tracked_job_ids.into_iter().collect(),
                 item_states: HashMap::new(),
                 folder_outcomes_by_path: HashMap::new(),
                 historical_cursor_count: 0,
-                seed_completed: false,
+                seed_completed: durable.seed_completed,
+                durable_rebuild_pending: true,
             }),
             tx,
             inner: Arc::downgrade(&inner),
             events: Mutex::new(VecDeque::with_capacity(EVENT_HISTORY_CAPACITY)),
             start_mode: start_mode_from_scan_run_mode(durable.mode),
             log: Mutex::new(ScanLogWatermark::default()),
+            seed_transition: Mutex::new(()),
+            finalization: Mutex::new(false),
         })
     }
 
@@ -1162,6 +1379,42 @@ impl ScanRun {
         self.start_mode
     }
 
+    async fn lifecycle_status(&self) -> ScanLifecycleStatus {
+        self.state.lock().await.status.clone()
+    }
+
+    async fn validate_pause(&self) -> Result<(), ScanControlError> {
+        match self.lifecycle_status().await {
+            ScanLifecycleStatus::Running | ScanLifecycleStatus::Paused => {
+                Ok(())
+            }
+            ScanLifecycleStatus::Completed
+            | ScanLifecycleStatus::Failed
+            | ScanLifecycleStatus::Canceled => {
+                Err(ScanControlError::ScanTerminal)
+            }
+            ScanLifecycleStatus::Pending => {
+                Err(ScanControlError::ScanNotRunning)
+            }
+        }
+    }
+
+    async fn validate_resume(&self) -> Result<(), ScanControlError> {
+        match self.lifecycle_status().await {
+            ScanLifecycleStatus::Paused | ScanLifecycleStatus::Running => {
+                Ok(())
+            }
+            ScanLifecycleStatus::Completed
+            | ScanLifecycleStatus::Failed
+            | ScanLifecycleStatus::Canceled => {
+                Err(ScanControlError::ScanTerminal)
+            }
+            ScanLifecycleStatus::Pending => {
+                Err(ScanControlError::ScanNotRunning)
+            }
+        }
+    }
+
     fn run_key(&self) -> String {
         scan_run_mode_from_start_mode(self.start_mode).run_key(self.library_id)
     }
@@ -1179,6 +1432,23 @@ impl ScanRun {
             state.build_payload()
         };
         self.emit_frame(ScanEventKind::Started, emitted).await;
+    }
+
+    async fn seed_completed(&self) -> bool {
+        self.state.lock().await.seed_completed
+    }
+
+    async fn mark_seed_command_completed(&self) {
+        let payload = {
+            let mut state = self.state.lock().await;
+            if state.is_terminal() {
+                return;
+            }
+            state.seed_completed = true;
+            state.last_activity_at = Some(Utc::now());
+            state.build_current_payload()
+        };
+        self.persist_progress_payload(&payload).await;
     }
 
     async fn seed_rehydrated_progress(&self) {
@@ -1348,70 +1618,86 @@ impl ScanRun {
         );
     }
 
-    async fn pause(
-        &self,
-        correlation_id: Uuid,
-    ) -> Result<(), ScanControlError> {
-        let payload = {
-            let mut state = self.state.lock().await;
-            match state.status {
-                ScanLifecycleStatus::Running => {
-                    state.status = ScanLifecycleStatus::Paused;
-                    state.correlation_id = correlation_id;
-                    state.build_payload()
-                }
-                ScanLifecycleStatus::Paused => return Ok(()),
-                ScanLifecycleStatus::Completed
-                | ScanLifecycleStatus::Failed
-                | ScanLifecycleStatus::Canceled => {
-                    return Err(ScanControlError::ScanTerminal);
-                }
-                ScanLifecycleStatus::Pending => {
-                    return Err(ScanControlError::ScanNotRunning);
-                }
-            }
-        };
-        self.emit_frame(ScanEventKind::Progress, payload).await;
+    async fn pause(&self) -> Result<(), ScanControlError> {
+        if let Some(payload) = self
+            .persist_control_status(ScanLifecycleStatus::Paused)
+            .await?
+        {
+            self.publish_frame(ScanEventKind::Progress, payload).await;
+        }
         Ok(())
     }
 
-    async fn resume(
-        &self,
-        correlation_id: Uuid,
-    ) -> Result<(), ScanControlError> {
-        let payload = {
-            let mut state = self.state.lock().await;
-            match state.status {
-                ScanLifecycleStatus::Paused => {
-                    state.status = ScanLifecycleStatus::Running;
-                    state.correlation_id = correlation_id;
-                    state.build_payload()
-                }
-                ScanLifecycleStatus::Running => return Ok(()),
-                ScanLifecycleStatus::Completed
-                | ScanLifecycleStatus::Failed
-                | ScanLifecycleStatus::Canceled => {
-                    return Err(ScanControlError::ScanTerminal);
-                }
-                ScanLifecycleStatus::Pending => {
-                    return Err(ScanControlError::ScanNotRunning);
-                }
-            }
-        };
-        self.emit_frame(ScanEventKind::Progress, payload).await;
+    async fn resume(&self) -> Result<(), ScanControlError> {
+        if let Some(payload) = self
+            .persist_control_status(ScanLifecycleStatus::Running)
+            .await?
+        {
+            self.publish_frame(ScanEventKind::Progress, payload).await;
+        }
         Ok(())
     }
 
-    async fn cancel(
+    async fn persist_control_status(
         &self,
-        correlation_id: Uuid,
-    ) -> Result<(), ScanControlError> {
+        target: ScanLifecycleStatus,
+    ) -> Result<Option<ScanProgressEvent>, ScanControlError> {
+        let mut state = self.state.lock().await;
+        match (&state.status, &target) {
+            (ScanLifecycleStatus::Running, ScanLifecycleStatus::Paused)
+            | (ScanLifecycleStatus::Paused, ScanLifecycleStatus::Running) => {}
+            (current, requested) if current == requested => return Ok(None),
+            (
+                ScanLifecycleStatus::Completed
+                | ScanLifecycleStatus::Failed
+                | ScanLifecycleStatus::Canceled,
+                _,
+            ) => return Err(ScanControlError::ScanTerminal),
+            _ => return Err(ScanControlError::ScanNotRunning),
+        }
+
+        if let Some(inner) = self.inner.upgrade() {
+            let counters = state.counter_snapshot();
+            let update = LibraryScanRunProgressUpdate {
+                scan_id: self.scan_id,
+                status: Some(target.clone().into()),
+                completed_items: counters.completed_items,
+                total_items: state.total_items,
+                retrying_items: counters.retrying_items,
+                dead_lettered_items: counters.failed_items,
+                current_path: state.current_path.clone(),
+                tracked_job_ids: state.sorted_tracked_job_ids(),
+                seed_completed: state.seed_completed,
+                sequence: state.event_sequence.saturating_add(1),
+            };
+            let persisted = inner
+                .unit_of_work
+                .scan_runs
+                .update_progress(update)
+                .await
+                .map_err(|err| {
+                    ScanControlError::internal(format!(
+                        "failed to persist scan lifecycle transition: {err}"
+                    ))
+                })?;
+            if persisted.is_none() {
+                return Err(ScanControlError::internal(
+                    "scan lifecycle transition lost its active durable row"
+                        .to_string(),
+                ));
+            }
+        }
+
+        state.status = target;
+        Ok(Some(state.build_payload()))
+    }
+
+    async fn cancel(&self) -> Result<bool, ScanControlError> {
         let frame = {
             let mut state = self.state.lock().await;
             if state.is_terminal() {
                 return Err(ScanControlError::ScanTerminal);
             }
-            state.correlation_id = correlation_id;
             state.last_error = Some("scan_cancelled".to_string());
             state
                 .transition(ScanPhase::Canceled, Utc::now())
@@ -1421,8 +1707,7 @@ impl ScanRun {
                 })
         };
         self.emit_frame(frame.event, frame.payload).await;
-        self.finalize_history(ScanLifecycleStatus::Canceled).await;
-        Ok(())
+        Ok(self.finalize_history(ScanLifecycleStatus::Canceled).await)
     }
 
     async fn snapshot(&self) -> Result<ScanSnapshot, ScanControlError> {
@@ -1459,6 +1744,51 @@ impl ScanRun {
         guard.iter().cloned().collect()
     }
 
+    async fn tracked_job_ids(&self) -> Vec<JobId> {
+        let state = self.state.lock().await;
+        state.sorted_tracked_job_ids()
+    }
+
+    async fn tracks_job_id(&self, job_id: JobId) -> bool {
+        self.state.lock().await.tracked_job_ids.contains(&job_id)
+    }
+
+    async fn needs_pre_stall_reconciliation(
+        &self,
+        stall_timeout: ChronoDuration,
+    ) -> bool {
+        let state = self.state.lock().await;
+        !state.is_terminal()
+            && matches!(
+                state.phase,
+                ScanPhase::Processing | ScanPhase::Discovering
+            )
+            && state.outstanding_items_stalled(stall_timeout, Utc::now())
+    }
+
+    async fn reconcile_durable_job_states(&self, jobs: &[DurableJobState]) {
+        let frames = {
+            let mut state = self.state.lock().await;
+            state.reconcile_durable_job_states(jobs)
+        };
+        self.emit_frames(frames).await;
+    }
+
+    async fn has_unmaterialized_durable_progress(&self) -> bool {
+        let state = self.state.lock().await;
+        state.durable_rebuild_pending
+            && (state.total_items > 0
+                || state.completed_items > 0
+                || state.dead_lettered_items > 0
+                || state.retrying_items > 0)
+    }
+
+    async fn has_active_items(&self) -> bool {
+        let state = self.state.lock().await;
+        !state.is_terminal()
+            && state.item_states.values().any(ScanItemState::is_active)
+    }
+
     async fn record_job_enqueued(
         &self,
         idempotency_key: &str,
@@ -1473,10 +1803,13 @@ impl ScanRun {
             if state.is_terminal() {
                 Vec::new()
             } else {
+                let newly_tracked = state.tracked_job_ids.insert(job_id);
                 let stale_terminal = state
                     .item_states
                     .get(idempotency_key)
-                    .map(|item| item.is_terminal())
+                    .map(|item| {
+                        item.is_terminal() && item.last_job_id == Some(job_id)
+                    })
                     .unwrap_or(false);
 
                 tracing::debug!(
@@ -1503,7 +1836,14 @@ impl ScanRun {
                     }
                     // Do not bump run-level last_activity for stale retrograde events; avoid
                     // keeping quiescence open due to out-of-order noise.
-                    Vec::new()
+                    if newly_tracked {
+                        vec![QueuedFrame {
+                            event: ScanEventKind::Progress,
+                            payload: state.build_payload(),
+                        }]
+                    } else {
+                        Vec::new()
+                    }
                 } else {
                     let previous_phase = state.phase;
                     state.status = ScanLifecycleStatus::Running;
@@ -1535,8 +1875,8 @@ impl ScanRun {
                         matches!(previous_phase, ScanPhase::Quiescing)
                             && matches!(state.phase, ScanPhase::Processing);
 
-                    if let Some(payload) =
-                        state.build_payload_if(changed || reopened)
+                    if let Some(payload) = state
+                        .build_payload_if(changed || reopened || newly_tracked)
                     {
                         frames.push(QueuedFrame {
                             event: ScanEventKind::Progress,
@@ -1593,16 +1933,39 @@ impl ScanRun {
         self.emit_frames(frames).await;
     }
 
-    async fn record_seed_completed(&self, summary: &ScanSeedSummary) -> bool {
+    async fn record_seed_completed(
+        &self,
+        summary: &ScanSeedSummary,
+        terminalization_allowed: bool,
+    ) -> bool {
         let frame = {
             let mut state = self.state.lock().await;
             if state.is_terminal() {
                 None
             } else {
-                state.mark_seed_completed(
+                let has_enrollment = !summary.enrolled_job_ids.is_empty();
+                summary.enrolled_job_ids.iter().copied().for_each(|job_id| {
+                    state.tracked_job_ids.insert(job_id);
+                });
+
+                if !terminalization_allowed {
+                    state.seed_completed = true;
+                    state.last_activity_at = Some(summary.completed_at);
+                    has_enrollment.then(|| QueuedFrame {
+                        event: ScanEventKind::Progress,
+                        payload: state.build_payload(),
+                    })
+                } else if let Some(frame) = state.mark_seed_completed(
                     summary.queued_folders,
                     summary.completed_at,
-                )
+                ) {
+                    Some(frame)
+                } else {
+                    has_enrollment.then(|| QueuedFrame {
+                        event: ScanEventKind::Progress,
+                        payload: state.build_payload(),
+                    })
+                }
             }
         };
 
@@ -1610,8 +1973,9 @@ impl ScanRun {
             let event = frame.event.clone();
             self.emit_frame(frame.event, frame.payload).await;
             if matches!(event, ScanEventKind::Completed) {
-                self.finalize_history(ScanLifecycleStatus::Completed).await;
-                return true;
+                return self
+                    .finalize_history(ScanLifecycleStatus::Completed)
+                    .await;
             }
         }
 
@@ -1707,6 +2071,7 @@ impl ScanRun {
         if state.is_terminal() {
             return;
         }
+        state.tracked_job_ids.insert(job_id);
         if let Some(item) = state.item_states.get_mut(idempotency_key) {
             if item.is_terminal() && item.last_job_id == Some(job_id) {
                 return;
@@ -1876,7 +2241,7 @@ impl ScanRun {
         self.emit_frames(frames).await;
     }
 
-    async fn fail_with_reason(&self, reason: &str) {
+    async fn fail_with_reason(&self, reason: &str) -> bool {
         let outcome = {
             let mut state = self.state.lock().await;
             if state.is_terminal() {
@@ -1889,8 +2254,9 @@ impl ScanRun {
 
         if let Some(frame) = outcome {
             self.emit_frame(frame.event, frame.payload).await;
-            self.finalize_history(ScanLifecycleStatus::Failed).await;
+            return self.finalize_history(ScanLifecycleStatus::Failed).await;
         }
+        false
     }
 
     async fn try_complete(
@@ -1901,7 +2267,11 @@ impl ScanRun {
         let (maybe_frame, finalize_status) = {
             let mut state = self.state.lock().await;
             if state.is_terminal() {
-                (None, None)
+                // Terminal state is applied in memory before its final
+                // PostgreSQL writes. If either write failed transiently, the
+                // run remains registered and this tick must retry durable
+                // finalization instead of no-oping forever.
+                (None, Some(state.status.clone()))
             } else {
                 let now = Utc::now();
                 let mut frame: Option<QueuedFrame> = None;
@@ -1977,18 +2347,28 @@ impl ScanRun {
         };
 
         if let Some(frame) = maybe_frame {
-            let event = frame.event.clone();
             self.emit_frame(frame.event, frame.payload).await;
             if let Some(status) = finalize_status {
-                self.finalize_history(status).await;
+                return self.finalize_history(status).await;
             }
-            matches!(event, ScanEventKind::Completed)
+            false
+        } else if let Some(status) = finalize_status {
+            self.finalize_history(status).await
         } else {
             false
         }
     }
 
     async fn emit_frame(
+        &self,
+        event: ScanEventKind,
+        payload: ScanProgressEvent,
+    ) {
+        self.persist_progress_payload(&payload).await;
+        self.publish_frame(event, payload).await;
+    }
+
+    async fn publish_frame(
         &self,
         event: ScanEventKind,
         payload: ScanProgressEvent,
@@ -2005,8 +2385,6 @@ impl ScanRun {
             }
             history.push_back(frame.clone());
         }
-
-        self.persist_progress_payload(&payload).await;
 
         let _ = self.tx.send(frame.clone());
         let error = if matches!(event, ScanEventKind::Failed) {
@@ -2132,6 +2510,10 @@ impl ScanRun {
         let Some(inner) = self.inner.upgrade() else {
             return;
         };
+        let (tracked_job_ids, seed_completed) = {
+            let state = self.state.lock().await;
+            (state.sorted_tracked_job_ids(), state.seed_completed)
+        };
 
         if let Err(err) = inner
             .unit_of_work
@@ -2144,6 +2526,8 @@ impl ScanRun {
                 retrying_items: payload.retrying_items,
                 dead_lettered_items: payload.failed_items,
                 current_path: payload.current_path.clone(),
+                tracked_job_ids,
+                seed_completed,
                 sequence: payload.sequence,
             })
             .await
@@ -2162,62 +2546,166 @@ impl ScanRun {
         state.last_error.clone()
     }
 
-    async fn finalize_history(&self, terminal: ScanLifecycleStatus) {
+    async fn finalize_history(&self, terminal: ScanLifecycleStatus) -> bool {
+        let mut finalized = self.finalization.lock().await;
+        if *finalized {
+            return false;
+        }
+        let repository_terminal: ApiScanLifecycleStatus =
+            terminal.clone().into();
+
         let artifacts = {
             let state = self.state.lock().await;
             state.terminal_artifacts(terminal.clone())
         };
         let final_events = self.event_log().await;
 
-        if let Some(inner) = self.inner.upgrade() {
-            if let Err(err) = inner
-                .unit_of_work
-                .scan_runs
-                .update_progress(artifacts.progress)
-                .await
-            {
+        let Some(inner) = self.inner.upgrade() else {
+            return false;
+        };
+
+        let progress_updated = match inner
+            .unit_of_work
+            .scan_runs
+            .update_progress(artifacts.progress)
+            .await
+        {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(err) => {
                 warn!(
                     scan = %self.scan_id,
                     status = ?terminal,
                     error = %err,
                     "failed to persist final scan progress; keeping run active"
                 );
-                return;
+                return false;
             }
+        };
 
-            if let Err(err) = inner
+        let authoritative = if progress_updated {
+            match inner
                 .unit_of_work
                 .scan_runs
                 .mark_terminal(
                     self.scan_id,
-                    terminal.clone().into(),
+                    repository_terminal.clone(),
                     artifacts.terminal_at,
                     artifacts.last_error,
                 )
                 .await
             {
-                warn!(
-                    scan = %self.scan_id,
-                    status = ?terminal,
-                    error = %err,
-                    "failed to persist terminal scan state; keeping run active"
-                );
-                return;
+                Ok(Some(run)) => run.status == repository_terminal,
+                Ok(None) => false,
+                Err(err) => {
+                    warn!(
+                        scan = %self.scan_id,
+                        status = ?terminal,
+                        error = %err,
+                        "failed to persist terminal scan state; keeping run active"
+                    );
+                    return false;
+                }
             }
+        } else {
+            false
+        };
 
-            inner
-                .finalize_run(
-                    self.scan_id,
-                    self.run_key(),
-                    self.correlation_id,
-                    artifacts.snapshot,
-                    final_events,
-                )
-                .await;
+        // `None` is an expected idempotency result when another finalizer won
+        // the compare-and-set. It is success only if PostgreSQL confirms this
+        // exact terminal state; a missing row or competing status remains
+        // authoritative and must not be replaced by local history.
+        let authoritative = if authoritative {
+            true
+        } else {
+            match inner
+                .unit_of_work
+                .scan_runs
+                .load_by_scan_id(self.scan_id)
+                .await
+            {
+                Ok(Some(run)) if run.status == repository_terminal => true,
+                Ok(Some(run)) => {
+                    warn!(
+                        scan = %self.scan_id,
+                        requested_status = ?terminal,
+                        durable_status = ?run.status,
+                        "durable scan terminal state differs; keeping local run active"
+                    );
+                    false
+                }
+                Ok(None) => {
+                    warn!(
+                        scan = %self.scan_id,
+                        status = ?terminal,
+                        "durable scan row disappeared during finalization; keeping local run active"
+                    );
+                    false
+                }
+                Err(err) => {
+                    warn!(
+                        scan = %self.scan_id,
+                        status = ?terminal,
+                        error = %err,
+                        "failed to verify terminal scan state; keeping local run active"
+                    );
+                    false
+                }
+            }
+        };
+
+        if !authoritative {
+            return false;
         }
 
+        inner
+            .finalize_run(
+                self.scan_id,
+                self.run_key(),
+                self.correlation_id,
+                artifacts.snapshot,
+                final_events,
+            )
+            .await;
+        *finalized = true;
         warn!(scan = %self.scan_id, status = ?terminal, "finalized scan run");
+        true
     }
+}
+
+async fn ensure_run_seeded(
+    run: &Arc<ScanRun>,
+    orchestrator: &ScanOrchestrator,
+) -> Result<bool, ScanControlError> {
+    let _seed_guard = run.seed_transition.lock().await;
+    seed_run_locked(run, orchestrator).await
+}
+
+async fn seed_run_locked(
+    run: &Arc<ScanRun>,
+    orchestrator: &ScanOrchestrator,
+) -> Result<bool, ScanControlError> {
+    let status = run.lifecycle_status().await;
+    if run.seed_completed().await || !lifecycle_allows_seed(&status) {
+        return Ok(false);
+    }
+
+    orchestrator
+        .command_library(
+            run.library_id(),
+            LibraryActorCommand::Start {
+                mode: run.start_mode(),
+                correlation_id: Some(run.correlation_id()),
+            },
+        )
+        .await
+        .map_err(|err| ScanControlError::internal(err.to_string()))?;
+
+    // Mailbox acknowledgement occurs only after the complete seed batch has
+    // been enqueued durably. Persist that fact independently of the bounded
+    // SeedCompleted broadcast so restart recovery does not rescan it.
+    run.mark_seed_command_completed().await;
+    Ok(true)
 }
 
 #[derive(Clone, Debug)]
@@ -2256,6 +2744,155 @@ impl ScanRunState {
             )
     }
 
+    fn reconcile_durable_job_states(
+        &mut self,
+        jobs: &[DurableJobState],
+    ) -> Vec<QueuedFrame> {
+        if self.is_terminal() || jobs.is_empty() {
+            return Vec::new();
+        }
+
+        if self.durable_rebuild_pending {
+            // Rehydrated runs carry aggregate counters but not per-job state.
+            // The first successful PostgreSQL read is a complete correlation
+            // snapshot, so rebuild from it instead of adding to the persisted
+            // aggregate and double-counting every recovered job.
+            self.completed_items = 0;
+            self.total_items = 0;
+            self.dead_lettered_items = 0;
+            self.retrying_items = 0;
+            self.item_states.clear();
+            self.durable_rebuild_pending = false;
+        }
+
+        // A dedupe key can have an old terminal row and a newer active row.
+        // PostgreSQL allows a new generation after the terminal transition;
+        // only the newest generation describes the current logical item.
+        let mut latest_by_dedupe: HashMap<&str, &DurableJobState> =
+            HashMap::with_capacity(jobs.len());
+        for job in jobs {
+            self.tracked_job_ids.insert(job.job_id);
+            let replace = latest_by_dedupe
+                .get(job.dedupe_key.as_str())
+                .map(|current| {
+                    job.created_at > current.created_at
+                        || (job.created_at == current.created_at
+                            && (job.updated_at > current.updated_at
+                                || (job.updated_at == current.updated_at
+                                    && job.job_id.0 > current.job_id.0)))
+                })
+                .unwrap_or(true);
+            if replace {
+                latest_by_dedupe.insert(job.dedupe_key.as_str(), job);
+            }
+        }
+        let mut latest_jobs: Vec<_> = latest_by_dedupe.into_values().collect();
+        latest_jobs.sort_unstable_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.job_id.0.cmp(&right.job_id.0))
+        });
+
+        let mut changed = false;
+        let mut saw_active = false;
+        let mut newest_activity: Option<(DateTime<Utc>, Option<SubjectKey>)> =
+            None;
+
+        for job in latest_jobs {
+            let target_status = match job.state {
+                JobState::Completed => {
+                    if job.kind == JobKind::FolderScan {
+                        job.path_key
+                            .as_ref()
+                            .and_then(subject_key_path)
+                            .and_then(|path| {
+                                self.folder_outcomes_by_path.get(path)
+                            })
+                            .copied()
+                            .map(Self::status_for_folder_outcome)
+                            .unwrap_or(ScanItemStatus::Completed)
+                    } else {
+                        ScanItemStatus::Completed
+                    }
+                }
+                JobState::Failed | JobState::DeadLetter => {
+                    ScanItemStatus::DeadLettered
+                }
+                JobState::Ready if job.attempts > 0 => ScanItemStatus::Retrying,
+                JobState::Ready | JobState::Deferred | JobState::Leased => {
+                    ScanItemStatus::InProgress
+                }
+            };
+            saw_active |= target_status.is_active();
+
+            changed |= self.update_item_status(
+                &job.dedupe_key,
+                Some(job.job_id),
+                target_status,
+                job.updated_at,
+                job.path_key.clone(),
+                job.last_error.clone(),
+            );
+
+            if newest_activity
+                .as_ref()
+                .map(|(updated_at, _)| job.updated_at > *updated_at)
+                .unwrap_or(true)
+            {
+                newest_activity = Some((job.updated_at, job.path_key.clone()));
+            }
+        }
+
+        if saw_active
+            && matches!(
+                self.phase,
+                ScanPhase::Initializing
+                    | ScanPhase::Discovering
+                    | ScanPhase::Quiescing
+            )
+        {
+            self.handle_state_event(ScanStateEvent::NewItemFound, Utc::now());
+        } else if matches!(self.phase, ScanPhase::Initializing) {
+            // A complete burst can disappear before any enqueue event is
+            // observed. Walk through the active phase so the recovered
+            // terminal rows can enter quiescence normally.
+            self.handle_state_event(ScanStateEvent::NewItemFound, Utc::now());
+        }
+
+        if let Some((updated_at, path_key)) = newest_activity {
+            let advances_activity = self
+                .last_activity_at
+                .map(|current| updated_at > current)
+                .unwrap_or(true);
+            if advances_activity {
+                self.last_activity_at = Some(updated_at);
+                if let Some(path_key) = path_key {
+                    self.current_path = subject_key_path_owned(&path_key);
+                    self.path_key = Some(path_key);
+                }
+            }
+        }
+
+        let mut frames = Vec::new();
+        if changed {
+            frames.push(QueuedFrame {
+                event: ScanEventKind::Progress,
+                payload: self.build_payload(),
+            });
+        }
+
+        if self.can_enter_quiescing()
+            && let Some(frame) = self.handle_state_event(
+                ScanStateEvent::AllItemsProcessed,
+                Utc::now(),
+            )
+        {
+            frames.push(frame);
+        }
+
+        frames
+    }
+
     fn terminal_artifacts(
         &self,
         terminal: ScanLifecycleStatus,
@@ -2291,6 +2928,8 @@ impl ScanRunState {
                 retrying_items,
                 dead_lettered_items: failed_items,
                 current_path: self.current_path.clone(),
+                tracked_job_ids: self.sorted_tracked_job_ids(),
+                seed_completed: self.seed_completed,
                 sequence: self.event_sequence,
             },
             terminal_at,
@@ -2705,6 +3344,9 @@ impl ScanRunState {
         path_key: Option<SubjectKey>,
         error: Option<String>,
     ) -> bool {
+        if let Some(job_id) = job_id {
+            self.tracked_job_ids.insert(job_id);
+        }
         match self.item_states.entry(idempotency_key.to_string()) {
             Entry::Vacant(slot) => {
                 self.total_items += 1;
@@ -2731,9 +3373,16 @@ impl ScanRunState {
             Entry::Occupied(mut slot) => {
                 let item = slot.get_mut();
                 let old_status = item.status;
+                let same_generation =
+                    job_id.is_none() || item.last_job_id == job_id;
 
-                // Refuse retrograde transitions: once terminal, never go back to active.
-                if old_status.is_terminal() && !status.is_terminal() {
+                // Refuse retrograde transitions within one durable job. A new
+                // job ID for the same dedupe key is a newer generation and may
+                // legitimately move the logical item back to active.
+                if old_status.is_terminal()
+                    && !status.is_terminal()
+                    && same_generation
+                {
                     tracing::debug!(
                         target: "scan::state",
                         scan = %self.scan_id,
@@ -2758,6 +3407,7 @@ impl ScanRunState {
                 }
                 if matches!(old_status, ScanItemStatus::DeadLettered)
                     && !matches!(status, ScanItemStatus::DeadLettered)
+                    && same_generation
                 {
                     return false;
                 }
@@ -2837,12 +3487,30 @@ impl ScanRunState {
                 == self.total_items
     }
 
+    fn sorted_tracked_job_ids(&self) -> Vec<JobId> {
+        let mut ids: Vec<_> = self.tracked_job_ids.iter().copied().collect();
+        ids.sort_unstable_by_key(|job_id| job_id.0);
+        ids
+    }
+
     fn outstanding_items_stalled(
         &self,
         stall_timeout: ChronoDuration,
         now: DateTime<Utc>,
     ) -> bool {
         if self.retrying_items > 0 {
+            return false;
+        }
+
+        // A large seed batch gives every ready item roughly the same old
+        // enqueue timestamp. Those untouched backlog entries are not evidence
+        // of a stalled run while other items are still completing. Require the
+        // run itself to have been inactive for the full timeout before using
+        // per-item timestamps to identify genuinely abandoned work.
+        if self
+            .last_activity_at
+            .is_some_and(|last_activity| now - last_activity <= stall_timeout)
+        {
             return false;
         }
 
@@ -2893,11 +3561,899 @@ mod tests {
             last_activity_at: None,
             quiescence_started_at: None,
             last_error: None,
+            tracked_job_ids: HashSet::new(),
             item_states: HashMap::new(),
             folder_outcomes_by_path: HashMap::new(),
             historical_cursor_count: 0,
             seed_completed: false,
+            durable_rebuild_pending: false,
         }
+    }
+
+    #[test]
+    fn paused_and_terminal_runs_cannot_claim_a_seed() {
+        assert!(lifecycle_allows_seed(&ScanLifecycleStatus::Pending));
+        assert!(lifecycle_allows_seed(&ScanLifecycleStatus::Running));
+        assert!(!lifecycle_allows_seed(&ScanLifecycleStatus::Paused));
+        assert!(!lifecycle_allows_seed(&ScanLifecycleStatus::Completed));
+        assert!(!lifecycle_allows_seed(&ScanLifecycleStatus::Failed));
+        assert!(!lifecycle_allows_seed(&ScanLifecycleStatus::Canceled));
+    }
+
+    fn durable_job(
+        correlation_id: Uuid,
+        job_id: JobId,
+        dedupe_key: impl Into<String>,
+        state: JobState,
+        attempts: u16,
+        path: impl Into<String>,
+        updated_at: DateTime<Utc>,
+    ) -> DurableJobState {
+        DurableJobState {
+            job_id,
+            kind: JobKind::FolderScan,
+            media_id: None,
+            indexing_change: None,
+            series_identity: None,
+            state,
+            attempts,
+            dedupe_key: dedupe_key.into(),
+            correlation_id: Some(correlation_id),
+            path_key: SubjectKey::path(path.into()).ok(),
+            last_error: None,
+            created_at: updated_at,
+            updated_at,
+        }
+    }
+
+    fn test_run(state: ScanRunState) -> Arc<ScanRun> {
+        let (tx, _rx) = broadcast::channel(16);
+        Arc::new(ScanRun {
+            scan_id: state.scan_id,
+            library_id: state.library_id,
+            correlation_id: state.correlation_id,
+            state: Mutex::new(state),
+            tx,
+            inner: Weak::new(),
+            events: Mutex::new(VecDeque::new()),
+            start_mode: StartMode::Bulk,
+            log: Mutex::new(ScanLogWatermark::default()),
+            seed_transition: Mutex::new(()),
+            finalization: Mutex::new(false),
+        })
+    }
+
+    #[tokio::test]
+    async fn lifecycle_commands_keep_the_run_correlation_immutable() {
+        let mut state = test_state();
+        state.phase = ScanPhase::Discovering;
+        state.status = ScanLifecycleStatus::Running;
+        let correlation_id = state.correlation_id;
+        let run = test_run(state);
+
+        run.pause().await.expect("running scan pauses");
+        assert_eq!(
+            run.snapshot().await.unwrap().correlation_id,
+            correlation_id
+        );
+
+        run.resume().await.expect("paused scan resumes");
+        assert_eq!(
+            run.snapshot().await.unwrap().correlation_id,
+            correlation_id
+        );
+
+        assert!(
+            !run.cancel().await.expect("running scan cancels"),
+            "a local-only test run cannot claim durable finalization"
+        );
+        assert_eq!(
+            run.snapshot().await.unwrap().correlation_id,
+            correlation_id
+        );
+    }
+
+    #[tokio::test]
+    async fn forgetting_active_library_runs_removes_both_registry_keys() {
+        let deleted_run = test_run(test_state());
+        let retained_run = test_run(test_state());
+        let deleted_scan_id = deleted_run.scan_id();
+        let retained_scan_id = retained_run.scan_id();
+        let deleted_correlation = deleted_run.correlation_id();
+        let deleted_library = deleted_run.library_id();
+
+        let active_by_scan_id = RwLock::new(HashMap::from([
+            (deleted_scan_id, Arc::clone(&deleted_run)),
+            (retained_scan_id, Arc::clone(&retained_run)),
+        ]));
+        let active_by_run_key = RwLock::new(HashMap::from([
+            (deleted_run.run_key(), Arc::clone(&deleted_run)),
+            (retained_run.run_key(), Arc::clone(&retained_run)),
+        ]));
+
+        let removed = forget_active_library_runs(
+            &active_by_scan_id,
+            &active_by_run_key,
+            deleted_library,
+        )
+        .await;
+        let removed_again = forget_active_library_runs(
+            &active_by_scan_id,
+            &active_by_run_key,
+            deleted_library,
+        )
+        .await;
+
+        assert_eq!(removed, HashSet::from([deleted_correlation]));
+        assert!(removed_again.is_empty());
+        assert!(
+            !active_by_scan_id
+                .read()
+                .await
+                .contains_key(&deleted_scan_id)
+        );
+        assert!(
+            active_by_scan_id
+                .read()
+                .await
+                .contains_key(&retained_scan_id)
+        );
+        assert_eq!(active_by_run_key.read().await.len(), 1);
+        assert!(
+            active_by_run_key
+                .read()
+                .await
+                .contains_key(&retained_run.run_key())
+        );
+    }
+
+    #[tokio::test]
+    async fn durable_reconciliation_recovers_burst_larger_than_broadcast_capacity()
+     {
+        let mut state = test_state();
+        let now = Utc::now();
+        state.phase = ScanPhase::Discovering;
+        state.status = ScanLifecycleStatus::Running;
+        let (tx, mut receiver) = tokio::sync::broadcast::channel(256);
+        let jobs = (0..300)
+            .map(|index| {
+                tx.send(index).expect("lag test receiver remains open");
+                durable_job(
+                    state.correlation_id,
+                    JobId::new(),
+                    format!("scan:{}:{index}", state.library_id),
+                    JobState::Completed,
+                    0,
+                    format!("/library/movie-{index}"),
+                    now + ChronoDuration::milliseconds(index),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let skipped = match receiver.recv().await {
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                skipped
+            }
+            other => panic!("expected >256 burst to lag, got {other:?}"),
+        };
+        assert!(skipped >= 44);
+
+        let frames = state.reconcile_durable_job_states(&jobs);
+
+        assert_eq!(state.total_items, 300);
+        assert_eq!(state.completed_items, 300);
+        assert_eq!(state.dead_lettered_items, 0);
+        assert_eq!(state.phase, ScanPhase::Quiescing);
+        assert!(frames.iter().any(|frame| {
+            matches!(frame.event, ScanEventKind::Progress)
+                && frame.payload.completed_items == 300
+        }));
+        assert!(
+            frames
+                .iter()
+                .any(|frame| matches!(frame.event, ScanEventKind::Quiescing))
+        );
+    }
+
+    #[tokio::test]
+    async fn lag_gate_blocks_terminalization_until_reconciliation_succeeds() {
+        let correlation_id = Uuid::now_v7();
+        let gate = DurableReconciliationGate::default();
+        let (tx, mut receiver) = tokio::sync::broadcast::channel(256);
+        for sequence in 0..300 {
+            tx.send(sequence).expect("lag test receiver remains open");
+        }
+
+        match receiver.recv().await {
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                gate.require_all([correlation_id]).await;
+            }
+            other => panic!("expected lagged receiver, got {other:?}"),
+        }
+
+        assert!(!gate.allows_terminal(correlation_id).await);
+        // A failed durable read does not call `reconciled`, so later events and
+        // quiescence ticks remain unable to terminalize the partial state.
+        assert!(gate.is_required(correlation_id).await);
+        assert!(!gate.allows_terminal(correlation_id).await);
+
+        let ticket = gate.begin_reconciliation(correlation_id).await;
+        assert!(gate.reconciled(correlation_id, &ticket).await);
+        assert!(gate.allows_terminal(correlation_id).await);
+    }
+
+    #[tokio::test]
+    async fn reconciliation_pacing_backs_off_until_a_new_trigger_resets_it() {
+        let correlation_id = Uuid::now_v7();
+        let pacing = DurableReconciliationPacing::default();
+        let started_at = Instant::now();
+
+        assert!(pacing.allows_attempt(correlation_id, started_at).await);
+        pacing.defer_next_attempt(correlation_id, started_at).await;
+        assert!(
+            !pacing
+                .allows_attempt(
+                    correlation_id,
+                    started_at + DURABLE_RECONCILIATION_INITIAL_BACKOFF
+                        - Duration::from_millis(1),
+                )
+                .await
+        );
+
+        pacing.forget(correlation_id).await;
+        assert!(
+            pacing
+                .allows_attempt(
+                    correlation_id,
+                    started_at + Duration::from_millis(1),
+                )
+                .await,
+            "a new lag or enrollment trigger must force one immediate attempt"
+        );
+        pacing.defer_next_attempt(correlation_id, started_at).await;
+        assert!(
+            !pacing
+                .allows_attempt(
+                    correlation_id,
+                    started_at + Duration::from_millis(2),
+                )
+                .await,
+            "the same still-required gate must not requery every tick"
+        );
+
+        let second_attempt =
+            started_at + DURABLE_RECONCILIATION_INITIAL_BACKOFF;
+        assert!(pacing.allows_attempt(correlation_id, second_attempt).await);
+        pacing
+            .defer_next_attempt(correlation_id, second_attempt)
+            .await;
+        assert!(
+            !pacing
+                .allows_attempt(
+                    correlation_id,
+                    second_attempt + DURABLE_RECONCILIATION_INITIAL_BACKOFF,
+                )
+                .await,
+            "an unchanged active snapshot doubles the retry delay"
+        );
+        assert!(
+            pacing
+                .allows_attempt(
+                    correlation_id,
+                    second_attempt + DURABLE_RECONCILIATION_INITIAL_BACKOFF * 2,
+                )
+                .await
+        );
+
+        pacing.forget(correlation_id).await;
+        assert!(
+            pacing.allows_attempt(correlation_id, second_attempt).await,
+            "terminal or forgotten runs must discard their cooldown"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_lag_gate_waits_for_seed_and_terminal_index_jobs() {
+        let correlation_id = Uuid::now_v7();
+        let gate = DurableReconciliationGate::default();
+        gate.require_catalog_projection_recovery([correlation_id])
+            .await;
+        let ticket = gate.begin_reconciliation(correlation_id).await;
+
+        assert!(ticket.catalog_projection_required);
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &ticket,
+                    false,
+                    true,
+                )
+                .await
+        );
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &ticket,
+                    true,
+                    false,
+                )
+                .await
+        );
+        assert!(gate.is_required(correlation_id).await);
+        assert!(
+            gate.begin_reconciliation(correlation_id)
+                .await
+                .catalog_projection_required
+        );
+
+        assert!(
+            gate.clear_after_seeded_snapshot(
+                correlation_id,
+                &ticket,
+                true,
+                true,
+            )
+            .await
+        );
+        assert!(gate.allows_terminal(correlation_id).await);
+        assert!(
+            !gate
+                .begin_reconciliation(correlation_id)
+                .await
+                .catalog_projection_required
+        );
+    }
+
+    #[tokio::test]
+    async fn reconciliation_generation_preserves_triggers_arriving_in_flight() {
+        let correlation_id = Uuid::now_v7();
+        let retry_job_id = JobId::new();
+        let gate = DurableReconciliationGate::default();
+
+        gate.require_all([correlation_id]).await;
+        let snapshot_ticket = gate.begin_reconciliation(correlation_id).await;
+
+        // A second lag arrives while the durable snapshot is in flight.
+        gate.require_all([correlation_id]).await;
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &snapshot_ticket,
+                    true,
+                    true,
+                )
+                .await
+        );
+        assert!(gate.is_required(correlation_id).await);
+
+        let lag_ticket = gate.begin_reconciliation(correlation_id).await;
+        // Catalog recovery is requested while that snapshot is projecting.
+        gate.require_catalog_projection_recovery([correlation_id])
+            .await;
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &lag_ticket,
+                    true,
+                    true,
+                )
+                .await
+        );
+
+        let catalog_ticket = gate.begin_reconciliation(correlation_id).await;
+        assert!(catalog_ticket.catalog_projection_required);
+        // A retry outcome becomes uncertain before the catalog pass settles.
+        gate.require_retryable_failure(correlation_id, retry_job_id)
+            .await;
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &catalog_ticket,
+                    true,
+                    true,
+                )
+                .await
+        );
+
+        let latest_ticket = gate.begin_reconciliation(correlation_id).await;
+        assert!(latest_ticket.catalog_projection_required);
+        assert!(latest_ticket.retryable_failures.contains(&retry_job_id));
+        assert!(
+            gate.clear_after_seeded_snapshot(
+                correlation_id,
+                &latest_ticket,
+                true,
+                true,
+            )
+            .await
+        );
+        assert!(gate.allows_terminal(correlation_id).await);
+    }
+
+    #[test]
+    fn catalog_lag_recovery_remains_pending_while_index_job_is_active() {
+        let correlation_id = Uuid::now_v7();
+        let now = Utc::now();
+        let mut active_index = durable_job(
+            correlation_id,
+            JobId::new(),
+            "index:active",
+            JobState::Leased,
+            0,
+            "/library/active.mkv",
+            now,
+        );
+        active_index.kind = JobKind::IndexUpsert;
+        active_index.media_id = Some(ferrex_core::types::MediaID::new(
+            ferrex_core::types::VideoMediaType::Movie,
+        ));
+        active_index.indexing_change = Some(
+            ferrex_core::domain::scan::actors::index::IndexingChange::Created,
+        );
+
+        assert!(!ScanRunAggregatorInner::catalog_index_jobs_terminal(
+            std::slice::from_ref(&active_index)
+        ));
+
+        active_index.state = JobState::Completed;
+        assert!(ScanRunAggregatorInner::catalog_index_jobs_terminal(&[
+            active_index
+        ]));
+    }
+
+    #[tokio::test]
+    async fn retryable_failure_gate_waits_for_authoritative_queue_outcome() {
+        let correlation_id = Uuid::now_v7();
+        let job_id = JobId::new();
+        let now = Utc::now();
+        let gate = DurableReconciliationGate::default();
+        gate.require_retryable_failure(correlation_id, job_id).await;
+        let ticket = gate.begin_reconciliation(correlation_id).await;
+
+        let leased = durable_job(
+            correlation_id,
+            job_id,
+            "scan:retry-uncertain",
+            JobState::Leased,
+            0,
+            "/library/retry-uncertain",
+            now,
+        );
+        assert_eq!(
+            gate.unresolved_retryable_failures(&ticket, &[leased]).await,
+            vec![(job_id, Some(JobState::Leased))]
+        );
+        assert!(!gate.allows_terminal(correlation_id).await);
+
+        let ready = durable_job(
+            correlation_id,
+            job_id,
+            "scan:retry-uncertain",
+            JobState::Ready,
+            1,
+            "/library/retry-uncertain",
+            now + ChronoDuration::milliseconds(1),
+        );
+        assert!(
+            gate.unresolved_retryable_failures(&ticket, &[ready])
+                .await
+                .is_empty()
+        );
+        assert!(gate.reconciled(correlation_id, &ticket).await);
+        assert!(gate.allows_terminal(correlation_id).await);
+    }
+
+    #[test]
+    fn durable_reconciliation_uses_newest_generation_per_dedupe_key() {
+        let mut state = test_state();
+        let correlation_id = state.correlation_id;
+        let now = Utc::now();
+        let old_job_id = JobId::new();
+        let new_job_id = JobId::new();
+        state.phase = ScanPhase::Processing;
+        state.status = ScanLifecycleStatus::Running;
+
+        let old_terminal = durable_job(
+            correlation_id,
+            old_job_id,
+            "scan:shared-path",
+            JobState::Completed,
+            0,
+            "/library/shared",
+            now - ChronoDuration::seconds(2),
+        );
+        let new_active = durable_job(
+            correlation_id,
+            new_job_id,
+            "scan:shared-path",
+            JobState::Leased,
+            0,
+            "/library/shared",
+            now,
+        );
+
+        state.reconcile_durable_job_states(&[old_terminal, new_active]);
+
+        assert_eq!(state.total_items, 1);
+        assert_eq!(state.completed_items, 0);
+        assert_eq!(state.phase, ScanPhase::Processing);
+        assert_eq!(
+            state.item_states["scan:shared-path"].last_job_id,
+            Some(new_job_id)
+        );
+        assert!(state.item_states["scan:shared-path"].is_active());
+    }
+
+    #[tokio::test]
+    async fn merged_job_id_forces_progress_frame_when_status_is_unchanged() {
+        let mut state = test_state();
+        let old_job_id = JobId::new();
+        let merged_job_id = JobId::new();
+        state.phase = ScanPhase::Processing;
+        state.status = ScanLifecycleStatus::Running;
+        state.update_item_status(
+            "scan:shared-path",
+            Some(old_job_id),
+            ScanItemStatus::InProgress,
+            Utc::now(),
+            SubjectKey::path("/library/shared".to_string()).ok(),
+            None,
+        );
+        let run = test_run(state);
+        let mut receiver = run.subscribe();
+
+        run.record_job_enqueued(
+            "scan:shared-path",
+            merged_job_id,
+            JobKind::FolderScan,
+            SubjectKey::path("/library/shared".to_string()).ok(),
+        )
+        .await;
+
+        let frame = receiver
+            .try_recv()
+            .expect("newly tracked merge emits persistence-bearing progress");
+        assert!(matches!(frame.event, ScanEventKind::Progress));
+        let tracked = run.tracked_job_ids().await;
+        assert!(tracked.contains(&old_job_id));
+        assert!(tracked.contains(&merged_job_id));
+    }
+
+    #[tokio::test]
+    async fn pre_seed_empty_reconciliation_cannot_clear_enrollment_gate() {
+        let mut state = test_state();
+        state.phase = ScanPhase::Discovering;
+        state.status = ScanLifecycleStatus::Running;
+        let correlation_id = state.correlation_id;
+        let library_id = state.library_id;
+        let shared_job_id = JobId::new();
+        let run = test_run(state);
+        let mut receiver = run.subscribe();
+        let gate = DurableReconciliationGate::default();
+        gate.require_all([correlation_id]).await;
+        let pre_seed_ticket = gate.begin_reconciliation(correlation_id).await;
+
+        // The first ticker can race Start and observe an empty database before
+        // its enqueue batch is complete. Production reconcile_run must not
+        // clear registration's gate from this pre-seed snapshot.
+        run.reconcile_durable_job_states(&[]).await;
+        assert!(
+            !gate
+                .clear_after_seeded_snapshot(
+                    correlation_id,
+                    &pre_seed_ticket,
+                    run.seed_completed().await,
+                    true,
+                )
+                .await
+        );
+        assert!(gate.is_required(correlation_id).await);
+
+        run.mark_seed_command_completed().await;
+        let summary = ScanSeedSummary {
+            library_id,
+            correlation_id: Some(correlation_id),
+            mode: ferrex_core::domain::scan::orchestration::ScanSeedMode::Bulk,
+            queued_folders: 1,
+            enrolled_job_ids: vec![shared_job_id],
+            completed_at: Utc::now(),
+        };
+
+        let terminalization_allowed =
+            gate.allows_terminal(correlation_id).await;
+        assert!(!terminalization_allowed);
+        assert!(
+            !run.record_seed_completed(&summary, terminalization_allowed)
+                .await
+        );
+
+        let frame = receiver.try_recv().expect(
+            "seed enrollment emits progress while durable reconciliation is gated",
+        );
+        assert!(matches!(frame.event, ScanEventKind::Progress));
+        assert!(run.tracks_job_id(shared_job_id).await);
+        assert!(run.state.lock().await.seed_completed);
+        // Seed completion alone cannot reinterpret the earlier empty snapshot
+        // as a no-work scan. A post-seed read is still mandatory.
+        assert!(gate.is_required(correlation_id).await);
+        assert!(!gate.allows_terminal(correlation_id).await);
+        let early_completion = if gate.allows_terminal(correlation_id).await {
+            run.try_complete(
+                ChronoDuration::zero(),
+                ChronoDuration::seconds(30),
+            )
+            .await
+        } else {
+            false
+        };
+        assert!(!early_completion);
+        assert_eq!(run.lifecycle_status().await, ScanLifecycleStatus::Running);
+
+        let post_seed_ticket = gate.begin_reconciliation(correlation_id).await;
+        run.reconcile_durable_job_states(&[durable_job(
+            correlation_id,
+            shared_job_id,
+            "scan:seeded-shared",
+            JobState::Leased,
+            0,
+            "/library/shared",
+            Utc::now(),
+        )])
+        .await;
+        assert!(
+            gate.clear_after_seeded_snapshot(
+                correlation_id,
+                &post_seed_ticket,
+                run.seed_completed().await,
+                true,
+            )
+            .await
+        );
+        assert!(gate.allows_terminal(correlation_id).await);
+        assert!(run.has_active_items().await);
+        assert!(
+            !run.try_complete(
+                ChronoDuration::milliseconds(1),
+                ChronoDuration::seconds(30),
+            )
+            .await
+        );
+    }
+
+    #[test]
+    fn durable_reconciliation_repairs_terminal_job_before_stall() {
+        let mut state = test_state();
+        let now = Utc::now();
+        let stale_at = now - ChronoDuration::seconds(30);
+        let job_id = JobId::new();
+        state.phase = ScanPhase::Processing;
+        state.status = ScanLifecycleStatus::Running;
+        state.update_item_status(
+            "scan:stalled",
+            Some(job_id),
+            ScanItemStatus::InProgress,
+            stale_at,
+            SubjectKey::path("/library/stalled".to_string()).ok(),
+            None,
+        );
+        assert!(
+            state.outstanding_items_stalled(ChronoDuration::seconds(5), now)
+        );
+
+        state.reconcile_durable_job_states(&[durable_job(
+            state.correlation_id,
+            job_id,
+            "scan:stalled",
+            JobState::Completed,
+            0,
+            "/library/stalled",
+            now,
+        )]);
+
+        assert_eq!(state.completed_items, 1);
+        assert_eq!(state.total_items, 1);
+        assert_eq!(state.phase, ScanPhase::Quiescing);
+        assert!(!state.outstanding_items_stalled(
+            ChronoDuration::seconds(5),
+            now + ChronoDuration::seconds(30)
+        ));
+    }
+
+    #[tokio::test]
+    async fn active_durable_snapshot_defers_same_tick_stall_terminalization() {
+        let mut state = test_state();
+        let now = Utc::now();
+        let stale_at = now - ChronoDuration::seconds(30);
+        let stall_timeout = ChronoDuration::seconds(5);
+        let job_id = JobId::new();
+        state.phase = ScanPhase::Processing;
+        state.status = ScanLifecycleStatus::Running;
+        state.last_activity_at = Some(stale_at);
+        state.update_item_status(
+            "scan:racing-completion",
+            Some(job_id),
+            ScanItemStatus::InProgress,
+            stale_at,
+            SubjectKey::path("/library/racing-completion".to_string()).ok(),
+            None,
+        );
+        let correlation_id = state.correlation_id;
+        let run = test_run(state);
+
+        // PostgreSQL still reported the job active when the pre-stall query
+        // completed. The timestamps are old enough that an immediate
+        // try_complete would otherwise fail the run as stalled.
+        run.reconcile_durable_job_states(&[durable_job(
+            correlation_id,
+            job_id,
+            "scan:racing-completion",
+            JobState::Leased,
+            0,
+            "/library/racing-completion",
+            stale_at,
+        )])
+        .await;
+        assert!(run.has_active_items().await);
+        assert!(
+            run.state
+                .lock()
+                .await
+                .outstanding_items_stalled(stall_timeout, now)
+        );
+
+        // This is the check_quiescence gate: an active durable snapshot owns
+        // this tick's decision, even if the job completes just after it.
+        let terminalized = if run.has_active_items().await {
+            false
+        } else {
+            run.try_complete(ChronoDuration::zero(), stall_timeout)
+                .await
+        };
+        assert!(!terminalized);
+        assert_eq!(run.state.lock().await.phase, ScanPhase::Processing);
+
+        // The next durable observation sees the racing completion. Terminal
+        // durable states do not retain the gate and can quiesce normally.
+        run.reconcile_durable_job_states(&[durable_job(
+            correlation_id,
+            job_id,
+            "scan:racing-completion",
+            JobState::Completed,
+            0,
+            "/library/racing-completion",
+            now,
+        )])
+        .await;
+        assert!(!run.has_active_items().await);
+        assert_eq!(run.state.lock().await.phase, ScanPhase::Quiescing);
+        assert!(
+            !run.try_complete(ChronoDuration::zero(), stall_timeout)
+                .await,
+            "in-memory completion is not reported before durable finalization"
+        );
+        assert_eq!(run.state.lock().await.phase, ScanPhase::Completed);
+    }
+
+    #[tokio::test]
+    async fn terminal_run_does_not_report_completion_without_durable_confirmation()
+     {
+        let mut state = test_state();
+        let now = Utc::now();
+        state.phase = ScanPhase::Failed;
+        state.status = ScanLifecycleStatus::Failed;
+        state.update_item_status(
+            "scan:terminal-but-not-persisted",
+            Some(JobId::new()),
+            ScanItemStatus::InProgress,
+            now,
+            SubjectKey::path("/library/terminal".to_string()).ok(),
+            None,
+        );
+        let run = test_run(state);
+
+        assert!(
+            !run.has_active_items().await,
+            "terminal memory state must not block retrying its durable terminal write"
+        );
+        assert!(
+            !run.try_complete(
+                ChronoDuration::milliseconds(1),
+                ChronoDuration::seconds(30),
+            )
+            .await,
+            "maintenance side effects must wait for authoritative finalization"
+        );
+    }
+
+    #[test]
+    fn old_ready_backlog_does_not_stall_while_run_is_making_progress() {
+        let mut state = test_state();
+        let now = Utc::now();
+        let stall_timeout = ChronoDuration::seconds(25);
+        let seeded_at = now - ChronoDuration::seconds(26);
+        state.phase = ScanPhase::Processing;
+        state.status = ScanLifecycleStatus::Running;
+
+        for index in 0..3_131 {
+            state.update_item_status(
+                &format!("folder:{index}"),
+                Some(JobId::new()),
+                ScanItemStatus::InProgress,
+                seeded_at,
+                SubjectKey::path(format!("/library/movie-{index}")).ok(),
+                None,
+            );
+        }
+
+        let completed_at = now - ChronoDuration::seconds(1);
+        state.update_item_status(
+            "folder:0",
+            None,
+            ScanItemStatus::Completed,
+            completed_at,
+            SubjectKey::path("/library/movie-0".to_string()).ok(),
+            None,
+        );
+        // Production completion handling records this run-level activity after
+        // applying the item transition.
+        state.last_activity_at = Some(completed_at);
+
+        assert_eq!(state.completed_items, 1);
+        assert_eq!(state.total_items, 3_131);
+        assert!(state.item_states.values().any(ScanItemState::is_active));
+        assert!(
+            !state.outstanding_items_stalled(stall_timeout, now),
+            "recent completion must keep an old ready backlog alive"
+        );
+
+        state.last_activity_at = Some(seeded_at);
+        assert!(
+            state.outstanding_items_stalled(stall_timeout, now),
+            "the same backlog is stalled once run-level progress also expires"
+        );
+    }
+
+    #[test]
+    fn rehydrated_run_rebuilds_without_double_counting_persisted_progress() {
+        let mut state = test_state();
+        let now = Utc::now();
+        state.phase = ScanPhase::Discovering;
+        state.status = ScanLifecycleStatus::Running;
+        state.total_items = 2;
+        state.completed_items = 2;
+        state.durable_rebuild_pending = true;
+        let jobs = [
+            durable_job(
+                state.correlation_id,
+                JobId::new(),
+                "scan:rehydrated:1",
+                JobState::Completed,
+                0,
+                "/library/one",
+                now,
+            ),
+            durable_job(
+                state.correlation_id,
+                JobId::new(),
+                "scan:rehydrated:2",
+                JobState::Completed,
+                0,
+                "/library/two",
+                now + ChronoDuration::milliseconds(1),
+            ),
+        ];
+
+        state.reconcile_durable_job_states(&jobs);
+
+        assert_eq!(state.total_items, 2);
+        assert_eq!(state.completed_items, 2);
+        assert_eq!(state.item_states.len(), 2);
+        assert!(!state.durable_rebuild_pending);
     }
 
     #[test]
@@ -3337,11 +4893,12 @@ mod tests {
         let mut state = test_state();
         let now = Utc::now();
         let path = SubjectKey::path("/library/stable".to_string()).ok();
+        let job_id = JobId::new();
 
         state.handle_state_event(ScanStateEvent::RunStarted, now);
         state.update_item_status(
             "stable-job",
-            Some(JobId::new()),
+            Some(job_id),
             ScanItemStatus::Completed,
             now + ChronoDuration::milliseconds(1),
             path.clone(),
@@ -3358,7 +4915,7 @@ mod tests {
 
         let demoted = state.update_item_status(
             "stable-job",
-            Some(JobId::new()),
+            Some(job_id),
             ScanItemStatus::InProgress,
             now + ChronoDuration::milliseconds(3),
             path,
@@ -3564,6 +5121,205 @@ mod tests {
         assert_eq!(latest[0].scan_id, evicting_scan_id);
         assert_eq!(latest[0].completed_items, HISTORY_CAPACITY as u64 + 1);
     }
+
+    #[tokio::test]
+    async fn progress_archive_forgets_only_deleted_library_entries() {
+        let archive = ScanRunProgressArchive::new();
+        let deleted_library = LibraryId::new();
+        let retained_library = LibraryId::new();
+        let deleted_scan_id = Uuid::now_v7();
+        let retained_scan_id = Uuid::now_v7();
+
+        archive
+            .record_terminal(
+                history_entry(deleted_scan_id, deleted_library, 1),
+                vec![replay_frame(deleted_scan_id, deleted_library, 1)],
+            )
+            .await;
+        archive
+            .record_terminal(
+                history_entry(retained_scan_id, retained_library, 2),
+                vec![replay_frame(retained_scan_id, retained_library, 2)],
+            )
+            .await;
+
+        archive.forget_library(deleted_library).await;
+        archive.forget_library(deleted_library).await;
+
+        assert!(archive.replay_events(&deleted_scan_id).await.is_none());
+        assert!(archive.replay_events(&retained_scan_id).await.is_some());
+        let history = archive.history(HISTORY_CAPACITY).await;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].library_id, retained_library);
+    }
+
+    fn ready_series_bundle_entry(
+        library_id: LibraryId,
+        series_id: ferrex_core::types::SeriesID,
+        series_root_path: SeriesRootPath,
+    ) -> SeriesBundleTrackerEntry {
+        use ferrex_core::domain::scan::{
+            actors::FolderScanSummary,
+            orchestration::{
+                AnalyzeScanHierarchy,
+                context::{
+                    FolderScanContext, SeriesFolderScanContext, SeriesLink,
+                    SeriesRef, SeriesScanHierarchy,
+                },
+            },
+        };
+
+        let context = FolderScanContext::Series(SeriesFolderScanContext {
+            library_id,
+            series_root_path: series_root_path.clone(),
+        });
+        let mut entry = SeriesBundleTrackerEntry::new(Instant::now());
+        entry.tracker.observe_folder_discovered(&context);
+        entry
+            .tracker
+            .observe_folder_scan_completed(&FolderScanSummary {
+                context,
+                discovered_files: 0,
+                enqueued_subfolders: 0,
+                listing_hash: "series-root".into(),
+                outcome: FolderScanOutcome::Changed,
+                completed_at: Utc::now(),
+            });
+        entry.tracker.observe_indexed(&IndexingOutcome {
+            library_id,
+            path_norm: series_root_path.as_str().to_owned(),
+            media_id: ferrex_core::types::MediaID::Series(series_id),
+            hierarchy: AnalyzeScanHierarchy::Series(SeriesScanHierarchy {
+                series_root_path,
+                series: SeriesLink::Resolved(SeriesRef {
+                    id: series_id,
+                    slug: Some("claim-race".into()),
+                    title: Some("Claim Race".into()),
+                }),
+            }),
+            indexed_at: Utc::now(),
+            upserted: true,
+            media: None,
+            change: ferrex_core::domain::scan::actors::index::IndexingChange::Created,
+        });
+        entry
+    }
+
+    #[tokio::test]
+    async fn concurrent_series_bundle_finalizers_claim_once() {
+        let library_id = LibraryId::new();
+        let series_id = ferrex_core::types::SeriesID(Uuid::now_v7());
+        let series_root_path =
+            SeriesRootPath::try_new("/library/Claim Race").unwrap();
+        let entry = Arc::new(Mutex::new(ready_series_bundle_entry(
+            library_id,
+            series_id,
+            series_root_path.clone(),
+        )));
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+
+        let first = {
+            let entry = Arc::clone(&entry);
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(async move {
+                barrier.wait().await;
+                entry.lock().await.claim_next_finalization()
+            })
+        };
+        let second = {
+            let entry = Arc::clone(&entry);
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(async move {
+                barrier.wait().await;
+                entry.lock().await.claim_next_finalization()
+            })
+        };
+
+        barrier.wait().await;
+        let (first, second) = tokio::join!(first, second);
+        let first = first.unwrap();
+        let second = second.unwrap();
+        let claims =
+            usize::from(first.is_some()) + usize::from(second.is_some());
+        assert_eq!(claims, 1, "only one worker may claim the same bundle");
+        let claimed = first.or(second).expect("one worker claimed the bundle");
+
+        let mut guard = entry.lock().await;
+        assert!(!guard.settle_finalization(&claimed, false));
+        let retry = guard.claim_next_finalization().expect(
+            "a failed publication releases its claim for polling retries",
+        );
+        assert!(guard.settle_finalization(&retry, true));
+        assert!(
+            guard.claim_next_finalization().is_none(),
+            "a published bundle must remain finalized"
+        );
+    }
+
+    #[test]
+    fn series_bundle_claim_revalidates_work_enrolled_during_publish() {
+        use ferrex_core::domain::scan::orchestration::job::JobPriority;
+
+        let library_id = LibraryId::new();
+        let series_id = ferrex_core::types::SeriesID(Uuid::now_v7());
+        let series_root_path =
+            SeriesRootPath::try_new("/library/Claim Race").unwrap();
+        let episode_path = "/library/Claim Race/Season 1/S01E02.mkv";
+        let mut entry = ready_series_bundle_entry(
+            library_id,
+            series_id,
+            series_root_path.clone(),
+        );
+
+        let claimed = entry
+            .claim_next_finalization()
+            .expect("the initial bundle is ready");
+        let late_job_id = JobId::new();
+
+        // Simulate episode enrollment while catalog publication is awaiting its
+        // database projection.
+        entry.tracker.observe_job_event(&JobEvent::from_job(
+            None,
+            library_id,
+            "episode:late:index".into(),
+            SubjectKey::path(episode_path).ok(),
+            JobEventPayload::Enqueued {
+                job_id: late_job_id,
+                kind: JobKind::IndexUpsert,
+                priority: JobPriority::P0,
+            },
+        ));
+        assert!(
+            entry.claim_next_finalization().is_none(),
+            "the original in-flight claim prevents a duplicate publisher"
+        );
+
+        // Even if the late episode terminalizes before publication returns, the
+        // original claim still describes the pre-enrollment generation. It must
+        // be rejected and published again from the updated generation.
+        entry.tracker.observe_job_event(&JobEvent::from_job(
+            None,
+            library_id,
+            "episode:late:index".into(),
+            SubjectKey::path(episode_path).ok(),
+            JobEventPayload::DeadLettered {
+                job_id: late_job_id,
+                kind: JobKind::IndexUpsert,
+                priority: JobPriority::P0,
+            },
+        ));
+        assert!(
+            !entry.settle_finalization(&claimed, true),
+            "a successful publication from a stale generation must not finalize the root"
+        );
+
+        let retry = entry
+            .claim_next_finalization()
+            .expect("the updated terminal generation must be published again");
+        assert_eq!(retry.series_root_path, series_root_path);
+        assert!(entry.settle_finalization(&retry, true));
+        assert!(entry.claim_next_finalization().is_none());
+    }
 }
 
 #[derive(Clone)]
@@ -3578,11 +5334,231 @@ struct ScanRunAggregatorInner {
     stall_timeout: ChronoDuration,
     catalog_events: CatalogEventProjection,
     series_bundles: Mutex<HashMap<LibraryId, SeriesBundleTrackerEntry>>,
+    reconciliation_gate: DurableReconciliationGate,
+    durable_reconciliation_pacing: DurableReconciliationPacing,
+}
+
+#[derive(Default)]
+struct DurableReconciliationPacing {
+    state: Mutex<HashMap<Uuid, DurableReconciliationPacingState>>,
+}
+
+#[derive(Clone, Copy)]
+struct DurableReconciliationPacingState {
+    not_before: Instant,
+    backoff: Duration,
+}
+
+impl DurableReconciliationPacing {
+    async fn allows_attempt(&self, correlation_id: Uuid, now: Instant) -> bool {
+        self.state
+            .lock()
+            .await
+            .get(&correlation_id)
+            .is_none_or(|state| now >= state.not_before)
+    }
+
+    async fn defer_next_attempt(&self, correlation_id: Uuid, now: Instant) {
+        let mut state = self.state.lock().await;
+        let backoff = state
+            .get(&correlation_id)
+            .map(|current| {
+                current
+                    .backoff
+                    .checked_mul(2)
+                    .unwrap_or(DURABLE_RECONCILIATION_MAX_BACKOFF)
+                    .min(DURABLE_RECONCILIATION_MAX_BACKOFF)
+            })
+            .unwrap_or(DURABLE_RECONCILIATION_INITIAL_BACKOFF);
+        state.insert(
+            correlation_id,
+            DurableReconciliationPacingState {
+                not_before: now + backoff,
+                backoff,
+            },
+        );
+    }
+
+    async fn forget(&self, correlation_id: Uuid) {
+        self.state.lock().await.remove(&correlation_id);
+    }
+}
+
+#[derive(Default)]
+struct DurableReconciliationGate {
+    state: Mutex<DurableReconciliationRequirements>,
+}
+
+#[derive(Default)]
+struct DurableReconciliationRequirements {
+    next_generation: u64,
+    by_correlation: HashMap<Uuid, DurableReconciliationRequirement>,
+}
+
+#[derive(Clone, Default)]
+struct DurableReconciliationRequirement {
+    generation: u64,
+    catalog_projection_required: bool,
+    retryable_failures: HashSet<JobId>,
+}
+
+#[derive(Clone, Default)]
+struct DurableReconciliationTicket {
+    generation: Option<u64>,
+    catalog_projection_required: bool,
+    retryable_failures: HashSet<JobId>,
+}
+
+impl DurableReconciliationRequirements {
+    fn require(
+        &mut self,
+        correlation_id: Uuid,
+    ) -> &mut DurableReconciliationRequirement {
+        self.next_generation = self
+            .next_generation
+            .checked_add(1)
+            .expect("durable reconciliation generation exhausted");
+        let generation = self.next_generation;
+        let requirement =
+            self.by_correlation.entry(correlation_id).or_default();
+        requirement.generation = generation;
+        requirement
+    }
+}
+
+impl DurableReconciliationGate {
+    async fn require_all(&self, correlations: impl IntoIterator<Item = Uuid>) {
+        let mut state = self.state.lock().await;
+        for correlation_id in correlations {
+            state.require(correlation_id);
+        }
+    }
+
+    async fn require_catalog_projection_recovery(
+        &self,
+        correlations: impl IntoIterator<Item = Uuid>,
+    ) {
+        let mut state = self.state.lock().await;
+        for correlation_id in correlations {
+            state.require(correlation_id).catalog_projection_required = true;
+        }
+    }
+
+    async fn require_retryable_failure(
+        &self,
+        correlation_id: Uuid,
+        job_id: JobId,
+    ) {
+        let mut state = self.state.lock().await;
+        state
+            .require(correlation_id)
+            .retryable_failures
+            .insert(job_id);
+    }
+
+    async fn is_required(&self, correlation_id: Uuid) -> bool {
+        self.state
+            .lock()
+            .await
+            .by_correlation
+            .contains_key(&correlation_id)
+    }
+
+    async fn allows_terminal(&self, correlation_id: Uuid) -> bool {
+        !self.is_required(correlation_id).await
+    }
+
+    async fn begin_reconciliation(
+        &self,
+        correlation_id: Uuid,
+    ) -> DurableReconciliationTicket {
+        self.state
+            .lock()
+            .await
+            .by_correlation
+            .get(&correlation_id)
+            .map(|requirement| DurableReconciliationTicket {
+                generation: Some(requirement.generation),
+                catalog_projection_required: requirement
+                    .catalog_projection_required,
+                retryable_failures: requirement.retryable_failures.clone(),
+            })
+            .unwrap_or_default()
+    }
+
+    async fn reconciled(
+        &self,
+        correlation_id: Uuid,
+        ticket: &DurableReconciliationTicket,
+    ) -> bool {
+        let mut state = self.state.lock().await;
+        let current_generation = state
+            .by_correlation
+            .get(&correlation_id)
+            .map(|requirement| requirement.generation);
+        if current_generation != ticket.generation {
+            return false;
+        }
+        state.by_correlation.remove(&correlation_id);
+        true
+    }
+
+    async fn clear_after_seeded_snapshot(
+        &self,
+        correlation_id: Uuid,
+        ticket: &DurableReconciliationTicket,
+        seed_completed: bool,
+        catalog_projection_complete: bool,
+    ) -> bool {
+        if !seed_completed || !catalog_projection_complete {
+            return false;
+        }
+        self.reconciled(correlation_id, ticket).await
+    }
+
+    async fn unresolved_retryable_failures(
+        &self,
+        ticket: &DurableReconciliationTicket,
+        jobs: &[DurableJobState],
+    ) -> Vec<(JobId, Option<JobState>)> {
+        if ticket.retryable_failures.is_empty() {
+            return Vec::new();
+        }
+
+        let durable_states: HashMap<_, _> =
+            jobs.iter().map(|job| (job.job_id, job.state)).collect();
+        ticket
+            .retryable_failures
+            .iter()
+            .copied()
+            .filter_map(|job_id| {
+                let state = durable_states.get(&job_id).copied();
+                (!matches!(
+                    state,
+                    Some(
+                        JobState::Ready
+                            | JobState::DeadLetter
+                            | JobState::Completed
+                    )
+                ))
+                .then_some((job_id, state))
+            })
+            .collect()
+    }
+
+    async fn forget(&self, correlation_id: Uuid) {
+        self.state
+            .lock()
+            .await
+            .by_correlation
+            .remove(&correlation_id);
+    }
 }
 
 #[derive(Debug)]
 struct SeriesBundleTrackerEntry {
     tracker: SeriesBundleTracker,
+    finalizations_in_flight: HashSet<SeriesRootPath>,
     last_touched_at: Instant,
     last_polled_at: Instant,
 }
@@ -3591,6 +5567,7 @@ impl SeriesBundleTrackerEntry {
     fn new(now: Instant) -> Self {
         Self {
             tracker: SeriesBundleTracker::default(),
+            finalizations_in_flight: HashSet::new(),
             last_touched_at: now,
             last_polled_at: now,
         }
@@ -3598,6 +5575,31 @@ impl SeriesBundleTrackerEntry {
 
     fn touch(&mut self, now: Instant) {
         self.last_touched_at = now;
+    }
+
+    fn claim_next_finalization(&mut self) -> Option<SeriesBundleFinalization> {
+        self.tracker
+            .finalization_candidates()
+            .into_iter()
+            .find(|candidate| {
+                self.finalizations_in_flight
+                    .insert(candidate.series_root_path.clone())
+            })
+    }
+
+    fn settle_finalization(
+        &mut self,
+        finalization: &SeriesBundleFinalization,
+        published: bool,
+    ) -> bool {
+        if !self
+            .finalizations_in_flight
+            .remove(&finalization.series_root_path)
+        {
+            return false;
+        }
+
+        published && self.tracker.mark_finalized_if_still_eligible(finalization)
     }
 }
 
@@ -3614,6 +5616,8 @@ impl ScanRunAggregator {
             .unwrap_or(Duration::from_secs(60));
         let stall_window = ChronoDuration::from_std(stall_std)
             .unwrap_or_else(|_| ChronoDuration::seconds(60));
+        let durable_reconciliation_pacing =
+            DurableReconciliationPacing::default();
         let inner = Arc::new(ScanRunAggregatorInner {
             orchestrator,
             runs: RwLock::new(HashMap::new()),
@@ -3621,6 +5625,8 @@ impl ScanRunAggregator {
             stall_timeout: stall_window,
             catalog_events,
             series_bundles: Mutex::new(HashMap::new()),
+            reconciliation_gate: DurableReconciliationGate::default(),
+            durable_reconciliation_pacing,
         });
 
         let aggregator = Self {
@@ -3631,55 +5637,127 @@ impl ScanRunAggregator {
     }
 
     fn spawn_worker(&self) {
-        let inner = Arc::clone(&self.inner);
+        let job_events = Arc::clone(&self.inner);
         spawn(async move {
-            ScanRunAggregatorInner::run(inner).await;
+            ScanRunAggregatorInner::run_job_events(job_events).await;
+        });
+
+        let durable_reconciliation = Arc::clone(&self.inner);
+        spawn(async move {
+            ScanRunAggregatorInner::run_durable_reconciliation(
+                durable_reconciliation,
+            )
+            .await;
+        });
+
+        let scan_events = Arc::clone(&self.inner);
+        spawn(async move {
+            ScanRunAggregatorInner::run_scan_events(scan_events).await;
         });
     }
 
     async fn register(&self, run: Arc<ScanRun>) {
+        let correlation_id = run.correlation_id();
         let mut guard = self.inner.runs.write().await;
-        guard.insert(run.correlation_id(), run);
+        guard.insert(correlation_id, run);
+        drop(guard);
+        // Registration covers both new and restart-rehydrated runs. Require a
+        // successful durable read before either path can terminalize; for a
+        // new run the initial snapshot is simply empty.
+        self.inner
+            .reconciliation_gate
+            .require_all([correlation_id])
+            .await;
+        self.inner
+            .durable_reconciliation_pacing
+            .forget(correlation_id)
+            .await;
     }
 
     async fn drop(&self, correlation_id: &Uuid) {
         let mut guard = self.inner.runs.write().await;
         guard.remove(correlation_id);
+        drop(guard);
+        self.inner.reconciliation_gate.forget(*correlation_id).await;
+        self.inner
+            .durable_reconciliation_pacing
+            .forget(*correlation_id)
+            .await;
+    }
+
+    async fn forget_library(&self, library_id: LibraryId) {
+        let correlations = {
+            let mut runs = self.inner.runs.write().await;
+            let correlations: Vec<_> = runs
+                .iter()
+                .filter(|(_, run)| run.library_id() == library_id)
+                .map(|(correlation_id, _)| *correlation_id)
+                .collect();
+            for correlation_id in &correlations {
+                runs.remove(correlation_id);
+            }
+            correlations
+        };
+
+        for correlation_id in correlations {
+            self.inner.reconciliation_gate.forget(correlation_id).await;
+            self.inner
+                .durable_reconciliation_pacing
+                .forget(correlation_id)
+                .await;
+        }
+        self.inner.series_bundles.lock().await.remove(&library_id);
     }
 }
 
 impl ScanRunAggregatorInner {
-    async fn run(self: Arc<Self>) {
+    async fn run_job_events(self: Arc<Self>) {
         use tokio::sync::broadcast::error::RecvError;
 
         let mut receiver = self.orchestrator.subscribe_job_events();
-        let mut domain_rx = self.orchestrator.subscribe_scan_events();
-        let mut ticker = interval(Duration::from_millis(500));
 
         loop {
-            tokio::select! {
-                biased;
-                result = receiver.recv() => {
-                    match result {
-                        Ok(event) => self.handle_job_event(event).await,
-                        Err(RecvError::Lagged(skipped)) => {
-                            warn!("scan aggregator lagged {skipped} events");
-                        }
-                        Err(RecvError::Closed) => break,
-                    }
+            match receiver.recv().await {
+                Ok(event) => self.handle_job_event(event).await,
+                Err(RecvError::Lagged(skipped)) => {
+                    warn!("scan aggregator lagged {skipped} events");
+                    // Keep draining immediately. PostgreSQL reconciliation can
+                    // require decoding every job in a large run; doing that in
+                    // this receiver loop creates a feedback cycle where the
+                    // durable read itself causes another broadcast lag.
+                    self.mark_all_runs_reconciliation_required().await;
                 }
-                result = domain_rx.recv() => {
-                    match result {
-                        Ok(event) => self.handle_scan_event(event).await,
-                        Err(RecvError::Lagged(skipped)) => {
-                            warn!("domain event stream lagged {skipped} events");
-                        }
-                        Err(RecvError::Closed) => break,
-                    }
+                Err(RecvError::Closed) => break,
+            }
+        }
+    }
+
+    async fn run_durable_reconciliation(self: Arc<Self>) {
+        let mut ticker = interval(Duration::from_millis(500));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            ticker.tick().await;
+            self.check_quiescence().await;
+        }
+    }
+
+    async fn run_scan_events(self: Arc<Self>) {
+        use tokio::sync::broadcast::error::RecvError;
+
+        let mut receiver = self.orchestrator.subscribe_scan_events();
+        loop {
+            match receiver.recv().await {
+                Ok(event) => self.handle_scan_event(event).await,
+                Err(RecvError::Lagged(skipped)) => {
+                    warn!("domain event stream lagged {skipped} events");
+                    // Keep PostgreSQL authoritative for terminal progress, but
+                    // never block catalog projection behind that durable read.
+                    // The independent progress worker will reconcile this gate
+                    // on its next quiescence tick.
+                    self.mark_all_runs_catalog_reconciliation_required().await;
                 }
-                _ = ticker.tick() => {
-                    self.check_quiescence().await;
-                }
+                Err(RecvError::Closed) => break,
             }
         }
     }
@@ -3691,6 +5769,80 @@ impl ScanRunAggregatorInner {
         };
 
         for run in runs {
+            let explicit_reconciliation_required = self
+                .reconciliation_gate
+                .is_required(run.correlation_id())
+                .await;
+            let pre_stall =
+                run.needs_pre_stall_reconciliation(self.stall_timeout).await;
+            let reconciliation_requested =
+                explicit_reconciliation_required || pre_stall;
+            let reconciliation_due = reconciliation_requested
+                && self
+                    .durable_reconciliation_pacing
+                    .allows_attempt(run.correlation_id(), Instant::now())
+                    .await;
+
+            if reconciliation_requested && !reconciliation_due {
+                // The last attempt still observed active jobs, an incomplete
+                // seed, or an unavailable durable store. Preserve that gate
+                // until its bounded retry is due instead of re-reading the
+                // entire run every 500 ms.
+                continue;
+            }
+
+            if reconciliation_due {
+                let reason = if explicit_reconciliation_required {
+                    "lag_retry"
+                } else {
+                    "pre_stall"
+                };
+                if let Err(err) = self.reconcile_run(&run, reason).await {
+                    warn!(
+                        scan = %run.scan_id(),
+                        library = %run.library_id(),
+                        error = %err,
+                        reason,
+                        "durable scan reconciliation failed; deferring terminal decision"
+                    );
+                    self.durable_reconciliation_pacing
+                        .defer_next_attempt(
+                            run.correlation_id(),
+                            Instant::now(),
+                        )
+                        .await;
+                    continue;
+                }
+
+                // PostgreSQL is authoritative for job lifecycle state. If a
+                // successful snapshot still contains active work, do not use
+                // the same stale timestamps to terminalize the run on this
+                // tick. A completion racing just after the snapshot will be
+                // observed by its event or by the next reconciliation.
+                if run.has_active_items().await {
+                    tracing::debug!(
+                        scan = %run.scan_id(),
+                        library = %run.library_id(),
+                        reason,
+                        "durable jobs remain active; deferring terminal decision"
+                    );
+                    continue;
+                }
+            }
+
+            // A registration gate must survive an empty snapshot taken while
+            // Start is still enqueueing its seed batch. Seed completion is
+            // persisted separately; until a successful snapshot after that
+            // marker, total_items == 0 is not authoritative evidence of a
+            // no-work scan.
+            if !self
+                .reconciliation_gate
+                .allows_terminal(run.correlation_id())
+                .await
+            {
+                continue;
+            }
+
             if run
                 .try_complete(self.quiescence_chrono, self.stall_timeout)
                 .await
@@ -3701,6 +5853,232 @@ impl ScanRunAggregatorInner {
 
         self.poll_series_bundle_finalizations().await;
         self.cleanup_series_bundle_trackers().await;
+    }
+
+    async fn mark_all_runs_reconciliation_required(&self) {
+        let correlations: Vec<Uuid> =
+            self.runs.read().await.keys().copied().collect();
+        self.reconciliation_gate
+            .require_all(correlations.iter().copied())
+            .await;
+        for correlation_id in correlations {
+            self.durable_reconciliation_pacing
+                .forget(correlation_id)
+                .await;
+        }
+    }
+
+    async fn mark_all_runs_catalog_reconciliation_required(&self) {
+        let correlations: Vec<Uuid> =
+            self.runs.read().await.keys().copied().collect();
+        self.reconciliation_gate
+            .require_catalog_projection_recovery(correlations.iter().copied())
+            .await;
+        for correlation_id in correlations {
+            self.durable_reconciliation_pacing
+                .forget(correlation_id)
+                .await;
+        }
+    }
+
+    async fn reconcile_run(
+        &self,
+        run: &Arc<ScanRun>,
+        reason: &'static str,
+    ) -> ferrex_core::error::Result<()> {
+        // This ticket fences every async read and projection below. A lag,
+        // retry, or catalog trigger that arrives while reconciliation is in
+        // flight advances the generation and cannot be cleared by this older
+        // snapshot.
+        let reconciliation_ticket = self
+            .reconciliation_gate
+            .begin_reconciliation(run.correlation_id())
+            .await;
+        let tracked_job_ids = run.tracked_job_ids().await;
+        let jobs = self
+            .orchestrator
+            .durable_job_states(run.correlation_id(), &tracked_job_ids)
+            .await?;
+        if jobs.is_empty()
+            && (!tracked_job_ids.is_empty()
+                || run.has_unmaterialized_durable_progress().await)
+        {
+            return Err(ferrex_core::error::MediaError::Internal(format!(
+                "durable job snapshot for scan {} was empty despite tracked jobs or persisted progress",
+                run.scan_id()
+            )));
+        }
+        let durable_job_ids: HashSet<_> =
+            jobs.iter().map(|job| job.job_id).collect();
+        let missing_job_ids: Vec<_> = tracked_job_ids
+            .iter()
+            .copied()
+            .filter(|job_id| !durable_job_ids.contains(job_id))
+            .collect();
+        if !missing_job_ids.is_empty() {
+            return Err(ferrex_core::error::MediaError::Internal(format!(
+                "durable job snapshot for scan {} omitted {} tracked jobs",
+                run.scan_id(),
+                missing_job_ids.len()
+            )));
+        }
+        let unresolved_retryable_failures = self
+            .reconciliation_gate
+            .unresolved_retryable_failures(&reconciliation_ticket, &jobs)
+            .await;
+        if !unresolved_retryable_failures.is_empty() {
+            return Err(ferrex_core::error::MediaError::Internal(format!(
+                "durable retry outcome for scan {} remains unresolved: {:?}",
+                run.scan_id(),
+                unresolved_retryable_failures
+            )));
+        }
+
+        let catalog_projection_complete =
+            if reconciliation_ticket.catalog_projection_required {
+                self.reconcile_catalog_projections(run, &jobs).await
+            } else {
+                true
+            };
+
+        tracing::debug!(
+            scan = %run.scan_id(),
+            library = %run.library_id(),
+            correlation = %run.correlation_id(),
+            tracked_jobs = tracked_job_ids.len(),
+            durable_jobs = jobs.len(),
+            reason,
+            "reconciling scan progress from durable job state"
+        );
+        run.reconcile_durable_job_states(&jobs).await;
+        if jobs.iter().any(|job| job.series_identity.is_some()) {
+            let now = Instant::now();
+            let mut guard = self.series_bundles.lock().await;
+            let entry = guard
+                .entry(run.library_id())
+                .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
+            entry.touch(now);
+            entry
+                .tracker
+                .reconcile_durable_job_states(run.library_id(), &jobs);
+        }
+        if !self
+            .reconciliation_gate
+            .clear_after_seeded_snapshot(
+                run.correlation_id(),
+                &reconciliation_ticket,
+                run.seed_completed().await,
+                catalog_projection_complete,
+            )
+            .await
+        {
+            tracing::debug!(
+                scan = %run.scan_id(),
+                library = %run.library_id(),
+                reason,
+                "durable snapshot did not satisfy the current reconciliation generation; retaining gate"
+            );
+        }
+
+        if self
+            .reconciliation_gate
+            .is_required(run.correlation_id())
+            .await
+            || run.has_active_items().await
+        {
+            self.durable_reconciliation_pacing
+                .defer_next_attempt(run.correlation_id(), Instant::now())
+                .await;
+        } else {
+            self.durable_reconciliation_pacing
+                .forget(run.correlation_id())
+                .await;
+        }
+        Ok(())
+    }
+
+    async fn reconcile_catalog_projections(
+        &self,
+        run: &Arc<ScanRun>,
+        jobs: &[DurableJobState],
+    ) -> bool {
+        let mut complete = Self::catalog_index_jobs_terminal(jobs);
+        for job in jobs.iter().filter(|job| {
+            job.kind == JobKind::IndexUpsert && job.state == JobState::Completed
+        }) {
+            let Some(media_id) = job.media_id else {
+                warn!(
+                    scan = %run.scan_id(),
+                    library = %run.library_id(),
+                    job = %job.job_id.0,
+                    "completed index job omitted durable media identity"
+                );
+                complete = false;
+                continue;
+            };
+            let Some(change) = job.indexing_change else {
+                warn!(
+                    scan = %run.scan_id(),
+                    library = %run.library_id(),
+                    job = %job.job_id.0,
+                    "completed index job omitted durable catalog change semantics"
+                );
+                complete = false;
+                continue;
+            };
+            let Some(path_norm) =
+                job.path_key.as_ref().and_then(subject_key_path)
+            else {
+                warn!(
+                    scan = %run.scan_id(),
+                    library = %run.library_id(),
+                    job = %job.job_id.0,
+                    "completed index job omitted durable path identity"
+                );
+                complete = false;
+                continue;
+            };
+
+            match self
+                .catalog_events
+                .publish_reconciled_indexed_media(
+                    run.library_id(),
+                    path_norm,
+                    media_id,
+                    change,
+                )
+                .await
+            {
+                Ok(Some(frame)) => {
+                    tracing::debug!(
+                        scan = %run.scan_id(),
+                        library = %run.library_id(),
+                        job = %job.job_id.0,
+                        sequence = frame.sequence,
+                        "recovered catalog projection from durable index job"
+                    );
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    complete = false;
+                    warn!(
+                        scan = %run.scan_id(),
+                        library = %run.library_id(),
+                        job = %job.job_id.0,
+                        error = %err,
+                        "failed to recover catalog projection from durable index job"
+                    );
+                }
+            }
+        }
+
+        complete
+    }
+
+    fn catalog_index_jobs_terminal(jobs: &[DurableJobState]) -> bool {
+        jobs.iter()
+            .filter(|job| job.kind == JobKind::IndexUpsert)
+            .all(DurableJobState::is_terminal)
     }
 
     async fn poll_series_bundle_finalizations(&self) {
@@ -3744,27 +6122,73 @@ impl ScanRunAggregatorInner {
         let mut guard = self.series_bundles.lock().await;
         guard.retain(|library_id, entry| {
             active_libraries.contains(library_id)
+                || !entry.finalizations_in_flight.is_empty()
                 || now.duration_since(entry.last_touched_at)
                     < SERIES_BUNDLE_TRACKER_IDLE_TTL
         });
     }
 
     async fn handle_job_event(&self, event: JobEvent) {
-        let run = {
+        let candidates: Vec<Arc<ScanRun>> = {
             let guard = self.runs.read().await;
-            guard.get(&event.meta.correlation_id).cloned()
+            guard.values().cloned().collect()
         };
+        let shared_job_id = match &event.payload {
+            JobEventPayload::Completed { job_id, .. }
+            | JobEventPayload::Failed { job_id, .. }
+            | JobEventPayload::DeadLettered { job_id, .. } => Some(*job_id),
+            _ => None,
+        };
+        let mut runs = Vec::new();
+        for candidate in candidates {
+            let correlation_match =
+                candidate.correlation_id() == event.meta.correlation_id;
+            let tracked_job_match = if correlation_match {
+                false
+            } else if let Some(job_id) = shared_job_id {
+                candidate.library_id() == event.meta.library_id
+                    && candidate.tracks_job_id(job_id).await
+            } else {
+                false
+            };
+            if correlation_match || tracked_job_match {
+                runs.push(candidate);
+            }
+        }
 
         self.observe_series_bundle_job_event(&event).await;
 
-        if let Some(run) = run {
-            let completed = match event.payload {
+        if runs.is_empty() {
+            self.handle_orphan_event(&event).await;
+            return;
+        }
+
+        for run in runs {
+            let terminalization_allowed = self
+                .reconciliation_gate
+                .allows_terminal(run.correlation_id())
+                .await;
+            let completed = match &event.payload {
                 JobEventPayload::Enqueued { kind, job_id, .. }
                 | JobEventPayload::Dequeued { kind, job_id, .. } => {
                     run.record_job_enqueued(
                         &event.meta.idempotency_key,
-                        job_id,
-                        kind,
+                        *job_id,
+                        *kind,
+                        event.meta.path_key.clone(),
+                    )
+                    .await;
+                    false
+                }
+                JobEventPayload::Merged {
+                    existing_job_id,
+                    kind,
+                    ..
+                } => {
+                    run.record_job_enqueued(
+                        &event.meta.idempotency_key,
+                        *existing_job_id,
+                        *kind,
                         event.meta.path_key.clone(),
                     )
                     .await;
@@ -3773,13 +6197,18 @@ impl ScanRunAggregatorInner {
                 JobEventPayload::Completed { kind, job_id, .. } => {
                     run.record_job_completed(
                         &event.meta.idempotency_key,
-                        job_id,
-                        kind,
+                        *job_id,
+                        *kind,
                         event.meta.path_key.clone(),
                     )
                     .await;
-                    run.try_complete(self.quiescence_chrono, self.stall_timeout)
-                        .await
+                    terminalization_allowed
+                        && run
+                            .try_complete(
+                                self.quiescence_chrono,
+                                self.stall_timeout,
+                            )
+                            .await
                 }
                 JobEventPayload::Failed {
                     kind,
@@ -3787,17 +6216,39 @@ impl ScanRunAggregatorInner {
                     job_id,
                     ..
                 } => {
+                    if *retryable {
+                        // The runtime can publish this event even when
+                        // q.fail returned an error, so it is not proof that
+                        // PostgreSQL actually moved the lease to Ready (or
+                        // exhausted it to DeadLetter). Keep terminalization
+                        // gated until an exact job-ID read observes the
+                        // authoritative retry outcome.
+                        self.reconciliation_gate
+                            .require_retryable_failure(
+                                run.correlation_id(),
+                                *job_id,
+                            )
+                            .await;
+                        self.durable_reconciliation_pacing
+                            .forget(run.correlation_id())
+                            .await;
+                    }
                     run.record_job_failure(
                         &event.meta.idempotency_key,
-                        job_id,
-                        kind,
+                        *job_id,
+                        *kind,
                         None,
                         event.meta.path_key.clone(),
-                        retryable,
+                        *retryable,
                     )
                     .await;
 
-                    if !retryable {
+                    if *retryable {
+                        // Keep the broadcast receiver draining. The dedicated
+                        // durable worker observes the reset gate on its next
+                        // tick and confirms the authoritative retry outcome.
+                        false
+                    } else if terminalization_allowed {
                         run.try_complete(
                             self.quiescence_chrono,
                             self.stall_timeout,
@@ -3810,19 +6261,24 @@ impl ScanRunAggregatorInner {
                 JobEventPayload::DeadLettered { kind, job_id, .. } => {
                     run.record_job_dead_lettered(
                         &event.meta.idempotency_key,
-                        job_id,
-                        kind,
+                        *job_id,
+                        *kind,
                         None,
                         event.meta.path_key.clone(),
                     )
                     .await;
-                    run.try_complete(self.quiescence_chrono, self.stall_timeout)
-                        .await
+                    terminalization_allowed
+                        && run
+                            .try_complete(
+                                self.quiescence_chrono,
+                                self.stall_timeout,
+                            )
+                            .await
                 }
                 JobEventPayload::LeaseRenewed { job_id, .. } => {
                     run.record_job_lease_renewed(
                         &event.meta.idempotency_key,
-                        job_id,
+                        *job_id,
                         event.meta.path_key.clone(),
                     )
                     .await;
@@ -3834,8 +6290,6 @@ impl ScanRunAggregatorInner {
             if completed {
                 self.on_run_completed(run.clone()).await;
             }
-        } else {
-            self.handle_orphan_event(&event).await;
         }
     }
 
@@ -3849,19 +6303,6 @@ impl ScanRunAggregatorInner {
             .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
         entry.touch(now);
         entry.tracker.observe_job_event(event);
-
-        drop(guard);
-
-        match &event.payload {
-            JobEventPayload::Completed { .. }
-            | JobEventPayload::DeadLettered { .. }
-            | JobEventPayload::Failed {
-                retryable: false, ..
-            } => {
-                self.try_emit_series_bundle_finalized(library_id).await;
-            }
-            _ => {}
-        }
     }
 
     async fn handle_scan_event(&self, event: ScanEvent) {
@@ -3897,10 +6338,55 @@ impl ScanRunAggregatorInner {
                         guard.get(&correlation_id).cloned()
                     };
 
-                    if let Some(run) = run
-                        && run.record_seed_completed(&summary).await
-                    {
-                        self.on_run_completed(run).await;
+                    if let Some(run) = run {
+                        let has_enrollment =
+                            !summary.enrolled_job_ids.is_empty();
+                        // Seed completion changes whether the registration
+                        // snapshot is authoritative, even for an empty run.
+                        // Let the dedicated worker retry immediately.
+                        self.durable_reconciliation_pacing
+                            .forget(correlation_id)
+                            .await;
+                        if has_enrollment {
+                            // Even if every enqueue notification was dropped,
+                            // the seed mailbox has the exact durable job IDs.
+                            // Force a PostgreSQL read before a zero-item run
+                            // can make a terminal decision.
+                            self.reconciliation_gate
+                                .require_all([correlation_id])
+                                .await;
+                        }
+                        let terminalization_allowed = self
+                            .reconciliation_gate
+                            .allows_terminal(correlation_id)
+                            .await;
+                        let completed = run
+                            .record_seed_completed(
+                                &summary,
+                                terminalization_allowed,
+                            )
+                            .await;
+                        if has_enrollment
+                            && let Err(err) = self
+                                .reconcile_run(&run, "post_seed_enrollment")
+                                .await
+                        {
+                            self.durable_reconciliation_pacing
+                                .defer_next_attempt(
+                                    correlation_id,
+                                    Instant::now(),
+                                )
+                                .await;
+                            warn!(
+                                scan = %run.scan_id(),
+                                library = %run.library_id(),
+                                error = %err,
+                                "post-seed durable reconciliation failed; terminalization remains gated"
+                            );
+                        }
+                        if completed {
+                            self.on_run_completed(run).await;
+                        }
                     }
                 }
             }
@@ -4007,31 +6493,41 @@ impl ScanRunAggregatorInner {
     }
 
     async fn try_emit_series_bundle_finalized(&self, library_id: LibraryId) {
-        let candidates: Vec<SeriesBundleFinalization> = {
-            let guard = self.series_bundles.lock().await;
-            guard
-                .get(&library_id)
-                .map(|entry| entry.tracker.finalization_candidates())
-                .unwrap_or_default()
-        };
+        loop {
+            // The job-progress and scan-domain workers can both make the same
+            // bundle eligible at nearly the same time. Claim the candidate
+            // while holding the tracker mutex so only one worker can publish
+            // it across the asynchronous database/event projection below.
+            let finalization = {
+                let mut guard = self.series_bundles.lock().await;
+                guard
+                    .get_mut(&library_id)
+                    .and_then(SeriesBundleTrackerEntry::claim_next_finalization)
+            };
+            let Some(finalization) = finalization else {
+                break;
+            };
 
-        for finalization in candidates {
             let receivers = self.catalog_events.receiver_count();
-            let Some(frame) = self
+            let frame = self
                 .catalog_events
                 .publish_series_bundle_finalized(
                     finalization.library_id,
                     finalization.series_id,
                 )
-                .await
-            else {
-                continue;
-            };
+                .await;
 
             let mut guard = self.series_bundles.lock().await;
             if let Some(entry) = guard.get_mut(&library_id) {
-                entry.tracker.mark_finalized(&finalization.series_root_path);
+                entry.settle_finalization(&finalization, frame.is_some());
             }
+            drop(guard);
+
+            let Some(frame) = frame else {
+                // Publication failures are retried by the periodic poll. Do
+                // not immediately reclaim the same candidate in a tight loop.
+                break;
+            };
 
             info!(
                 library = %finalization.library_id,
@@ -4052,7 +6548,9 @@ impl ScanRunAggregatorInner {
         let library_id = run.library_id();
         let command = LibraryActorCommand::Start {
             mode: StartMode::Maintenance,
-            correlation_id: Some(Uuid::now_v7()),
+            // The actor uses the ending run correlation as a generation guard:
+            // a delayed Maintenance(A) cannot replace a newer Bulk(B).
+            correlation_id: Some(run.correlation_id()),
         };
 
         match self.orchestrator.command_library(library_id, command).await {

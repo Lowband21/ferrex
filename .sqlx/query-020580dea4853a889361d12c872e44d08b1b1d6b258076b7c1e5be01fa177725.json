@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE library_scan_runs\n            SET status = COALESCE($2::varchar, status),\n                completed_items = $3,\n                total_items = $4,\n                retrying_items = $5,\n                dead_lettered_items = $6,\n                current_path = $7,\n                sequence = GREATEST(sequence, $8),\n                updated_at = NOW()\n            WHERE scan_id = $1\n              AND status::text IN ('pending','running','paused')\n            RETURNING\n                scan_id,\n                library_id,\n                mode as \"mode!\",\n                run_key as \"run_key!\",\n                correlation_id,\n                status as \"status!\",\n                completed_items as \"completed_items!\",\n                total_items as \"total_items!\",\n                retrying_items as \"retrying_items!\",\n                dead_lettered_items as \"dead_lettered_items!\",\n                current_path,\n                last_error,\n                sequence as \"sequence!\",\n                started_at,\n                terminal_at,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            SELECT\n                scan_id as \"scan_id!\",\n                library_id as \"library_id!\",\n                mode as \"mode!\",\n                run_key as \"run_key!\",\n                correlation_id,\n                status as \"status!\",\n                completed_items as \"completed_items!\",\n                total_items as \"total_items!\",\n                retrying_items as \"retrying_items!\",\n                dead_lettered_items as \"dead_lettered_items!\",\n                current_path,\n                last_error,\n                sequence as \"sequence!\",\n                started_at,\n                terminal_at,\n                created_at,\n                updated_at\n            FROM library_scan_runs\n            WHERE scan_id = $1\n            ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "scan_id",
+        "name": "scan_id!",
         "type_info": "Uuid"
       },
       {
         "ordinal": 1,
-        "name": "library_id",
+        "name": "library_id!",
         "type_info": "Uuid"
       },
       {
@@ -91,14 +91,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Varchar",
-        "Int8",
-        "Int8",
-        "Int8",
-        "Int8",
-        "Text",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -121,5 +114,5 @@
       false
     ]
   },
-  "hash": "43c6d42f218e18ee4ddb897e22a2b2c074bc70482c12fb15167962764f279b4e"
+  "hash": "020580dea4853a889361d12c872e44d08b1b1d6b258076b7c1e5be01fa177725"
 }

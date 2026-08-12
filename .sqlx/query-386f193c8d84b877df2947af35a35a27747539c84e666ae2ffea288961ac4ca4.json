@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, attempts, payload, correlation_id\n            FROM orchestrator_jobs\n            WHERE lease_id = $1::uuid AND state = 'leased'\n            ",
+  "query": "\n            SELECT id, attempts, payload, correlation_id\n            FROM orchestrator_jobs\n            WHERE lease_id = $1::uuid AND state = 'leased'\n            FOR UPDATE\n            ",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       true
     ]
   },
-  "hash": "7ab16258ea647055c103d95b33f6c6ee9f94f91916925f9209306ae197f0cd12"
+  "hash": "386f193c8d84b877df2947af35a35a27747539c84e666ae2ffea288961ac4ca4"
 }

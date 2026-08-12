@@ -7,7 +7,10 @@ use crate::{
     common::ui_utils::icon_text,
     domains::{
         auth::permissions::StatePermissionExt,
-        ui::{messages::UiMessage, settings_ui::SettingsUiMessage, theme},
+        ui::{
+            LibraryMaintenanceAction, messages::UiMessage,
+            settings_ui::SettingsUiMessage, theme,
+        },
     },
     state::State,
 };
@@ -27,6 +30,18 @@ use lucide_icons::Icon;
 )]
 pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
     let permissions = state.permission_checker();
+    let maintenance_pending = state
+        .domains
+        .ui
+        .state
+        .library_maintenance_confirmation
+        .is_some()
+        || state
+            .domains
+            .ui
+            .state
+            .library_maintenance_in_flight
+            .is_some();
 
     // Check if user has any admin permissions
     if !permissions.can_view_admin_dashboard() {
@@ -77,6 +92,24 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
         .align_y(iced::Alignment::Center),
     );
 
+    if let Some(error) = &state.domains.ui.state.error_message {
+        content = content.push(
+            container(
+                row![
+                    icon_text(Icon::OctagonAlert),
+                    text(error)
+                        .size(15)
+                        .color(theme::MediaServerTheme::ERROR_COLOR),
+                ]
+                .spacing(12)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding([12, 16])
+            .width(Length::Fill)
+            .style(theme::Container::ErrorBox.style()),
+        );
+    }
+
     // Build sections based on permissions
     let mut sections_row_1 = row![].spacing(20).align_y(iced::Alignment::Start);
 
@@ -87,6 +120,16 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
 
     // Library Management section (only if user can manage libraries)
     if permissions.can_view_admin_dashboard() {
+        let manage_libraries = button("Manage Libraries")
+            .style(theme::Button::Primary.style())
+            .padding([12, 20])
+            .width(Length::Fill);
+        let manage_libraries = if maintenance_pending {
+            manage_libraries
+        } else {
+            manage_libraries
+                .on_press(SettingsUiMessage::ShowLibraryManagement.into())
+        };
         sections_row_1 = sections_row_1.push(
             container(
                 column![
@@ -105,11 +148,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
                     ]
                     .align_y(iced::Alignment::Center),
                     Space::new().height(20),
-                    button("Manage Libraries")
-                        .on_press(SettingsUiMessage::ShowLibraryManagement.into())
-                        .style(theme::Button::Primary.style())
-                        .padding([12, 20])
-                        .width(Length::Fill),
+                    manage_libraries,
                 ]
                 .spacing(15)
                 .padding(20),
@@ -122,6 +161,15 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
 
     // User Management section (only if user can manage users)
     if permissions.can_view_users() {
+        let manage_users = button("Manage Users")
+            .style(theme::Button::Primary.style())
+            .padding([12, 20])
+            .width(Length::Fill);
+        let manage_users = if maintenance_pending {
+            manage_users
+        } else {
+            manage_users.on_press(SettingsUiMessage::ShowUserManagement.into())
+        };
         if has_row_1_content {
             sections_row_1 = sections_row_1.push(Space::new().width(20));
         }
@@ -143,11 +191,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
                     ]
                     .align_y(iced::Alignment::Center),
                     Space::new().height(20),
-                    button("Manage Users")
-                        .on_press(SettingsUiMessage::ShowUserManagement.into())
-                        .style(theme::Button::Primary.style())
-                        .padding([12, 20])
-                        .width(Length::Fill),
+                    manage_users,
                 ]
                 .spacing(15)
                 .padding(20),
@@ -195,6 +239,28 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
 
     // Dev Tools section (only if user can reset database or is admin)
     if permissions.can_reset_database() {
+        let label = if state.domains.ui.state.library_maintenance_in_flight
+            == Some(LibraryMaintenanceAction::ClearAllData)
+        {
+            "Clearing…"
+        } else {
+            "Clear All Data"
+        };
+        let clear_button = button(label)
+            .style(theme::Button::Danger.style())
+            .padding([12, 20])
+            .width(Length::Fill);
+        let clear_button = if maintenance_pending {
+            clear_button
+        } else {
+            clear_button.on_press(
+                SettingsUiMessage::ShowLibraryMaintenanceConfirm(
+                    LibraryMaintenanceAction::ClearAllData,
+                )
+                .into(),
+            )
+        };
+
         if has_row_2_content {
             sections_row_2 = sections_row_2.push(Space::new().width(20));
         }
@@ -216,13 +282,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
                     ]
                     .align_y(iced::Alignment::Center),
                     Space::new().height(20),
-                    button("Dev Tools")
-                        .on_press(
-                            SettingsUiMessage::ShowClearDatabaseConfirm.into()
-                        )
-                        .style(theme::Button::Danger.style())
-                        .padding([12, 20])
-                        .width(Length::Fill),
+                    clear_button,
                 ]
                 .spacing(15)
                 .padding(20),

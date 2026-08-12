@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_view_history",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "30117d6189bea05be2b7bbd40e2e7c5ce8f129fbc4cffff0304dc78b0aebb115"
+}

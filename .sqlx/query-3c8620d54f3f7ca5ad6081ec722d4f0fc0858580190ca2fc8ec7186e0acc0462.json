@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE orchestrator_jobs\n        SET state = 'ready',\n            dependency_key = NULL,\n            available_at = NOW(),\n            updated_at = NOW()\n        WHERE kind = $1\n          AND state = 'deferred'\n          AND library_id = $2\n          AND dependency_key = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3c8620d54f3f7ca5ad6081ec722d4f0fc0858580190ca2fc8ec7186e0acc0462"
+}

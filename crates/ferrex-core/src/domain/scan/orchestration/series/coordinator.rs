@@ -97,7 +97,11 @@ impl SeriesCoordinator {
         Self { states, resolver }
     }
 
-    /// Record that a series root was discovered by folder scanning.
+    /// Enroll a series root for resolution before its job can be enqueued.
+    ///
+    /// This explicitly marks every non-resolved root as a newly discovered
+    /// generation, so a terminalizing resolver can distinguish fresh work from
+    /// the attempt whose result it is trying to persist.
     pub async fn record_root_discovery(
         &self,
         library_id: LibraryId,
@@ -106,7 +110,7 @@ impl SeriesCoordinator {
     ) -> Result<SeriesDiscoveryOutcome> {
         let state = self
             .states
-            .mark_discovered(library_id, series_root_path, hint)
+            .enroll_resolution_generation(library_id, series_root_path, hint)
             .await?;
         Ok(SeriesDiscoveryOutcome::new(state))
     }
@@ -512,6 +516,30 @@ mod tests {
             Some("provider returned 404")
         );
 
+        let decision = coordinator
+            .prepare_episode_dependency(
+                library_id,
+                &episode_hierarchy(series_root.clone()),
+            )
+            .await
+            .expect("late episode observes terminal series state");
+        assert_eq!(
+            decision,
+            EpisodeDependencyDecision::Deferred {
+                dependency_key: DependencyKey::series_root(&series_root),
+            }
+        );
+        assert_eq!(
+            states
+                .get(library_id, &series_root)
+                .await
+                .expect("state lookup")
+                .expect("failed state remains")
+                .status,
+            SeriesScanStatus::Failed,
+            "late episode discovery must not erase terminal failure"
+        );
+
         let releaser = RecordingReleaser::default();
         coordinator
             .release_blocked_episode_dependencies(
@@ -520,11 +548,82 @@ mod tests {
                 &series_root,
             )
             .await
-            .expect("release dependency");
+            .expect("terminal resolver releases dependency");
 
         assert_eq!(
             releaser.releases.lock().await.as_slice(),
             &[(library_id, series_root)]
+        );
+    }
+
+    #[tokio::test]
+    async fn fresh_root_enrollment_cannot_release_from_historical_failure() {
+        let (coordinator, states) = coordinator_with_states();
+        let library_id = lib(70);
+        let series_root = root("/demo/Shows/Retry After Failure");
+        let job = SeriesResolveJob {
+            library_id,
+            series_root_path: series_root.clone(),
+            hint: Some(hint("Retry After Failure")),
+            folder_name: "Retry After Failure".into(),
+            scan_reason: ScanReason::BulkSeed,
+        };
+
+        coordinator
+            .record_resolution_failure(
+                &job,
+                "historical provider failure".into(),
+            )
+            .await
+            .expect("record historical failure");
+
+        // Root discovery enrolls the fresh generation before the caller can
+        // enqueue SeriesResolve. At this point the resolver intentionally has
+        // not called mark_seeded yet.
+        let enrollment = coordinator
+            .record_root_discovery(
+                library_id,
+                series_root.clone(),
+                job.hint.clone(),
+            )
+            .await
+            .expect("enroll fresh resolver generation");
+        assert!(enrollment.should_enqueue_resolution());
+        assert_eq!(enrollment.state().status, SeriesScanStatus::Discovered);
+        assert!(enrollment.state().failure_reason.is_none());
+
+        let decision = coordinator
+            .prepare_episode_dependency(
+                library_id,
+                &episode_hierarchy(series_root.clone()),
+            )
+            .await
+            .expect("episode waits for freshly enrolled resolver");
+        assert_eq!(
+            decision,
+            EpisodeDependencyDecision::Deferred {
+                dependency_key: DependencyKey::series_root(&series_root),
+            }
+        );
+
+        let seeded = states
+            .mark_seeded(library_id, series_root.clone(), job.hint.clone())
+            .await
+            .expect("resolver starts fresh generation");
+        assert_eq!(seeded.status, SeriesScanStatus::Seeded);
+
+        coordinator
+            .record_resolution_failure(&job, "fresh provider failure".into())
+            .await
+            .expect("fresh generation reaches terminal failure");
+        assert_eq!(
+            states
+                .get(library_id, &series_root)
+                .await
+                .expect("fresh terminal state lookup")
+                .expect("fresh terminal state exists")
+                .status,
+            SeriesScanStatus::Failed
         );
     }
 

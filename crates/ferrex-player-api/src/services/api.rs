@@ -8,6 +8,7 @@ use crate::api_types::{DemoResetRequest, DemoStatus};
 use async_trait::async_trait;
 use ferrex_core::{
     api::types::{
+        admin::{ResetDatabaseRequest, ResetDatabaseResult},
         collections::*,
         setup::{ConfirmClaimResponse, StartClaimResponse},
     },
@@ -17,12 +18,12 @@ use ferrex_core::{
         ImageManifestResponse, LatestProgressResponse, Library, LibraryId,
         Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
         MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
-        MovieBatchSyncResponse, NextEpisode, ScanCommandAcceptedResponse,
-        ScanCommandRequest, ScanConfig, ScanMetrics, SeasonWatchStatus,
-        SeriesBundleFetchRequest, SeriesBundleSyncRequest,
-        SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus,
-        StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
-        UserPermissions, UserWatchState,
+        MovieBatchSyncResponse, NextEpisode, ResetLibraryRequest,
+        ResetLibraryResult, ScanCommandAcceptedResponse, ScanCommandRequest,
+        ScanConfig, ScanMetrics, SeasonWatchStatus, SeriesBundleFetchRequest,
+        SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
+        SeriesWatchStatus, StartScanRequest, UpdateLibraryRequest,
+        UpdateProgressRequest, User, UserPermissions, UserWatchState,
     },
 };
 use ferrex_model::image::ImageQuery;
@@ -154,6 +155,18 @@ pub trait ApiService: Send + Sync + Debug {
     ) -> RepositoryResult<()>;
     /// Delete a library on the server
     async fn delete_library(&self, id: LibraryId) -> RepositoryResult<()>;
+    /// Atomically clear a library while preserving its configuration and ID.
+    async fn reset_library(
+        &self,
+        id: LibraryId,
+        request: ResetLibraryRequest,
+    ) -> RepositoryResult<ResetLibraryResult>;
+
+    /// Perform an authenticated administrative database reset.
+    async fn reset_database(
+        &self,
+        request: ResetDatabaseRequest,
+    ) -> RepositoryResult<ResetDatabaseResult>;
 
     /// Start a library scan
     async fn start_library_scan(

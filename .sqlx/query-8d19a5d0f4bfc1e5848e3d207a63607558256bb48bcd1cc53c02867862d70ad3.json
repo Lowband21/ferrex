@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM setup_claims",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "8d19a5d0f4bfc1e5848e3d207a63607558256bb48bcd1cc53c02867862d70ad3"
+}

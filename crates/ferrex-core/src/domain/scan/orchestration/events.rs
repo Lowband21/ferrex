@@ -154,6 +154,11 @@ pub struct ScanSeedSummary {
     pub correlation_id: Option<Uuid>,
     pub mode: ScanSeedMode,
     pub queued_folders: usize,
+    /// Durable queue IDs enrolled by the seed batch. For merged work this is
+    /// the existing shared job ID, allowing recovery even if enqueue events
+    /// were dropped from the broadcast stream.
+    #[serde(default)]
+    pub enrolled_job_ids: Vec<JobId>,
     pub completed_at: DateTime<Utc>,
 }
 
@@ -164,6 +169,14 @@ pub enum ScanEvent {
         context: Box<FolderScanContext>,
         /// Why this folder should be scanned; used to determine priority
         reason: ScanReason,
+        /// Scan-run lineage inherited by the child folder job.
+        #[serde(default)]
+        correlation_id: Option<Uuid>,
+        /// Durable child job created before this observational event was
+        /// published. Older producers omit this field and are still routed
+        /// through the compatibility enqueue path.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        durable_job_id: Option<JobId>,
     },
     MediaFileDiscovered(Box<MediaFileDiscovered>),
     FolderScanCompleted(FolderScanSummary),

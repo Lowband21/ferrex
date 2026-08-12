@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_permissions SET granted_by = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "4282f759559fa6735c125d6b13c32f6a6c267387d8504cd923a22a38843505ff"
+}

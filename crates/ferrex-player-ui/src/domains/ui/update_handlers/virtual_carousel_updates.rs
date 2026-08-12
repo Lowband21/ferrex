@@ -1619,7 +1619,7 @@ fn handle_release_snap_align(
     Task::none()
 }
 
-pub(super) fn maybe_send_snapshot_for_key(
+pub(crate) fn maybe_send_snapshot_for_key(
     state: &mut State,
     key: &CarouselKey,
     force: bool,

@@ -11,6 +11,9 @@ use crate::{
 };
 use ferrex_player_foundation::repository::{RepositoryError, RepositoryResult};
 
+use ferrex_core::api::types::admin::{
+    ResetDatabaseRequest, ResetDatabaseResult,
+};
 use ferrex_core::api::types::collections::*;
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
@@ -19,8 +22,9 @@ use ferrex_core::player_prelude::{
     LibraryMediaResponse, Media, MediaID, MediaQuery, MediaRootBrowseResponse,
     MediaWithStatus, MovieBatchFetchRequest, MovieBatchId,
     MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
-    ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
-    SeasonWatchStatus, SeriesBundleFetchRequest, SeriesBundleSyncRequest,
+    ResetLibraryRequest, ResetLibraryResult, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanConfig, ScanMetrics, SeasonWatchStatus,
+    SeriesBundleFetchRequest, SeriesBundleSyncRequest,
     SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus, SortBy, SortOrder,
     StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
     UserPermissions, UserWatchState,
@@ -990,6 +994,32 @@ impl ApiService for ApiClientAdapter {
             .await
             .map_err(|e| RepositoryError::DeleteFailed(e.to_string()))?;
         Ok(())
+    }
+
+    async fn reset_library(
+        &self,
+        id: LibraryId,
+        request: ResetLibraryRequest,
+    ) -> RepositoryResult<ResetLibraryResult> {
+        let path = replace_param(
+            v1::libraries::RESET,
+            "{id}",
+            id.as_uuid().to_string(),
+        );
+        self.client
+            .post(&path, &request)
+            .await
+            .map_err(|e| RepositoryError::DeleteFailed(e.to_string()))
+    }
+
+    async fn reset_database(
+        &self,
+        request: ResetDatabaseRequest,
+    ) -> RepositoryResult<ResetDatabaseResult> {
+        self.client
+            .post(v1::admin::dev::RESET_DATABASE, &request)
+            .await
+            .map_err(|e| RepositoryError::DeleteFailed(e.to_string()))
     }
 
     async fn start_library_scan(

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO series_scan_state (\n                library_id, series_root_path, status,\n                series_title, series_slug, series_year, series_region,\n                attempts, created_at, updated_at\n            )\n            VALUES (\n                $1, $2, 'discovered'::series_scan_status,\n                $3, $4, $5, $6, 0, NOW(), NOW()\n            )\n            ON CONFLICT (library_id, series_root_path)\n            DO UPDATE SET\n                series_title = COALESCE(\n                    EXCLUDED.series_title,\n                    series_scan_state.series_title\n                ),\n                series_slug = COALESCE(\n                    EXCLUDED.series_slug,\n                    series_scan_state.series_slug\n                ),\n                series_year = COALESCE(\n                    EXCLUDED.series_year,\n                    series_scan_state.series_year\n                ),\n                series_region = COALESCE(\n                    EXCLUDED.series_region,\n                    series_scan_state.series_region\n                ),\n                status = CASE\n                    WHEN series_scan_state.status <> 'resolved'\n                        THEN 'discovered'::series_scan_status\n                    ELSE series_scan_state.status\n                END,\n                series_id = CASE\n                    WHEN series_scan_state.status <> 'resolved' THEN NULL\n                    ELSE series_scan_state.series_id\n                END,\n                resolved_at = CASE\n                    WHEN series_scan_state.status <> 'resolved' THEN NULL\n                    ELSE series_scan_state.resolved_at\n                END,\n                failed_at = CASE\n                    WHEN series_scan_state.status <> 'resolved' THEN NULL\n                    ELSE series_scan_state.failed_at\n                END,\n                failure_reason = CASE\n                    WHEN series_scan_state.status <> 'resolved' THEN NULL\n                    ELSE series_scan_state.failure_reason\n                END,\n                updated_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int2",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c1e0c26a5bd13c4b288de62d41219bb2e5f37d2792050e6a00b173bd6d976353"
+}

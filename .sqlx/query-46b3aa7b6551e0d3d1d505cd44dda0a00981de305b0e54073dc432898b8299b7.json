@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM persons",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "46b3aa7b6551e0d3d1d505cd44dda0a00981de305b0e54073dc432898b8299b7"
+}

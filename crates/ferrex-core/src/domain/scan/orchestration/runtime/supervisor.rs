@@ -179,6 +179,12 @@ where
         self.scheduler.clone()
     }
 
+    /// Remove scheduler counts and reservations after a library's durable jobs
+    /// have been deleted.
+    pub async fn forget_library_scheduler_state(&self, library_id: LibraryId) {
+        self.scheduler.forget_library(library_id).await;
+    }
+
     pub async fn register_library_actor(
         &self,
         library_id: LibraryId,
@@ -187,6 +193,33 @@ where
         let mut guard = self.library_actors.write().await;
         guard.insert(library_id, actor);
         Ok(())
+    }
+
+    /// Remove and shut down a library actor so no new work can be accepted for
+    /// a library that is about to be deleted.
+    pub async fn unregister_library_actor(
+        &self,
+        library_id: LibraryId,
+    ) -> Result<bool> {
+        let actor = {
+            let mut guard = self.library_actors.write().await;
+            guard.remove(&library_id)
+        };
+
+        let Some(actor) = actor else {
+            return Ok(false);
+        };
+
+        let shutdown_result = actor
+            .lock()
+            .await
+            .handle_command(LibraryActorCommand::Shutdown)
+            .await;
+        if let Err(error) = shutdown_result {
+            self.library_actors.write().await.insert(library_id, actor);
+            return Err(error);
+        }
+        Ok(true)
     }
 
     pub async fn library_actor(
@@ -203,12 +236,20 @@ where
     }
 
     pub async fn start(&self) -> Result<()> {
+        let recovered_expired = self.queue.scan_expired_leases().await?;
+        if recovered_expired > 0 {
+            tracing::info!(
+                recovered_expired,
+                "recovered expired leases before scheduler priming"
+            );
+        }
         self.task_graph
             .prime_scheduler_from_persistence(self.queue(), self.scheduler())
             .await?;
 
         self.task_graph
             .spawn_scheduler_observer(
+                self.queue(),
                 self.events(),
                 self.scheduler(),
                 self.correlations.clone(),
@@ -263,6 +304,7 @@ where
         self.task_graph
             .spawn_housekeeper(
                 self.queue(),
+                self.scheduler(),
                 std::time::Duration::from_millis(
                     self.config.lease.housekeeper_interval_ms,
                 ),
@@ -549,14 +591,19 @@ mod tests {
         DequeueRequest, JobLease, LeaseId, LeaseRenewal, QueueSelector,
     };
     use crate::domain::scan::orchestration::persistence::PostgresQueueService;
-    use crate::domain::scan::orchestration::queue::ReadyQueueCount;
+    use crate::domain::scan::orchestration::queue::{
+        FailOutcome, QueueTransitionOutcome, ReadyQueueCount,
+    };
     use crate::domain::scan::orchestration::runtime::InProcJobEventBus;
     use crate::types::ids::LibraryId;
     use async_trait::async_trait;
     use sqlx::PgPool;
     use std::collections::{HashMap, VecDeque};
     use std::fmt;
-    use std::sync::Arc;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     use std::time::Duration;
     use tokio::sync::Mutex as TokioMutex;
     use tokio::time;
@@ -645,6 +692,28 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct FirstCallNeverReturnsDispatcher {
+        calls: AtomicUsize,
+    }
+
+    impl FirstCallNeverReturnsDispatcher {
+        fn call_count(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl JobDispatcher for FirstCallNeverReturnsDispatcher {
+        async fn dispatch(&self, _lease: &JobLease) -> DispatchStatus {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                std::future::pending::<DispatchStatus>().await
+            } else {
+                DispatchStatus::Success
+            }
+        }
+    }
+
     async fn record_dispatch_start(
         state: &TokioMutex<DispatcherState>,
         lease: &JobLease,
@@ -691,10 +760,29 @@ mod tests {
         dead_letters: usize,
         renewals: usize,
         expired_scans: usize,
+        complete_outcomes: VecDeque<ScriptedTransitionOutcome>,
+        fail_outcomes: VecDeque<ScriptedFailOutcome>,
+        dead_letter_outcomes: VecDeque<ScriptedTransitionOutcome>,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum ScriptedTransitionOutcome {
+        Applied,
+        Requeued,
+        Error,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum ScriptedFailOutcome {
+        RetryScheduled,
+        Requeued,
+        Terminal(JobState),
     }
 
     #[derive(Clone, Copy, Debug, Default)]
     struct RecordingQueueStats {
+        ready: usize,
+        leased: usize,
         completed: usize,
         failures: usize,
         dead_letters: usize,
@@ -718,11 +806,29 @@ mod tests {
         async fn stats(&self) -> RecordingQueueStats {
             let state = self.state.lock().await;
             RecordingQueueStats {
+                ready: state.ready.len(),
+                leased: state.leased.len(),
                 completed: state.completed,
                 failures: state.failures,
                 dead_letters: state.dead_letters,
                 renewals: state.renewals,
             }
+        }
+
+        async fn script_complete(&self, outcome: ScriptedTransitionOutcome) {
+            self.state.lock().await.complete_outcomes.push_back(outcome);
+        }
+
+        async fn script_fail(&self, outcome: ScriptedFailOutcome) {
+            self.state.lock().await.fail_outcomes.push_back(outcome);
+        }
+
+        async fn script_dead_letter(&self, outcome: ScriptedTransitionOutcome) {
+            self.state
+                .lock()
+                .await
+                .dead_letter_outcomes
+                .push_back(outcome);
         }
     }
 
@@ -803,6 +909,28 @@ mod tests {
             Ok(())
         }
 
+        async fn complete_with_outcome(
+            &self,
+            lease_id: LeaseId,
+        ) -> Result<QueueTransitionOutcome> {
+            let scripted =
+                self.state.lock().await.complete_outcomes.pop_front();
+            match scripted.unwrap_or(ScriptedTransitionOutcome::Applied) {
+                ScriptedTransitionOutcome::Applied => {
+                    self.complete(lease_id).await?;
+                    Ok(QueueTransitionOutcome::Applied)
+                }
+                ScriptedTransitionOutcome::Requeued => {
+                    Err(MediaError::Internal(
+                        "scripted completion cannot requeue".into(),
+                    ))
+                }
+                ScriptedTransitionOutcome::Error => Err(MediaError::Internal(
+                    "scripted complete persistence failure".into(),
+                )),
+            }
+        }
+
         async fn fail(
             &self,
             lease_id: LeaseId,
@@ -827,6 +955,60 @@ mod tests {
             Ok(())
         }
 
+        async fn fail_with_outcome(
+            &self,
+            lease_id: LeaseId,
+            retryable: bool,
+            error: Option<String>,
+        ) -> Result<FailOutcome> {
+            let scripted = self.state.lock().await.fail_outcomes.pop_front();
+            let outcome = scripted.unwrap_or(if retryable {
+                ScriptedFailOutcome::RetryScheduled
+            } else {
+                ScriptedFailOutcome::Terminal(JobState::Failed)
+            });
+
+            match outcome {
+                ScriptedFailOutcome::RetryScheduled => {
+                    self.fail(lease_id, true, error).await?;
+                    Ok(FailOutcome::RetryScheduled)
+                }
+                ScriptedFailOutcome::Requeued => {
+                    let mut state = self.state.lock().await;
+                    let mut lease =
+                        state.leased.remove(&lease_id).ok_or_else(|| {
+                            MediaError::NotFound(format!(
+                                "lease {} not found",
+                                lease_id.0
+                            ))
+                        })?;
+                    lease.job.state = JobState::Ready;
+                    lease.job.attempts = 0;
+                    lease.job.lease_owner = None;
+                    lease.job.lease_expires_at = None;
+                    state.failures += 1;
+                    state.ready.push_back(lease.job);
+                    Ok(FailOutcome::Requeued)
+                }
+                ScriptedFailOutcome::Terminal(state) => {
+                    let mut queue_state = self.state.lock().await;
+                    queue_state.leased.remove(&lease_id).ok_or_else(|| {
+                        MediaError::NotFound(format!(
+                            "lease {} not found",
+                            lease_id.0
+                        ))
+                    })?;
+                    queue_state.failures += 1;
+                    match state {
+                        JobState::Completed => queue_state.completed += 1,
+                        JobState::DeadLetter => queue_state.dead_letters += 1,
+                        _ => {}
+                    }
+                    Ok(FailOutcome::Terminal { state })
+                }
+            }
+        }
+
         async fn dead_letter(
             &self,
             lease_id: LeaseId,
@@ -838,6 +1020,41 @@ mod tests {
             })?;
             state.dead_letters += 1;
             Ok(())
+        }
+
+        async fn dead_letter_with_outcome(
+            &self,
+            lease_id: LeaseId,
+            error: Option<String>,
+        ) -> Result<QueueTransitionOutcome> {
+            let scripted =
+                self.state.lock().await.dead_letter_outcomes.pop_front();
+            match scripted.unwrap_or(ScriptedTransitionOutcome::Applied) {
+                ScriptedTransitionOutcome::Applied => {
+                    self.dead_letter(lease_id, error).await?;
+                    Ok(QueueTransitionOutcome::Applied)
+                }
+                ScriptedTransitionOutcome::Requeued => {
+                    let mut state = self.state.lock().await;
+                    let mut lease =
+                        state.leased.remove(&lease_id).ok_or_else(|| {
+                            MediaError::NotFound(format!(
+                                "lease {} not found",
+                                lease_id.0
+                            ))
+                        })?;
+                    lease.job.state = JobState::Ready;
+                    lease.job.attempts = 0;
+                    lease.job.lease_owner = None;
+                    lease.job.lease_expires_at = None;
+                    state.failures += 1;
+                    state.ready.push_back(lease.job);
+                    Ok(QueueTransitionOutcome::Requeued)
+                }
+                ScriptedTransitionOutcome::Error => Err(MediaError::Internal(
+                    "scripted dead-letter persistence failure".into(),
+                )),
+            }
         }
 
         async fn cancel_job(&self, _job_id: JobId) -> Result<()> {
@@ -865,25 +1082,41 @@ mod tests {
 
         async fn ready_counts_grouped(&self) -> Result<Vec<ReadyQueueCount>> {
             let state = self.state.lock().await;
-            let mut grouped: HashMap<(JobKind, LibraryId, JobPriority), usize> =
-                HashMap::new();
+            let mut grouped: HashMap<
+                (JobKind, LibraryId, JobPriority),
+                (usize, usize),
+            > = HashMap::new();
             for job in &state.ready {
-                *grouped
+                grouped
                     .entry((
                         job.payload.kind(),
                         job.payload.library_id(),
                         job.priority,
                     ))
-                    .or_default() += 1;
+                    .or_default()
+                    .0 += 1;
+            }
+            for lease in state.leased.values() {
+                grouped
+                    .entry((
+                        lease.job.payload.kind(),
+                        lease.job.payload.library_id(),
+                        lease.job.priority,
+                    ))
+                    .or_default()
+                    .1 += 1;
             }
 
             Ok(grouped
                 .into_iter()
-                .map(|((kind, library_id, priority), ready)| ReadyQueueCount {
-                    kind,
-                    library_id,
-                    priority,
-                    ready,
+                .map(|((kind, library_id, priority), (ready, leased))| {
+                    ReadyQueueCount {
+                        kind,
+                        library_id,
+                        priority,
+                        ready,
+                        leased,
+                    }
                 })
                 .collect())
         }
@@ -914,6 +1147,54 @@ mod tests {
             device_id: None,
         });
         JobRecord::new(payload, priority)
+    }
+
+    fn single_scan_worker_config() -> OrchestratorConfig {
+        let mut config = OrchestratorConfig::default();
+        config.queue.max_parallel_scans = 1;
+        config.queue.max_parallel_series_resolve = 0;
+        config.queue.max_parallel_analyses = 0;
+        config.queue.max_parallel_metadata = 0;
+        config.queue.max_parallel_index = 0;
+        config.queue.max_parallel_image_fetch = 0;
+        config.queue.max_parallel_transcript_extract = 0;
+        config.queue.default_library_cap = 1;
+        config.budget.library_scan_limit = 1;
+        config.lease.housekeeper_interval_ms = 10_000;
+        config
+    }
+
+    async fn wait_for_worker_accounting_to_release(
+        runtime: &OrchestratorRuntime<
+            RecordingQueue,
+            InProcJobEventBus,
+            InMemoryBudget,
+        >,
+        budget: &InMemoryBudget,
+        library_id: LibraryId,
+    ) {
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let scheduler_idle = runtime
+                    .scheduler()
+                    .snapshot()
+                    .await
+                    .get(&library_id)
+                    .copied()
+                    .unwrap_or_default()
+                    == (0, 0);
+                let (in_use, _) = budget
+                    .utilization(WorkloadType::LibraryScan)
+                    .await
+                    .expect("budget utilization");
+                if scheduler_idle && in_use == 0 {
+                    break;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("worker releases scheduler and budget accounting");
     }
 
     #[tokio::test]
@@ -974,7 +1255,7 @@ mod tests {
         config.lease.lease_ttl_secs = 1;
         config.lease.renew_at_fraction = 0.0;
         config.lease.renew_min_margin_ms = 950;
-        config.lease.housekeeper_interval_ms = 10_000;
+        config.lease.housekeeper_interval_ms = 10;
 
         let queue = Arc::new(RecordingQueue::with_ready(vec![
             folder_scan_record(library_id, "/library/movie-a", JobPriority::P1),
@@ -1119,6 +1400,496 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_timeout_retries_never_returning_job_and_releases_accounting()
+     {
+        let library_id = LibraryId::new();
+        let mut config = OrchestratorConfig::default();
+        config.queue.max_parallel_scans = 1;
+        config.queue.max_parallel_series_resolve = 0;
+        config.queue.max_parallel_analyses = 0;
+        config.queue.max_parallel_metadata = 0;
+        config.queue.max_parallel_index = 0;
+        config.queue.max_parallel_image_fetch = 0;
+        config.queue.max_parallel_transcript_extract = 0;
+        config.queue.default_library_cap = 1;
+        config.budget.library_scan_limit = 1;
+        config.lease.dispatch_timeout_ms = 25;
+        config.lease.housekeeper_interval_ms = 10;
+
+        let queue =
+            Arc::new(RecordingQueue::with_ready(vec![folder_scan_record(
+                library_id,
+                "/library/timeout-movie",
+                JobPriority::P1,
+            )]));
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let mut job_events = events.subscribe();
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher = Arc::new(FirstCallNeverReturnsDispatcher::default());
+
+        let runtime = OrchestratorRuntimeBuilder::new(config)
+            .with_queue(queue.clone())
+            .with_events(events)
+            .with_budget(budget.clone())
+            .with_dispatcher(dispatcher.clone())
+            .build()
+            .expect("runtime build");
+
+        runtime.start().await.expect("runtime start");
+
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let stats = queue.stats().await;
+                let scheduler_idle = runtime
+                    .scheduler()
+                    .snapshot()
+                    .await
+                    .get(&library_id)
+                    .copied()
+                    .unwrap_or_default()
+                    == (0, 0);
+                if stats.failures == 1 && stats.completed == 1 && scheduler_idle
+                {
+                    break;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("timed-out dispatch is retried and then completes");
+
+        assert_eq!(dispatcher.call_count(), 2);
+        let (in_use, _) = budget
+            .utilization(WorkloadType::LibraryScan)
+            .await
+            .expect("budget utilization");
+        assert_eq!(in_use, 0, "timeout releases the workload budget");
+
+        let mut saw_retryable_timeout = false;
+        while let Ok(event) = job_events.try_recv() {
+            if matches!(
+                event.payload,
+                JobEventPayload::Failed {
+                    retryable: true,
+                    ..
+                }
+            ) {
+                saw_retryable_timeout = true;
+            }
+        }
+        assert!(
+            saw_retryable_timeout,
+            "timeout publishes a retryable failure event"
+        );
+
+        runtime.shutdown().await.expect("runtime shutdown succeeds");
+    }
+
+    #[tokio::test]
+    async fn complete_persistence_failure_does_not_publish_terminal_success() {
+        let library_id = LibraryId::new();
+        let config = single_scan_worker_config();
+        let queue =
+            Arc::new(RecordingQueue::with_ready(vec![folder_scan_record(
+                library_id,
+                "/library/complete-persistence-failure",
+                JobPriority::P1,
+            )]));
+        queue
+            .script_complete(ScriptedTransitionOutcome::Error)
+            .await;
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let mut job_events = events.subscribe();
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher = Arc::new(TestDispatcher::new(Duration::ZERO));
+
+        let runtime = OrchestratorRuntimeBuilder::new(config)
+            .with_queue(queue.clone())
+            .with_events(events)
+            .with_budget(budget.clone())
+            .with_dispatcher(dispatcher)
+            .build()
+            .expect("runtime build");
+        runtime.start().await.expect("runtime start");
+
+        let mut payloads = Vec::new();
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event = job_events
+                    .recv()
+                    .await
+                    .expect("job event bus remains open");
+                let done = matches!(
+                    &event.payload,
+                    JobEventPayload::Failed {
+                        retryable: true,
+                        ..
+                    }
+                );
+                payloads.push(event.payload);
+                if done {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("persistence uncertainty is published");
+
+        wait_for_worker_accounting_to_release(
+            &runtime,
+            budget.as_ref(),
+            library_id,
+        )
+        .await;
+        time::sleep(Duration::from_millis(25)).await;
+        while let Ok(event) = job_events.try_recv() {
+            payloads.push(event.payload);
+        }
+
+        let stats = queue.stats().await;
+        assert_eq!(stats.ready, 0);
+        assert_eq!(
+            stats.leased, 1,
+            "failed persistence keeps the lease durable"
+        );
+        assert_eq!(stats.completed, 0);
+        assert!(!payloads.iter().any(|payload| matches!(
+            payload,
+            JobEventPayload::Completed { .. }
+        )));
+
+        runtime.shutdown().await.expect("runtime shutdown succeeds");
+    }
+
+    #[tokio::test]
+    async fn dead_letter_persistence_failure_does_not_publish_terminal_event() {
+        let library_id = LibraryId::new();
+        let config = single_scan_worker_config();
+        let queue =
+            Arc::new(RecordingQueue::with_ready(vec![folder_scan_record(
+                library_id,
+                "/library/dead-letter-persistence-failure",
+                JobPriority::P1,
+            )]));
+        queue
+            .script_dead_letter(ScriptedTransitionOutcome::Error)
+            .await;
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let mut job_events = events.subscribe();
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher = Arc::new(ScriptedDispatcher::new(
+            Duration::ZERO,
+            vec![DispatchStatus::DeadLetter {
+                error: "terminal dispatch failure".into(),
+            }],
+        ));
+
+        let runtime = OrchestratorRuntimeBuilder::new(config)
+            .with_queue(queue.clone())
+            .with_events(events)
+            .with_budget(budget.clone())
+            .with_dispatcher(dispatcher)
+            .build()
+            .expect("runtime build");
+        runtime.start().await.expect("runtime start");
+
+        let mut payloads = Vec::new();
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event = job_events
+                    .recv()
+                    .await
+                    .expect("job event bus remains open");
+                let done = matches!(
+                    &event.payload,
+                    JobEventPayload::Failed {
+                        retryable: true,
+                        ..
+                    }
+                );
+                payloads.push(event.payload);
+                if done {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("persistence uncertainty is published");
+
+        wait_for_worker_accounting_to_release(
+            &runtime,
+            budget.as_ref(),
+            library_id,
+        )
+        .await;
+        time::sleep(Duration::from_millis(25)).await;
+        while let Ok(event) = job_events.try_recv() {
+            payloads.push(event.payload);
+        }
+
+        let stats = queue.stats().await;
+        assert_eq!(stats.ready, 0);
+        assert_eq!(
+            stats.leased, 1,
+            "failed persistence keeps the lease durable"
+        );
+        assert_eq!(stats.dead_letters, 0);
+        assert!(!payloads.iter().any(|payload| matches!(
+            payload,
+            JobEventPayload::DeadLettered { .. }
+        )));
+
+        runtime.shutdown().await.expect("runtime shutdown succeeds");
+    }
+
+    #[tokio::test]
+    async fn superseded_dead_letter_requeues_without_terminal_event() {
+        let library_id = LibraryId::new();
+        let config = single_scan_worker_config();
+        let queue =
+            Arc::new(RecordingQueue::with_ready(vec![folder_scan_record(
+                library_id,
+                "/library/superseded-dead-letter",
+                JobPriority::P1,
+            )]));
+        queue
+            .script_dead_letter(ScriptedTransitionOutcome::Requeued)
+            .await;
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let mut job_events = events.subscribe();
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher = Arc::new(ScriptedDispatcher::new(
+            Duration::ZERO,
+            vec![
+                DispatchStatus::DeadLetter {
+                    error: "superseded terminal result".into(),
+                },
+                DispatchStatus::Success,
+            ],
+        ));
+
+        let runtime = OrchestratorRuntimeBuilder::new(config)
+            .with_queue(queue.clone())
+            .with_events(events)
+            .with_budget(budget.clone())
+            .with_dispatcher(dispatcher)
+            .build()
+            .expect("runtime build");
+        runtime.start().await.expect("runtime start");
+
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let stats = queue.stats().await;
+                if stats.failures == 1 && stats.completed == 1 {
+                    break;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("requeued work is immediately scheduled and completed");
+
+        wait_for_worker_accounting_to_release(
+            &runtime,
+            budget.as_ref(),
+            library_id,
+        )
+        .await;
+        let mut payloads = Vec::new();
+        while let Ok(event) = job_events.try_recv() {
+            payloads.push(event.payload);
+        }
+
+        let stats = queue.stats().await;
+        assert_eq!(stats.dead_letters, 0);
+        assert_eq!(
+            payloads
+                .iter()
+                .filter(|payload| matches!(
+                    payload,
+                    JobEventPayload::Dequeued { .. }
+                ))
+                .count(),
+            2,
+            "the requeued row must be advertised without waiting for housekeeper"
+        );
+        assert!(payloads.iter().any(|payload| matches!(
+            payload,
+            JobEventPayload::Failed {
+                retryable: true,
+                ..
+            }
+        )));
+        assert!(!payloads.iter().any(|payload| matches!(
+            payload,
+            JobEventPayload::DeadLettered { .. }
+        )));
+
+        runtime.shutdown().await.expect("runtime shutdown succeeds");
+    }
+
+    #[tokio::test]
+    async fn superseded_exhausted_failure_requeues_without_housekeeper() {
+        let library_id = LibraryId::new();
+        let config = single_scan_worker_config();
+        let queue =
+            Arc::new(RecordingQueue::with_ready(vec![folder_scan_record(
+                library_id,
+                "/library/superseded-exhausted-failure",
+                JobPriority::P1,
+            )]));
+        queue.script_fail(ScriptedFailOutcome::Requeued).await;
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let mut job_events = events.subscribe();
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher = Arc::new(ScriptedDispatcher::new(
+            Duration::ZERO,
+            vec![
+                DispatchStatus::Retry {
+                    error: "superseded exhausted result".into(),
+                },
+                DispatchStatus::Success,
+            ],
+        ));
+
+        let runtime = OrchestratorRuntimeBuilder::new(config)
+            .with_queue(queue.clone())
+            .with_events(events)
+            .with_budget(budget.clone())
+            .with_dispatcher(dispatcher)
+            .build()
+            .expect("runtime build");
+        runtime.start().await.expect("runtime start");
+
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let stats = queue.stats().await;
+                if stats.failures == 1 && stats.completed == 1 {
+                    break;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("requeued exhausted work is immediately completed");
+        wait_for_worker_accounting_to_release(
+            &runtime,
+            budget.as_ref(),
+            library_id,
+        )
+        .await;
+
+        let mut payloads = Vec::new();
+        while let Ok(event) = job_events.try_recv() {
+            payloads.push(event.payload);
+        }
+        let stats = queue.stats().await;
+        assert_eq!(stats.dead_letters, 0);
+        assert_eq!(
+            payloads
+                .iter()
+                .filter(|payload| matches!(
+                    payload,
+                    JobEventPayload::Dequeued { .. }
+                ))
+                .count(),
+            2,
+            "FailOutcome::Requeued must advertise ready work before housekeeper"
+        );
+        assert!(payloads.iter().any(|payload| matches!(
+            payload,
+            JobEventPayload::Failed {
+                retryable: true,
+                ..
+            }
+        )));
+        assert!(!payloads.iter().any(|payload| matches!(
+            payload,
+            JobEventPayload::DeadLettered { .. }
+        )));
+
+        runtime.shutdown().await.expect("runtime shutdown succeeds");
+    }
+
+    #[tokio::test]
+    async fn retry_at_attempt_limit_publishes_durable_dead_letter_outcome() {
+        let library_id = LibraryId::new();
+        let config = single_scan_worker_config();
+        let queue =
+            Arc::new(RecordingQueue::with_ready(vec![folder_scan_record(
+                library_id,
+                "/library/retry-attempt-limit",
+                JobPriority::P1,
+            )]));
+        queue
+            .script_fail(ScriptedFailOutcome::Terminal(JobState::DeadLetter))
+            .await;
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let mut job_events = events.subscribe();
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher = Arc::new(ScriptedDispatcher::new(
+            Duration::ZERO,
+            vec![DispatchStatus::Retry {
+                error: "last retry failed".into(),
+            }],
+        ));
+
+        let runtime = OrchestratorRuntimeBuilder::new(config)
+            .with_queue(queue.clone())
+            .with_events(events)
+            .with_budget(budget.clone())
+            .with_dispatcher(dispatcher)
+            .build()
+            .expect("runtime build");
+        runtime.start().await.expect("runtime start");
+
+        let mut payloads = Vec::new();
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event = job_events
+                    .recv()
+                    .await
+                    .expect("job event bus remains open");
+                let done = matches!(
+                    &event.payload,
+                    JobEventPayload::DeadLettered { .. }
+                );
+                payloads.push(event.payload);
+                if done {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("max-attempt retry publishes dead-letter event");
+
+        wait_for_worker_accounting_to_release(
+            &runtime,
+            budget.as_ref(),
+            library_id,
+        )
+        .await;
+        while let Ok(event) = job_events.try_recv() {
+            payloads.push(event.payload);
+        }
+
+        let stats = queue.stats().await;
+        assert_eq!(stats.ready, 0, "terminal retry is not re-advertised");
+        assert_eq!(stats.leased, 0);
+        assert_eq!(stats.failures, 1);
+        assert_eq!(stats.dead_letters, 1);
+        assert!(!payloads.iter().any(|payload| matches!(
+            payload,
+            JobEventPayload::Failed {
+                retryable: true,
+                ..
+            }
+        )));
+
+        runtime.shutdown().await.expect("runtime shutdown succeeds");
+    }
+
+    #[tokio::test]
     async fn scheduler_observer_skips_ready_for_merged_events() {
         let database_url = match std::env::var("DATABASE_URL") {
             Ok(url) => url,
@@ -1219,7 +1990,8 @@ mod tests {
             "enqueued event should seed correlation cache",
         );
 
-        if let Some(reservation) = scheduler.reserve().await {
+        if let Some(reservation) = scheduler.reserve(JobKind::FolderScan).await
+        {
             scheduler.confirm(reservation.id).await;
             scheduler.record_completed(library_id).await;
         }

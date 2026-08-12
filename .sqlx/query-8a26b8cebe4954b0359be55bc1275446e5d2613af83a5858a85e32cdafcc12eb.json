@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM intelligence_media_context",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "8a26b8cebe4954b0359be55bc1275446e5d2613af83a5858a85e32cdafcc12eb"
+}

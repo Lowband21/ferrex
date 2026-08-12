@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM cached_images",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "64694c91bfbe00227865a96d6fc62eacc0b76e05f37aa369286c80f633c79fe4"
+}

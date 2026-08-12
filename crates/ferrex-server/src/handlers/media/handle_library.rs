@@ -5,7 +5,7 @@ use axum::{
     http::header,
     response::{IntoResponse, Json, Response},
 };
-use ferrex_core::domain::users::user::User;
+use ferrex_core::domain::users::{rbac, user::User};
 use ferrex_core::error::MediaError;
 use ferrex_core::query::{
     filtering::hash_filter_spec,
@@ -18,6 +18,7 @@ use ferrex_core::{
     api::types::{
         ApiResponse, CreateLibraryRequest, FetchMediaRequest,
         FilterIndicesRequest, IndicesResponse, LibraryMediaResponse,
+        ResetLibraryRequest, ResetLibraryResult, ScanCommandAcceptedResponse,
         ScanRunMode, UpdateLibraryRequest,
     },
     types::LibraryType,
@@ -44,12 +45,351 @@ use ferrex_core::domain::scan::orchestration::LibraryActorConfig;
 use futures::{StreamExt, TryStreamExt, stream};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
+use sqlx::PgPool;
 
 const FILTER_CACHE_TTL: Duration = Duration::from_secs(30);
 const MIN_SCAN_INTERVAL_MINUTES: u32 = 1;
 
 static FILTER_CACHE: Lazy<RwLock<HashMap<FilterCacheKey, CachedIndices>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static LIBRARY_MAINTENANCE_LOCK: Lazy<tokio::sync::Mutex<()>> =
+    Lazy::new(|| tokio::sync::Mutex::new(()));
+
+async fn require_library_permission(
+    state: &AppState,
+    user: &User,
+    permission: &str,
+) -> Result<(), StatusCode> {
+    let permissions = state
+        .unit_of_work()
+        .rbac
+        .get_user_permissions(user.id)
+        .await
+        .map_err(|err| {
+            error!(user_id = %user.id, error = %err, "failed to load library permissions");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if permissions.has_permission(permission) || permissions.has_role("admin") {
+        Ok(())
+    } else {
+        Err(StatusCode::FORBIDDEN)
+    }
+}
+
+fn actor_config_for_library(
+    state: &AppState,
+    library: &Library,
+) -> LibraryActorConfig {
+    LibraryActorConfig {
+        library: LibraryReference {
+            id: library.id,
+            name: library.name.clone(),
+            library_type: library.library_type,
+            paths: library.paths.clone(),
+        },
+        root_paths: library.paths.clone(),
+        max_outstanding_jobs: state
+            .config()
+            .scanner
+            .library_actor_max_outstanding_jobs,
+    }
+}
+
+/// Stop runtime producers before deleting library-owned data. If persistence
+/// rejects the delete, restore the actor/watch configuration so the library is
+/// not left present-but-inert.
+pub(crate) async fn delete_library_with_runtime_cleanup(
+    state: &AppState,
+    library_id: LibraryId,
+) -> Result<(), String> {
+    let _maintenance_guard = LIBRARY_MAINTENANCE_LOCK.lock().await;
+    let libraries = state.unit_of_work().libraries.clone();
+    let library = libraries
+        .get_library(library_id)
+        .await
+        .map_err(|err| {
+            format!("Failed to load library before deletion: {err}")
+        })?
+        .ok_or_else(|| "Library not found".to_string())?;
+    let orchestrator = state.scan_control().orchestrator();
+    let actor_config = actor_config_for_library(state, &library);
+
+    orchestrator
+        .unregister_library(&actor_config, library.watch_for_changes)
+        .await
+        .map_err(|err| format!("Failed to stop library scan runtime: {err}"))?;
+
+    if let Err(delete_error) = libraries.delete_library(library_id).await {
+        let restore_result = orchestrator
+            .register_library(actor_config, library.watch_for_changes)
+            .await;
+
+        return match restore_result {
+            Ok(()) => Err(format!("Delete failed: {delete_error}")),
+            Err(restore_error) => Err(format!(
+                "Delete failed: {delete_error}; scan runtime restoration also failed: {restore_error}"
+            )),
+        };
+    }
+
+    state.scan_control().forget_library(library_id).await;
+    invalidate_filter_cache_for(*library_id.as_uuid());
+    Ok(())
+}
+
+async fn completed_reset_library(
+    pool: &PgPool,
+    operation_id: Uuid,
+) -> Result<Option<LibraryId>, String> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT library_id
+        FROM library_maintenance_operations
+        WHERE operation_id = $1
+          AND operation = 'reset'
+        "#,
+        operation_id,
+    )
+    .fetch_optional(pool)
+    .await
+    .map(|library_id| library_id.map(LibraryId))
+    .map_err(|err| format!("Failed to load reset operation: {err}"))
+}
+
+async fn reset_library_data(
+    pool: &PgPool,
+    library_id: LibraryId,
+    operation_id: Uuid,
+) -> Result<bool, String> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| format!("Failed to begin library reset: {err}"))?;
+
+    sqlx::query!(
+        r#"SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text, 0))"#,
+        library_id.0,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to lock library reset operation: {err}"))?;
+
+    if let Some(existing_library_id) = sqlx::query_scalar!(
+        r#"
+        SELECT library_id
+        FROM library_maintenance_operations
+        WHERE operation_id = $1
+          AND operation = 'reset'
+        "#,
+        operation_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to replay library reset: {err}"))?
+    {
+        if existing_library_id != library_id.0 {
+            return Err(format!(
+                "Reset operation {operation_id} belongs to another library"
+            ));
+        }
+        tx.commit()
+            .await
+            .map_err(|err| format!("Failed to finish reset replay: {err}"))?;
+        return Ok(false);
+    }
+
+    let restored_library_id = sqlx::query_scalar!(
+        r#"
+        WITH deleted AS (
+            DELETE FROM libraries
+            WHERE id = $1
+            RETURNING
+                id,
+                name,
+                library_type,
+                paths,
+                scan_interval_minutes,
+                enabled,
+                auto_scan,
+                watch_for_changes,
+                analyze_on_scan,
+                max_retry_attempts,
+                movie_ref_batch_size,
+                created_at
+        )
+        INSERT INTO libraries (
+            id,
+            name,
+            library_type,
+            paths,
+            scan_interval_minutes,
+            enabled,
+            auto_scan,
+            watch_for_changes,
+            analyze_on_scan,
+            max_retry_attempts,
+            movie_ref_batch_size,
+            created_at,
+            updated_at
+        )
+        SELECT
+            id,
+            name,
+            library_type,
+            paths,
+            scan_interval_minutes,
+            enabled,
+            auto_scan,
+            watch_for_changes,
+            analyze_on_scan,
+            max_retry_attempts,
+            movie_ref_batch_size,
+            created_at,
+            NOW()
+        FROM deleted
+        RETURNING id
+        "#,
+        library_id.0,
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to reset library-owned data: {err}"))?
+    .ok_or_else(|| "Library not found".to_string())?;
+
+    sqlx::query!(
+        r#"
+        INSERT INTO library_maintenance_operations (
+            operation_id,
+            library_id,
+            operation
+        )
+        VALUES ($1, $2, 'reset')
+        "#,
+        operation_id,
+        restored_library_id,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to record library reset: {err}"))?;
+
+    tx.commit()
+        .await
+        .map_err(|err| format!("Failed to commit library reset: {err}"))?;
+    Ok(true)
+}
+
+async fn reset_library_with_runtime_cleanup(
+    state: &AppState,
+    library_id: LibraryId,
+    operation_id: Uuid,
+) -> Result<ResetLibraryResult, String> {
+    let _maintenance_guard = LIBRARY_MAINTENANCE_LOCK.lock().await;
+    let postgres = state.postgres();
+    let pool = postgres.pool();
+    let libraries = state.unit_of_work().libraries.clone();
+
+    if let Some(existing_library_id) =
+        completed_reset_library(pool, operation_id).await?
+        && existing_library_id != library_id
+    {
+        return Err(format!(
+            "Reset operation {operation_id} belongs to another library"
+        ));
+    }
+
+    let library = libraries
+        .get_library(library_id)
+        .await
+        .map_err(|err| format!("Failed to load library before reset: {err}"))?
+        .ok_or_else(|| "Library not found".to_string())?;
+    let actor_config = actor_config_for_library(state, &library);
+    let reset_already_completed =
+        completed_reset_library(pool, operation_id).await?.is_some();
+
+    if !reset_already_completed {
+        state
+            .scan_control()
+            .orchestrator()
+            .unregister_library(&actor_config, library.watch_for_changes)
+            .await
+            .map_err(|err| {
+                format!("Failed to stop library scan runtime: {err}")
+            })?;
+    }
+
+    let applied = match reset_library_data(pool, library_id, operation_id).await
+    {
+        Ok(applied) => applied,
+        Err(reset_error) => {
+            if !reset_already_completed {
+                let restore_result = state
+                    .scan_control()
+                    .orchestrator()
+                    .register_library(actor_config, library.watch_for_changes)
+                    .await;
+                return match restore_result {
+                    Ok(()) => Err(reset_error),
+                    Err(restore_error) => Err(format!(
+                        "{reset_error}; scan runtime restoration also failed: {restore_error}"
+                    )),
+                };
+            }
+            return Err(reset_error);
+        }
+    };
+
+    if applied {
+        state.scan_control().forget_library(library_id).await;
+        invalidate_filter_cache_for(*library_id.as_uuid());
+    }
+
+    let restored_library = libraries
+        .get_library(library_id)
+        .await
+        .map_err(|err| format!("Failed to load reset library: {err}"))?
+        .ok_or_else(|| "Reset library was not restored".to_string())?;
+    state
+        .scan_control()
+        .orchestrator()
+        .register_library(
+            actor_config_for_library(state, &restored_library),
+            restored_library.watch_for_changes,
+        )
+        .await
+        .map_err(|err| {
+            format!("Failed to restore library scan runtime: {err}")
+        })?;
+
+    let scan = if restored_library.enabled {
+        let accepted = state
+            .scan_control()
+            .start_library_scan(
+                library_id,
+                Some(operation_id),
+                ScanRunMode::Manual,
+            )
+            .await
+            .map_err(|err| {
+                format!(
+                    "Library data reset completed, but the fresh scan could not be started: {err}"
+                )
+            })?;
+        Some(ScanCommandAcceptedResponse {
+            scan_id: accepted.scan_id,
+            correlation_id: accepted.correlation_id,
+            status: accepted.status.into(),
+            mode: accepted.mode,
+            idempotency_key: accepted.idempotency_key,
+            run_key: accepted.run_key,
+            disposition: accepted.disposition,
+        })
+    } else {
+        None
+    };
+
+    Ok(ResetLibraryResult { library_id, scan })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct FilterCacheKey {
@@ -721,8 +1061,15 @@ pub async fn get_library_handler(
 /// Create a new library
 pub async fn create_library_handler(
     State(state): State<AppState>,
+    Extension(user): Extension<User>,
     Json(request): Json<CreateLibraryRequest>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    require_library_permission(
+        &state,
+        &user,
+        rbac::permissions::LIBRARIES_CREATE,
+    )
+    .await?;
     if demo_mode::is_demo_mode(&state) {
         return Ok(Json(ApiResponse::error(
             "Library creation is disabled in demo mode".to_string(),
@@ -765,8 +1112,8 @@ pub async fn create_library_handler(
         media: None,
         auto_scan: request.auto_scan,
         watch_for_changes: request.watch_for_changes,
-        analyze_on_scan: false,
-        max_retry_attempts: 3,
+        analyze_on_scan: request.analyze_on_scan,
+        max_retry_attempts: request.max_retry_attempts,
         movie_ref_batch_size,
     };
 
@@ -857,9 +1204,17 @@ pub async fn create_library_handler(
 /// Update an existing library
 pub async fn update_library_handler(
     State(state): State<AppState>,
+    Extension(user): Extension<User>,
     Path(id): Path<String>, // TODO: Use LibraryID directly
     Json(request): Json<UpdateLibraryRequest>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    require_library_permission(
+        &state,
+        &user,
+        rbac::permissions::LIBRARIES_UPDATE,
+    )
+    .await?;
+
     info!("Updating library: {}", id);
 
     // Get the existing library
@@ -909,6 +1264,12 @@ pub async fn update_library_handler(
     }
     if let Some(watch_for_changes) = request.watch_for_changes {
         library.watch_for_changes = watch_for_changes;
+    }
+    if let Some(analyze_on_scan) = request.analyze_on_scan {
+        library.analyze_on_scan = analyze_on_scan;
+    }
+    if let Some(max_retry_attempts) = request.max_retry_attempts {
+        library.max_retry_attempts = max_retry_attempts;
     }
     if let Some(size) = request.movie_ref_batch_size {
         match ferrex_core::types::ids::MovieReferenceBatchSize::new(size) {
@@ -983,8 +1344,16 @@ pub async fn update_library_handler(
 /// Delete a library
 pub async fn delete_library_handler(
     State(state): State<AppState>,
+    Extension(user): Extension<User>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    require_library_permission(
+        &state,
+        &user,
+        rbac::permissions::LIBRARIES_DELETE,
+    )
+    .await?;
+
     info!("Deleting library: {}", id);
 
     let library_uuid =
@@ -996,10 +1365,7 @@ pub async fn delete_library_handler(
         return Ok(Json(ApiResponse::error("Library not found".to_string())));
     }
 
-    match state
-        .unit_of_work()
-        .libraries
-        .delete_library(LibraryId(library_uuid))
+    match delete_library_with_runtime_cleanup(&state, LibraryId(library_uuid))
         .await
     {
         Ok(_) => {
@@ -1010,5 +1376,149 @@ pub async fn delete_library_handler(
             error!("Failed to delete library: {}", e);
             Ok(Json(ApiResponse::error(e.to_string())))
         }
+    }
+}
+
+/// Atomically clear library-owned data while preserving library identity and
+/// configuration, then start an idempotent fresh scan.
+pub async fn reset_library_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<String>,
+    Json(request): Json<ResetLibraryRequest>,
+) -> Result<Json<ApiResponse<ResetLibraryResult>>, StatusCode> {
+    require_library_permission(
+        &state,
+        &user,
+        rbac::permissions::LIBRARIES_DELETE,
+    )
+    .await?;
+    require_library_permission(
+        &state,
+        &user,
+        rbac::permissions::LIBRARIES_CREATE,
+    )
+    .await?;
+    require_library_permission(
+        &state,
+        &user,
+        rbac::permissions::LIBRARIES_SCAN,
+    )
+    .await?;
+
+    let library_id =
+        LibraryId(Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?);
+    if demo_mode::is_demo_mode(&state)
+        && !demo_mode::is_demo_library(&library_id)
+    {
+        return Ok(Json(ApiResponse::error("Library not found".to_string())));
+    }
+
+    match reset_library_with_runtime_cleanup(
+        &state,
+        library_id,
+        request.operation_id,
+    )
+    .await
+    {
+        Ok(result) => Ok(Json(ApiResponse::success(result))),
+        Err(err) => {
+            error!(library_id = %library_id, error = %err, "failed to reset library");
+            Ok(Json(ApiResponse::error(err)))
+        }
+    }
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+    use sqlx::Row;
+
+    #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+    async fn reset_is_idempotent_and_preserves_library_configuration(
+        pool: PgPool,
+    ) {
+        let library_id = Uuid::now_v7();
+        let operation_id = Uuid::now_v7();
+        sqlx::query(
+            r#"
+            INSERT INTO libraries (
+                id, name, library_type, paths, scan_interval_minutes, enabled,
+                auto_scan, watch_for_changes, analyze_on_scan,
+                max_retry_attempts, movie_ref_batch_size
+            )
+            VALUES ($1, 'Reset Me', 'movies', ARRAY['/media/reset']::varchar[],
+                    137, true, false, true, true, 9, 333)
+            "#,
+        )
+        .bind(library_id)
+        .execute(&pool)
+        .await
+        .expect("seed library");
+        sqlx::query(
+            r#"
+            INSERT INTO library_scan_runs (
+                scan_id, library_id, mode, correlation_id, status
+            )
+            VALUES ($1, $2, 'manual', $3, 'running')
+            "#,
+        )
+        .bind(Uuid::now_v7())
+        .bind(library_id)
+        .bind(Uuid::now_v7())
+        .execute(&pool)
+        .await
+        .expect("seed owned scan data");
+
+        assert!(
+            reset_library_data(&pool, LibraryId(library_id), operation_id,)
+                .await
+                .expect("apply reset")
+        );
+        assert!(
+            !reset_library_data(&pool, LibraryId(library_id), operation_id,)
+                .await
+                .expect("replay reset")
+        );
+
+        let library = sqlx::query(
+            r#"
+            SELECT name, paths, scan_interval_minutes, enabled, auto_scan,
+                   watch_for_changes, analyze_on_scan, max_retry_attempts,
+                   movie_ref_batch_size, last_scan
+            FROM libraries
+            WHERE id = $1
+            "#,
+        )
+        .bind(library_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load restored library");
+        assert_eq!(library.get::<String, _>("name"), "Reset Me");
+        assert_eq!(
+            library.get::<Vec<String>, _>("paths"),
+            vec!["/media/reset".to_string()]
+        );
+        assert_eq!(library.get::<i32, _>("scan_interval_minutes"), 137);
+        assert!(library.get::<bool, _>("enabled"));
+        assert!(!library.get::<bool, _>("auto_scan"));
+        assert!(library.get::<bool, _>("watch_for_changes"));
+        assert!(library.get::<bool, _>("analyze_on_scan"));
+        assert_eq!(library.get::<i32, _>("max_retry_attempts"), 9);
+        assert_eq!(library.get::<i32, _>("movie_ref_batch_size"), 333);
+        assert!(
+            library
+                .get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_scan")
+                .is_none()
+        );
+
+        let owned_scan_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM library_scan_runs WHERE library_id = $1",
+        )
+        .bind(library_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count reset scan rows");
+        assert_eq!(owned_scan_count, 0);
     }
 }

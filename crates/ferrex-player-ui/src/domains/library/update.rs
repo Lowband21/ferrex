@@ -15,7 +15,9 @@ use crate::{
             tabs::{TabId, TabState},
             update_handlers::{
                 emit_initial_all_tab_snapshots_combined, init_all_tab_view,
+                virtual_carousel_updates::maybe_send_snapshot_for_key,
             },
+            views::virtual_carousel::types::{CarouselConfig, CarouselKey},
         },
     },
     infra::api_types::Media,
@@ -30,7 +32,7 @@ use std::{
     sync::Arc,
 };
 
-use ferrex_core::player_prelude::{Library, LibraryId};
+use ferrex_core::player_prelude::{Library, LibraryId, MediaIDLike, MediaOps};
 #[cfg(feature = "demo")]
 use ferrex_model::library::LibraryType;
 use ferrex_player_api::services::api::ApiService;
@@ -508,26 +510,64 @@ pub fn update_library(
         }
 
         LibraryMessage::ResetLibraryDone(result) => {
-            if let Err(err) = result {
-                state.domains.ui.state.error_message =
-                    Some(format!("Library reset failed: {}", err));
-            } else {
-                // Refresh libraries and active scans after fresh rescan
-                let fetch =
-                    super::update_handlers::library_loaded::fetch_libraries(
-                        state.api_service.clone(),
-                        state.disk_media_repo_cache.clone(),
+            let reset_library_id =
+                match state.domains.ui.state.library_maintenance_in_flight {
+                    Some(
+                        crate::domains::ui::LibraryMaintenanceAction::Reset(
+                            library_id,
+                        ),
+                    ) => Some(library_id),
+                    _ => None,
+                };
+            state.domains.ui.state.library_maintenance_in_flight = None;
+
+            match result {
+                Ok(reset) => {
+                    debug_assert_eq!(reset_library_id, Some(reset.library_id));
+                    state.domains.library.state.library_form_errors.clear();
+                    state.domains.ui.state.error_message = None;
+                    state.domains.library.state.library_form_success = Some(
+                        if reset.scan.is_some() {
+                            "Library reset successfully; a fresh scan has started"
+                                .to_string()
+                        } else {
+                            "Library reset successfully; enable it to start a fresh scan"
+                                .to_string()
+                        },
                     );
-                return DomainUpdateResult::task(
-                    Task::perform(fetch, |res| {
-                        LibraryMessage::LibrariesLoaded(
-                            res.map_err(|e| format!("{:#}", e)),
-                        )
-                    })
-                    .map(DomainMessage::Library),
-                );
+                }
+                Err(err) => {
+                    let message = format!("Library reset failed: {}", err);
+                    state.domains.ui.state.error_message =
+                        Some(message.clone());
+                    state.domains.library.state.library_form_success = None;
+                    state.domains.library.state.library_form_errors.clear();
+                    state
+                        .domains
+                        .library
+                        .state
+                        .library_form_errors
+                        .push(message);
+                }
             }
-            DomainUpdateResult::task(Task::none())
+
+            // Reconcile library contents and scan state after success or an
+            // error returned after the transactional reset boundary.
+            let fetch = super::update_handlers::library_loaded::fetch_libraries(
+                state.api_service.clone(),
+                state.disk_media_repo_cache.clone(),
+            );
+            DomainUpdateResult::task(Task::batch([
+                Task::perform(fetch, |res| {
+                    LibraryMessage::LibrariesLoaded(
+                        res.map_err(|e| format!("{:#}", e)),
+                    )
+                })
+                .map(DomainMessage::Library),
+                Task::done(DomainMessage::Library(
+                    LibraryMessage::FetchActiveScans,
+                )),
+            ]))
         }
 
         // Library form management - using actual handlers
@@ -1064,20 +1104,25 @@ fn apply_discovered_media_to_tabs(
 
     for (library_id, media_items) in additions {
         let tab_id = TabId::Library(*library_id);
-        if tab_id != active_tab {
+        let home_is_active = active_tab == TabId::Home;
+        if tab_id != active_tab && !home_is_active {
             continue;
         }
 
-        if let Some(TabState::Library(tab_state)) =
-            state.tab_manager.get_tab_mut(tab_id)
+        if let TabState::Library(tab_state) =
+            state.tab_manager.get_or_create_tab(tab_id)
         {
             let mut inserted_any = false;
+            let mut represented_on_home = false;
             for media in media_items {
                 if tab_state.insert_media_reference(media) {
                     inserted_any = true;
                 }
+                represented_on_home |= home_is_active
+                    && tab_state
+                        .contains_cached_media_id(&media.media_id().to_uuid());
             }
-            if inserted_any {
+            if inserted_any || represented_on_home {
                 inline_updated.insert(*library_id);
             }
         }
@@ -1100,8 +1145,8 @@ fn mark_tabs_after_media_changes(
 
     for library_id in libraries {
         let tab_id = TabId::Library(*library_id);
-        let skip_active_refresh =
-            inline_updated.contains(library_id) && active_tab == tab_id;
+        let skip_active_refresh = inline_updated.contains(library_id)
+            && (active_tab == tab_id || active_tab == TabId::Home);
 
         if skip_active_refresh {
             continue;
@@ -1117,16 +1162,184 @@ fn mark_tabs_after_media_changes(
         state.tab_manager.refresh_active_tab();
     }
 
+    if active_tab == TabId::Home && !inline_updated.is_empty() {
+        sync_home_library_carousels(state, inline_updated);
+        active_needs_refresh = true;
+    }
+
     active_needs_refresh
+}
+
+/// Keep the active Home view's per-library rails in sync with inline scan
+/// additions without rebuilding every curated list for every discovered item.
+/// Poster demand is limited by the carousel snapshot debounce, while the item
+/// count itself changes immediately so each addition is visible to the view.
+fn sync_home_library_carousels(
+    state: &mut State,
+    libraries: &HashSet<LibraryId>,
+) {
+    for library_id in libraries {
+        let Some(TabState::Library(tab_state)) =
+            state.tab_manager.get_tab(TabId::Library(*library_id))
+        else {
+            continue;
+        };
+
+        let key = match tab_state.library_type {
+            crate::infra::api_types::LibraryType::Movies => {
+                CarouselKey::LibraryMovies(library_id.to_uuid())
+            }
+            crate::infra::api_types::LibraryType::Series => {
+                CarouselKey::LibrarySeries(library_id.to_uuid())
+            }
+        };
+        let total = tab_state.cached_index_ids.len();
+
+        if let Some(carousel) =
+            state.domains.ui.state.carousel_registry.get_mut(&key)
+        {
+            if carousel.total_items != total {
+                carousel.set_total_items(total);
+            }
+        } else {
+            let width = state.window_size.width.max(1.0);
+            let scale = state.domains.ui.state.scaled_layout.scale;
+            state.domains.ui.state.carousel_registry.ensure_default(
+                key.clone(),
+                total,
+                width,
+                CarouselConfig::poster_defaults(),
+                scale,
+            );
+        }
+        maybe_send_snapshot_for_key(state, &key, false);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ferrex_core::player_prelude::{
-        ScanCommandAcceptedResponse, ScanLifecycleStatus, ScanRunMode,
-        ScanStartDisposition,
+        MediaID, MovieBatchId, MovieID, MovieReference,
+        MovieReferenceBatchResponse, ScanCommandAcceptedResponse,
+        ScanLifecycleStatus, ScanRunMode, ScanStartDisposition,
     };
+    use ferrex_model::{
+        EnhancedMovieDetails, MediaFile, details::ExternalIds,
+        image::metadata::MediaImages, titles::MovieTitle, urls::MovieURL,
+    };
+    use uuid::Uuid;
+
+    fn movie_details(id: u64, title: &str) -> EnhancedMovieDetails {
+        EnhancedMovieDetails {
+            id,
+            title: title.to_string(),
+            original_title: None,
+            overview: None,
+            release_date: None,
+            runtime: None,
+            vote_average: None,
+            vote_count: None,
+            popularity: None,
+            content_rating: None,
+            content_ratings: Vec::new(),
+            release_dates: Vec::new(),
+            genres: Vec::new(),
+            spoken_languages: Vec::new(),
+            production_companies: Vec::new(),
+            production_countries: Vec::new(),
+            homepage: None,
+            status: None,
+            tagline: None,
+            budget: None,
+            revenue: None,
+            poster_path: None,
+            backdrop_path: None,
+            logo_path: None,
+            primary_poster_iid: None,
+            primary_backdrop_iid: None,
+            images: MediaImages::default(),
+            cast: Vec::new(),
+            crew: Vec::new(),
+            videos: Vec::new(),
+            keywords: Vec::new(),
+            external_ids: ExternalIds::default(),
+            alternative_titles: Vec::new(),
+            translations: Vec::new(),
+            collection: None,
+            recommendations: Vec::new(),
+            similar: Vec::new(),
+        }
+    }
+
+    fn movie_reference(
+        library_id: LibraryId,
+        batch_id: MovieBatchId,
+        index: u64,
+    ) -> MovieReference {
+        let movie_id = MovieID(Uuid::from_u128(10_000 + u128::from(index)));
+        let title = format!("Movie {index:03}");
+        MovieReference {
+            id: movie_id,
+            library_id,
+            batch_id: Some(batch_id),
+            tmdb_id: index,
+            title: MovieTitle::from(title.clone()),
+            details: movie_details(index, &title),
+            endpoint: MovieURL::from(format!("/media/{index}")),
+            file: MediaFile {
+                id: Uuid::from_u128(20_000 + u128::from(index)),
+                media_id: MediaID::Movie(movie_id),
+                path: std::path::PathBuf::from(format!(
+                    "/tmp/movie-{index}.mkv"
+                )),
+                filename: format!("movie-{index}.mkv"),
+                size: index + 1,
+                discovered_at: ferrex_model::chrono::Utc::now(),
+                created_at: ferrex_model::chrono::Utc::now(),
+                media_file_metadata: None,
+                library_id,
+            },
+            theme_color: None,
+        }
+    }
+
+    fn library_item_count(state: &State, library_id: LibraryId) -> usize {
+        match state
+            .tab_manager
+            .get_tab(TabId::Library(library_id))
+            .expect("library tab exists")
+        {
+            TabState::Library(tab) => tab.grid_state.total_items,
+            TabState::Home(_) | TabState::Collections(_) => {
+                panic!("expected library tab")
+            }
+        }
+    }
+
+    fn home_movie_item_count(state: &State, library_id: LibraryId) -> usize {
+        state
+            .domains
+            .ui
+            .state
+            .carousel_registry
+            .get(&CarouselKey::LibraryMovies(library_id.to_uuid()))
+            .expect("Home movie carousel exists")
+            .total_items
+    }
+
+    fn home_recent_movie_count(state: &State) -> usize {
+        match state
+            .tab_manager
+            .get_tab(TabId::Home)
+            .expect("Home tab exists")
+        {
+            TabState::Home(tab) => tab.recent_movies.len(),
+            TabState::Library(_) | TabState::Collections(_) => {
+                panic!("expected Home tab")
+            }
+        }
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn double_click_scan_started_reuses_one_active_scan_entry() {
@@ -1166,5 +1379,87 @@ mod tests {
         assert_eq!(snapshot.correlation_id, correlation_id);
         assert_eq!(snapshot.mode, ScanRunMode::Manual);
         assert_eq!(snapshot.run_key, ScanRunMode::Manual.run_key(library_id));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn home_movie_additions_stream_then_batch_replacement_deduplicates() {
+        use crate::infra::{
+            api_types::LibraryType, repository::media_repo::MediaRepo,
+        };
+
+        let mut state = State::new("http://localhost:3000".to_string());
+        *state.media_repo.write() = Some(MediaRepo::new_empty());
+
+        let library_id = LibraryId(Uuid::from_u128(1));
+        let batch_id = MovieBatchId::new(1).expect("valid batch id");
+        state
+            .tab_manager
+            .register_library(library_id, LibraryType::Movies);
+        init_all_tab_view(&mut state);
+        assert_eq!(state.tab_manager.active_tab_id(), TabId::Home);
+        assert_eq!(home_movie_item_count(&state, library_id), 0);
+
+        let movies: Vec<_> = (0..100)
+            .map(|index| movie_reference(library_id, batch_id, index))
+            .collect();
+
+        for (index, movie) in movies.iter().cloned().enumerate() {
+            let _ = update_library(
+                &mut state,
+                LibraryMessage::MediaDiscovered(vec![Media::Movie(Box::new(
+                    movie,
+                ))]),
+            );
+            assert_eq!(
+                home_movie_item_count(&state, library_id),
+                index + 1,
+                "Home must expose each MovieAdded event before batch finalization"
+            );
+            assert_eq!(
+                home_recent_movie_count(&state),
+                0,
+                "per-item additions must not rebuild every curated Home rail"
+            );
+        }
+
+        let batch = MovieReferenceBatchResponse {
+            library_id,
+            batch_id,
+            movies: movies.clone(),
+        };
+        let batch_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&batch)
+            .expect("serialize movie batch");
+        let _ = update_library(
+            &mut state,
+            LibraryMessage::MovieBatchLoaded {
+                library_id,
+                batch_id,
+                result: Ok(batch_bytes),
+            },
+        );
+
+        assert_eq!(home_movie_item_count(&state, library_id), 100);
+        assert_eq!(library_item_count(&state, library_id), 100);
+        assert!(
+            state
+                .domains
+                .library
+                .state
+                .repo_accessor
+                .is_movie_backed_by_batch(&movies[0].id)
+                .expect("batch lookup succeeds")
+        );
+
+        let _ = update_library(
+            &mut state,
+            LibraryMessage::MediaDiscovered(vec![Media::Movie(Box::new(
+                movies[0].clone(),
+            ))]),
+        );
+        assert_eq!(
+            home_movie_item_count(&state, library_id),
+            100,
+            "a late duplicate MovieAdded must not duplicate a batch-backed Home item"
+        );
     }
 }

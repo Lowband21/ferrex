@@ -7,6 +7,7 @@ use super::{JobEventStream, ScanEventStream};
 use crate::domain::scan::actors::{
     LibraryActor, LibraryActorCommand, StartMode,
 };
+use crate::domain::scan::orchestration::context::FolderScanContext;
 use crate::domain::scan::orchestration::{
     budget::{WorkloadBudget, WorkloadType},
     config::LeaseConfig,
@@ -18,11 +19,13 @@ use crate::domain::scan::orchestration::{
         ScanSeedSummary, stable_path_key,
     },
     job::{
-        DedupeKey, EnqueueRequest, FolderScanJob, JobKind, JobPayload,
-        JobPriority, ScanReason,
+        DedupeKey, EnqueueRequest, FolderScanJob, JobId, JobKind, JobPayload,
+        JobPriority, JobState, ScanReason,
     },
-    lease::{DequeueRequest, LeaseRenewal, QueueSelector},
-    queue::{LeaseExpiryScanner, QueueService},
+    lease::{DequeueRequest, JobLease, LeaseRenewal, QueueSelector},
+    queue::{
+        FailOutcome, LeaseExpiryScanner, QueueService, QueueTransitionOutcome,
+    },
     scheduler::{ReadyCountEntry, WeightedFairScheduler},
 };
 use crate::{
@@ -55,6 +58,326 @@ struct RuntimeTaskHandle {
     handle: tokio::task::JoinHandle<()>,
 }
 
+#[derive(Debug)]
+enum WorkerTransition {
+    Completed,
+    RetryScheduled {
+        error: String,
+    },
+    Requeued {
+        error: String,
+    },
+    TerminalFailed {
+        error: String,
+    },
+    DeadLettered {
+        error: String,
+    },
+    Missing {
+        operation: &'static str,
+        error: String,
+    },
+    PersistenceError {
+        operation: &'static str,
+        error: String,
+    },
+}
+
+impl WorkerTransition {
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed
+                | Self::TerminalFailed { .. }
+                | Self::DeadLettered { .. }
+        )
+    }
+}
+
+fn worker_transition_from_complete(
+    outcome: Result<QueueTransitionOutcome>,
+) -> WorkerTransition {
+    match outcome {
+        Ok(QueueTransitionOutcome::Applied) => WorkerTransition::Completed,
+        Ok(QueueTransitionOutcome::Requeued) => {
+            WorkerTransition::PersistenceError {
+                operation: "complete",
+                error: "queue requeued a job during completion".into(),
+            }
+        }
+        Ok(QueueTransitionOutcome::Missing) => WorkerTransition::Missing {
+            operation: "complete",
+            error: "durable completion was not applied because the lease was missing"
+                .into(),
+        },
+        Err(err) => WorkerTransition::PersistenceError {
+            operation: "complete",
+            error: format!("failed to persist job completion: {err}"),
+        },
+    }
+}
+
+fn worker_transition_from_fail(
+    outcome: Result<FailOutcome>,
+    execution_error: String,
+    operation: &'static str,
+) -> WorkerTransition {
+    match outcome {
+        Ok(FailOutcome::RetryScheduled) => WorkerTransition::RetryScheduled {
+            error: execution_error,
+        },
+        Ok(FailOutcome::Requeued) => WorkerTransition::Requeued {
+            error: execution_error,
+        },
+        Ok(FailOutcome::Terminal {
+            state: JobState::DeadLetter,
+        }) => WorkerTransition::DeadLettered {
+            error: execution_error,
+        },
+        Ok(FailOutcome::Terminal {
+            state: JobState::Failed,
+        }) => WorkerTransition::TerminalFailed {
+            error: execution_error,
+        },
+        Ok(FailOutcome::Terminal {
+            state: JobState::Completed,
+        }) => WorkerTransition::Completed,
+        Ok(FailOutcome::Terminal { state }) => {
+            WorkerTransition::PersistenceError {
+                operation,
+                error: format!(
+                    "queue reported non-terminal state {state:?} as terminal; original error: {execution_error}"
+                ),
+            }
+        }
+        Ok(FailOutcome::Missing) => WorkerTransition::Missing {
+            operation,
+            error: format!(
+                "durable failure transition was not applied because the lease was missing; original error: {execution_error}"
+            ),
+        },
+        Err(err) => WorkerTransition::PersistenceError {
+            operation,
+            error: format!(
+                "failed to persist job failure: {err}; original error: {execution_error}"
+            ),
+        },
+    }
+}
+
+fn worker_transition_from_dead_letter(
+    outcome: Result<QueueTransitionOutcome>,
+    execution_error: String,
+) -> WorkerTransition {
+    match outcome {
+        Ok(QueueTransitionOutcome::Applied) => WorkerTransition::DeadLettered {
+            error: execution_error,
+        },
+        Ok(QueueTransitionOutcome::Requeued) => WorkerTransition::Requeued {
+            error: execution_error,
+        },
+        Ok(QueueTransitionOutcome::Missing) => WorkerTransition::Missing {
+            operation: "dead_letter",
+            error: format!(
+                "durable dead-letter transition was not applied because the lease was missing; original error: {execution_error}"
+            ),
+        },
+        Err(err) => WorkerTransition::PersistenceError {
+            operation: "dead_letter",
+            error: format!(
+                "failed to persist job dead-letter: {err}; original error: {execution_error}"
+            ),
+        },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finalize_worker_transition<E>(
+    transition: WorkerTransition,
+    lease: &JobLease,
+    reserved_library_id: LibraryId,
+    scheduler: &WeightedFairScheduler,
+    events: &E,
+    correlations: &CorrelationCache,
+    mailbox_tx: &Arc<
+        Mutex<Option<tokio::sync::mpsc::Sender<OrchestratorCommand>>>,
+    >,
+) where
+    E: ScanEventBus + ?Sized,
+{
+    let job_id = lease.job.id;
+    let job_kind = lease.job.payload.kind();
+    let job_priority = lease.job.priority;
+    let library_id = lease.job.payload.library_id();
+    let dedupe_key: DedupeKey = lease.job.payload.dedupe_key();
+    let terminal = transition.is_terminal();
+    let requeued = matches!(&transition, WorkerTransition::Requeued { .. });
+
+    let (payload, command) = match transition {
+        WorkerTransition::Completed => (
+            JobEventPayload::Completed {
+                job_id,
+                kind: job_kind,
+                priority: job_priority,
+            },
+            LibraryActorCommand::JobCompleted {
+                job_id,
+                dedupe_key: dedupe_key.clone(),
+            },
+        ),
+        WorkerTransition::RetryScheduled { error } => (
+            JobEventPayload::Failed {
+                job_id,
+                kind: job_kind,
+                priority: job_priority,
+                retryable: true,
+            },
+            LibraryActorCommand::JobFailed {
+                job_id,
+                dedupe_key: dedupe_key.clone(),
+                retryable: true,
+                error: Some(error),
+            },
+        ),
+        WorkerTransition::Requeued { error } => (
+            JobEventPayload::Failed {
+                job_id,
+                kind: job_kind,
+                priority: job_priority,
+                retryable: true,
+            },
+            LibraryActorCommand::JobFailed {
+                job_id,
+                dedupe_key: dedupe_key.clone(),
+                retryable: true,
+                error: Some(error),
+            },
+        ),
+        WorkerTransition::TerminalFailed { error } => (
+            JobEventPayload::Failed {
+                job_id,
+                kind: job_kind,
+                priority: job_priority,
+                retryable: false,
+            },
+            LibraryActorCommand::JobFailed {
+                job_id,
+                dedupe_key: dedupe_key.clone(),
+                retryable: false,
+                error: Some(error),
+            },
+        ),
+        WorkerTransition::DeadLettered { error } => (
+            JobEventPayload::DeadLettered {
+                job_id,
+                kind: job_kind,
+                priority: job_priority,
+            },
+            LibraryActorCommand::JobFailed {
+                job_id,
+                dedupe_key: dedupe_key.clone(),
+                retryable: false,
+                error: Some(error),
+            },
+        ),
+        WorkerTransition::Missing { operation, error } => {
+            tracing::warn!(
+                job = %job_id.0,
+                lease = %lease.lease_id.0,
+                operation,
+                "durable queue transition was not applied because the lease was missing"
+            );
+            (
+                JobEventPayload::Failed {
+                    job_id,
+                    kind: job_kind,
+                    priority: job_priority,
+                    retryable: true,
+                },
+                LibraryActorCommand::JobFailed {
+                    job_id,
+                    dedupe_key: dedupe_key.clone(),
+                    retryable: true,
+                    error: Some(error),
+                },
+            )
+        }
+        WorkerTransition::PersistenceError { operation, error } => {
+            tracing::error!(
+                job = %job_id.0,
+                lease = %lease.lease_id.0,
+                operation,
+                error = %error,
+                "durable queue transition failed"
+            );
+            (
+                JobEventPayload::Failed {
+                    job_id,
+                    kind: job_kind,
+                    priority: job_priority,
+                    retryable: true,
+                },
+                LibraryActorCommand::JobFailed {
+                    job_id,
+                    dedupe_key: dedupe_key.clone(),
+                    retryable: true,
+                    error: Some(error),
+                },
+            )
+        }
+    };
+
+    let correlation_id = if terminal {
+        correlations
+            .take_persisted_or_generate(job_id, lease.job.correlation_id)
+            .await
+    } else {
+        correlations
+            .fetch_persisted_or_generate(job_id, lease.job.correlation_id)
+            .await
+    };
+    let event = JobEvent::from_job(
+        Some(correlation_id),
+        library_id,
+        lease.job.dedupe_key.clone(),
+        stable_path_key(&lease.job.payload),
+        payload,
+    );
+    if let Err(err) = events.publish(event).await {
+        tracing::error!(job = %job_id.0, "publish worker transition event failed: {err}");
+    }
+
+    if terminal {
+        scheduler.record_completed(reserved_library_id).await;
+    } else {
+        scheduler.release(reserved_library_id).await;
+        if requeued {
+            scheduler
+                .record_enqueued(job_kind, reserved_library_id, job_priority)
+                .await;
+        }
+    }
+
+    let sender_opt = {
+        let guard = mailbox_tx.lock().await;
+        guard.clone()
+    };
+    if let Some(sender) = sender_opt
+        && let Err(err) = sender
+            .send(OrchestratorCommand::Library {
+                library_id,
+                command,
+                completion: None,
+            })
+            .await
+    {
+        tracing::warn!(
+            job = %job_id.0,
+            "failed to send library actor notification: {err}"
+        );
+    }
+}
+
 impl fmt::Debug for RuntimeTaskHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RuntimeTaskHandle")
@@ -74,6 +397,166 @@ impl fmt::Debug for RuntimeTaskHandle {
 pub(super) struct RuntimeTaskGraph {
     shutdown_token: CancellationToken,
     tasks: Mutex<Vec<RuntimeTaskHandle>>,
+}
+
+fn folder_scan_request_from_discovery(
+    context: &FolderScanContext,
+    reason: ScanReason,
+    correlation_id: Option<uuid::Uuid>,
+    durable_job_id: Option<JobId>,
+) -> Option<EnqueueRequest> {
+    if durable_job_id.is_some() {
+        return None;
+    }
+    let job = FolderScanJob {
+        context: context.clone(),
+        scan_reason: reason,
+        enqueue_time: chrono::Utc::now(),
+        device_id: None,
+    };
+    let priority = match reason {
+        ScanReason::HotChange | ScanReason::WatcherOverflow => JobPriority::P0,
+        ScanReason::UserRequested | ScanReason::BulkSeed => JobPriority::P1,
+        ScanReason::MaintenanceSweep => JobPriority::P2,
+    };
+    let mut request =
+        EnqueueRequest::new(priority, JobPayload::FolderScan(job));
+    request.correlation_id = correlation_id;
+    Some(request)
+}
+
+async fn reconcile_scheduler_ready<Q>(
+    queue: &Q,
+    scheduler: &WeightedFairScheduler,
+) -> Result<usize>
+where
+    Q: QueueService + ?Sized,
+{
+    let counts = queue.ready_counts_grouped().await?;
+    let ready_total = counts.iter().map(|count| count.ready).sum();
+    scheduler
+        .reconcile_ready_absolute(counts.into_iter().map(|count| {
+            ReadyCountEntry {
+                kind: count.kind,
+                library_id: count.library_id,
+                priority: count.priority,
+                count: count.ready,
+                leased: count.leased,
+            }
+        }))
+        .await;
+    Ok(ready_total)
+}
+
+async fn run_housekeeper_cycle<Q>(queue: &Q, scheduler: &WeightedFairScheduler)
+where
+    Q: QueueService + LeaseExpiryScanner + ?Sized,
+{
+    if let Err(err) = queue.scan_expired_leases().await {
+        tracing::warn!("housekeeper scan_expired_leases error: {err}");
+    }
+
+    match queue.repair_terminal_series_dependencies().await {
+        Ok(0) => {}
+        Ok(repaired) => tracing::info!(
+            repaired,
+            "repaired deferred episode jobs with terminal series dependencies"
+        ),
+        Err(err) => tracing::warn!(
+            error = %err,
+            "terminal series dependency repair failed"
+        ),
+    }
+
+    match reconcile_scheduler_ready(queue, scheduler).await {
+        Ok(ready_total) => {
+            tracing::trace!(ready_total, "scheduler ready counts reconciled")
+        }
+        Err(err) => tracing::warn!(
+            error = %err,
+            "periodic scheduler ready reconciliation failed"
+        ),
+    }
+}
+
+async fn observe_scheduler_events<Q>(
+    queue: Arc<Q>,
+    mut job_rx: tokio::sync::broadcast::Receiver<JobEvent>,
+    scheduler: WeightedFairScheduler,
+    correlations: CorrelationCache,
+    shutdown: CancellationToken,
+) where
+    Q: QueueService + ?Sized,
+{
+    loop {
+        tokio::select! {
+            _ = shutdown.cancelled() => {
+                tracing::info!("Scheduler observer shutting down");
+                break;
+            }
+            event = job_rx.recv() => match event {
+                Ok(event) => {
+                    match event.payload {
+                        JobEventPayload::Enqueued {
+                            job_id,
+                            kind,
+                            priority,
+                        } => {
+                            correlations
+                                .remember(job_id, event.meta.correlation_id)
+                                .await;
+                            scheduler
+                                .record_enqueued(
+                                    kind,
+                                    event.meta.library_id,
+                                    priority,
+                                )
+                                .await;
+                        }
+                        JobEventPayload::Merged {
+                            existing_job_id,
+                            merged_job_id,
+                            ..
+                        } => {
+                            correlations
+                                .remember_if_absent(
+                                    existing_job_id,
+                                    event.meta.correlation_id,
+                                )
+                                .await;
+                            if merged_job_id != existing_job_id {
+                                correlations
+                                    .remember_if_absent(
+                                        merged_job_id,
+                                        event.meta.correlation_id,
+                                    )
+                                    .await;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::warn!(
+                        "scheduler observer lagged, skipped {skipped} events; reconciling durable ready counts"
+                    );
+                    match reconcile_scheduler_ready(queue.as_ref(), &scheduler)
+                        .await
+                    {
+                        Ok(ready_total) => tracing::info!(
+                            ready_total,
+                            "scheduler ready counts reconciled after event lag"
+                        ),
+                        Err(err) => tracing::error!(
+                            error = %err,
+                            "scheduler ready reconciliation failed after event lag"
+                        ),
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Debug for RuntimeTaskGraph {
@@ -127,16 +610,7 @@ impl RuntimeTaskGraph {
     where
         Q: QueueService + ?Sized,
     {
-        let counts = queue.ready_counts_grouped().await?;
-        scheduler
-            .record_ready_bulk(counts.into_iter().map(|count| {
-                ReadyCountEntry {
-                    library_id: count.library_id,
-                    priority: count.priority,
-                    count: count.ready,
-                }
-            }))
-            .await;
+        reconcile_scheduler_ready(queue.as_ref(), &scheduler).await?;
         Ok(())
     }
 
@@ -151,19 +625,6 @@ impl RuntimeTaskGraph {
         let mut domain_rx = events.subscribe_scan();
         let shutdown = self.shutdown_token.clone();
 
-        // Helper mirrors dispatcher priority mapping.
-        fn priority_for_reason(reason: &ScanReason) -> JobPriority {
-            match reason {
-                ScanReason::HotChange | ScanReason::WatcherOverflow => {
-                    JobPriority::P0
-                }
-                ScanReason::UserRequested | ScanReason::BulkSeed => {
-                    JobPriority::P1
-                }
-                ScanReason::MaintenanceSweep => JobPriority::P2,
-            }
-        }
-
         self.spawn_task(RuntimeTaskKind::DomainEventRouter, async move {
             loop {
                 tokio::select! {
@@ -172,19 +633,23 @@ impl RuntimeTaskGraph {
                         break;
                     }
                     evt = domain_rx.recv() => match evt {
-                        Ok(ScanEvent::FolderDiscovered { context, reason }) => {
-                            let job = FolderScanJob {
-                                context: *context.clone(),
-                                scan_reason: reason,
-                                enqueue_time: chrono::Utc::now(),
-                                device_id: None,
-                            };
-                            let payload = JobPayload::FolderScan(job);
-                            let priority = priority_for_reason(&reason);
-                            let request = EnqueueRequest::new(priority, payload);
+                        Ok(ScanEvent::FolderDiscovered {
+                            context,
+                            reason,
+                            correlation_id,
+                            durable_job_id,
+                        }) => {
+                            let request = folder_scan_request_from_discovery(
+                                &context,
+                                reason,
+                                correlation_id,
+                                durable_job_id,
+                            );
 
-                            if let Err(err) = enqueuer.enqueue(request).await {
-                                tracing::warn!(target: "scan::router", error = %err, folder = %context.folder_path_norm(), "failed to enqueue FolderScan from FolderDiscovered");
+                            if let Some(request) = request
+                                && let Err(err) = enqueuer.enqueue(request).await
+                            {
+                                tracing::warn!(target: "scan::router", error = %err, folder = %context.folder_path_norm(), "failed to enqueue legacy FolderScan from FolderDiscovered");
                             }
                         }
                         Ok(_) => { /* ignore other domain events */ }
@@ -286,14 +751,56 @@ impl RuntimeTaskGraph {
                                         })
                                         .count();
 
-                                    if !batch.is_empty() {
-                                        enqueuer.enqueue_many(batch).await.map_err(
-                                            |err| {
-                                                tracing::warn!(target: "scan::mailbox", error = %err, "failed to enqueue scan batch from actor request");
-                                                err
-                                            },
-                                        )?;
-                                    }
+                                    // LibraryActor admission marks folder paths
+                                    // active before persistence is attempted. If
+                                    // enqueue fails, release those provisional
+                                    // records so the retained watcher batch (or a
+                                    // retried seed command) can be admitted again.
+                                    let provisional_folder_jobs: Vec<_> = batch
+                                        .iter()
+                                        .filter(|request| {
+                                            matches!(request.payload, JobPayload::FolderScan(_))
+                                        })
+                                        .map(|request| request.dedupe_key())
+                                        .collect();
+
+                                    let handles = if batch.is_empty() {
+                                        Vec::new()
+                                    } else {
+                                        match enqueuer.enqueue_many(batch).await {
+                                            Ok(handles) => handles,
+                                            Err(err) => {
+                                                tracing::warn!(target: "scan::mailbox", error = %err, "failed to enqueue scan batch from actor request; rolling back provisional actor state");
+                                                let mut actor = actor_handle.lock().await;
+                                                for dedupe_key in provisional_folder_jobs {
+                                                    if let Err(rollback_err) = actor
+                                                        .handle_command(LibraryActorCommand::JobFailed {
+                                                            job_id: JobId::new(),
+                                                            dedupe_key,
+                                                            retryable: true,
+                                                            error: Some("durable enqueue failed".to_string()),
+                                                        })
+                                                        .await
+                                                    {
+                                                        tracing::warn!(target: "scan::mailbox", error = %rollback_err, "failed to roll back provisional library actor state");
+                                                    }
+                                                }
+                                                return Err(err);
+                                            }
+                                        }
+                                    };
+                                    let mut enrolled_job_ids: Vec<_> = handles
+                                        .iter()
+                                        .map(|handle| {
+                                            handle
+                                                .merged_into
+                                                .unwrap_or(handle.job_id)
+                                        })
+                                        .collect();
+                                    enrolled_job_ids.sort_unstable_by_key(
+                                        |job_id| job_id.0,
+                                    );
+                                    enrolled_job_ids.dedup();
 
                                     if let LibraryActorCommand::Start {
                                         mode,
@@ -312,16 +819,18 @@ impl RuntimeTaskGraph {
                                             correlation_id: *correlation_id,
                                             mode,
                                             queued_folders,
+                                            enrolled_job_ids,
                                             completed_at: chrono::Utc::now(),
                                         };
-                                        if let Err(err) = events
-                                            .publish_scan_event(ScanEvent::SeedCompleted(
-                                                summary,
-                                            ))
+                                        events
+                                            .publish_scan_event(
+                                                ScanEvent::SeedCompleted(summary),
+                                            )
                                             .await
-                                        {
-                                            tracing::warn!(target: "scan::mailbox", error = %err, "failed to publish scan seed completion");
-                                        }
+                                            .map_err(|err| {
+                                                tracing::warn!(target: "scan::mailbox", error = %err, "failed to publish scan seed completion");
+                                                err
+                                            })?;
                                     }
 
                                     Ok(())
@@ -344,63 +853,30 @@ impl RuntimeTaskGraph {
         Ok(())
     }
 
-    pub(super) async fn spawn_scheduler_observer<E>(
+    pub(super) async fn spawn_scheduler_observer<Q, E>(
         &self,
+        queue: Arc<Q>,
         events: Arc<E>,
         scheduler: WeightedFairScheduler,
         correlations: CorrelationCache,
     ) where
+        Q: QueueService + 'static,
         E: ScanEventBus + JobEventStream + 'static,
     {
-        let mut job_rx = events.subscribe_jobs();
+        let job_rx = events.subscribe_jobs();
         let shutdown = self.shutdown_token.clone();
 
-        self.spawn_task(RuntimeTaskKind::SchedulerObserver, async move {
-            loop {
-                tokio::select! {
-                    _ = shutdown.cancelled() => {
-                        tracing::info!("Scheduler observer shutting down");
-                        break;
-                    }
-                    event = job_rx.recv() => match event {
-                        Ok(event) => {
-                            match event.payload {
-                                JobEventPayload::Enqueued { job_id, priority, .. } => {
-                                    correlations.remember(job_id, event.meta.correlation_id).await;
-                                    scheduler
-                                        .record_enqueued(event.meta.library_id, priority)
-                                        .await;
-                                }
-                                JobEventPayload::Merged {
-                                    existing_job_id,
-                                    merged_job_id,
-                                    ..
-                                } => {
-                                    correlations
-                                        .remember_if_absent(existing_job_id, event.meta.correlation_id)
-                                        .await;
-                                    if merged_job_id != existing_job_id {
-                                        correlations
-                                            .remember_if_absent(
-                                                merged_job_id,
-                                                event.meta.correlation_id,
-                                            )
-                                            .await;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            tracing::warn!(
-                                "scheduler observer lagged, skipped {skipped} events"
-                            );
-                        }
-                    }
-                }
-            }
-        }).await;
+        self.spawn_task(
+            RuntimeTaskKind::SchedulerObserver,
+            observe_scheduler_events(
+                queue,
+                job_rx,
+                scheduler,
+                correlations,
+                shutdown,
+            ),
+        )
+        .await;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -455,7 +931,7 @@ impl RuntimeTaskGraph {
                         continue;
                     }
 
-                    let reservation = match scheduler.reserve().await {
+                    let reservation = match scheduler.reserve(worker_kind).await {
                         Some(reservation) => reservation,
                         None => {
                             tokio::time::sleep(
@@ -538,22 +1014,29 @@ impl RuntimeTaskGraph {
                                     tracing::error!(
                                         "budget acquire error: {err}"
                                     );
-                                    let _ = q
-                                        .fail(
+                                    let execution_error = format!(
+                                        "budget acquire failed: {err}"
+                                    );
+                                    let transition = worker_transition_from_fail(
+                                        q.fail_with_outcome(
                                             lease_id,
                                             true,
-                                            Some(
-                                                "budget acquire failed".into(),
-                                            ),
+                                            Some(execution_error.clone()),
                                         )
-                                        .await;
-                                    scheduler.release(library_id).await;
-                                    scheduler
-                                        .record_enqueued(
-                                            library_id,
-                                            job_priority,
-                                        )
-                                        .await;
+                                        .await,
+                                        execution_error,
+                                        "fail_after_budget_acquire",
+                                    );
+                                    finalize_worker_transition(
+                                        transition,
+                                        &lease,
+                                        reservation.library_id,
+                                        &scheduler,
+                                        e.as_ref(),
+                                        &correlation_cache,
+                                        &mailbox_tx,
+                                    )
+                                    .await;
                                     continue;
                                 }
                             };
@@ -576,162 +1059,75 @@ impl RuntimeTaskGraph {
                                 },
                             );
 
-                            let dispatch_status = d.dispatch(&lease).await;
+                            let dispatch_timeout =
+                                std::time::Duration::from_millis(
+                                    lease_cfg.dispatch_timeout_ms.max(1),
+                                );
+                            let dispatch_status = match tokio::time::timeout(
+                                dispatch_timeout,
+                                d.dispatch(&lease),
+                            )
+                            .await
+                            {
+                                Ok(status) => status,
+                                Err(_) => {
+                                    let error = format!(
+                                        "job dispatch timed out after {} ms",
+                                        dispatch_timeout.as_millis()
+                                    );
+                                    tracing::error!(
+                                        job = %job_id.0,
+                                        kind = ?job_kind,
+                                        library = %library_id,
+                                        timeout_ms = dispatch_timeout.as_millis(),
+                                        "{error}"
+                                    );
+                                    DispatchStatus::Retry { error }
+                                }
+                            };
 
                             renew_task.stop().await;
 
-                            let dedupe_key: DedupeKey =
-                                lease.job.payload.dedupe_key();
-                            let library_id = lease.job.payload.library_id();
-                            let notify_command = match dispatch_status {
+                            let transition = match dispatch_status {
                                 DispatchStatus::Success => {
-                                    if let Err(err) = q.complete(lease_id).await
-                                    {
-                                        tracing::error!(
-                                            "queue complete error: {err}"
-                                        );
-                                    }
-                                    let correlation_id = correlation_cache
-                                        .take_persisted_or_generate(
-                                            job_id,
-                                            lease.job.correlation_id,
-                                        )
-                                        .await;
-                                    let event = JobEvent::from_job(
-                                        Some(correlation_id),
-                                        library_id,
-                                        lease.job.dedupe_key.clone(),
-                                        stable_path_key(&lease.job.payload),
-                                        JobEventPayload::Completed {
-                                            job_id,
-                                            kind: job_kind,
-                                            priority: job_priority,
-                                        },
-                                    );
-                                    if let Err(err) = e.publish(event).await {
-                                        tracing::error!(
-                                            "publish complete event failed: {err}"
-                                        );
-                                    }
-                                    scheduler.record_completed(library_id).await;
-                                    Some(LibraryActorCommand::JobCompleted {
-                                        job_id,
-                                        dedupe_key: dedupe_key.clone(),
-                                    })
+                                    worker_transition_from_complete(
+                                        q.complete_with_outcome(lease_id).await,
+                                    )
                                 }
                                 DispatchStatus::Retry { error } => {
-                                    if let Err(err) = q
-                                        .fail(
+                                    worker_transition_from_fail(
+                                        q.fail_with_outcome(
                                             lease_id,
                                             true,
                                             Some(error.clone()),
                                         )
-                                        .await
-                                    {
-                                        tracing::error!(
-                                            "queue fail error: {err}"
-                                        );
-                                    }
-                                    let correlation_id = correlation_cache
-                                        .fetch_persisted_or_generate(
-                                            job_id,
-                                            lease.job.correlation_id,
-                                        )
-                                        .await;
-                                    let event = JobEvent::from_job(
-                                        Some(correlation_id),
-                                        library_id,
-                                        lease.job.dedupe_key.clone(),
-                                        stable_path_key(&lease.job.payload),
-                                        JobEventPayload::Failed {
-                                            job_id,
-                                            kind: job_kind,
-                                            priority: job_priority,
-                                            retryable: true,
-                                        },
-                                    );
-                                    if let Err(err) = e.publish(event).await {
-                                        tracing::error!(
-                                            "publish retry event failed: {err}"
-                                        );
-                                    }
-                                    scheduler.release(library_id).await;
-                                    scheduler
-                                        .record_enqueued(
-                                            library_id,
-                                            job_priority,
-                                        )
-                                        .await;
-                                    Some(LibraryActorCommand::JobFailed {
-                                        job_id,
-                                        dedupe_key: dedupe_key.clone(),
-                                        retryable: true,
-                                        error: Some(error),
-                                    })
+                                        .await,
+                                        error,
+                                        "fail",
+                                    )
                                 }
                                 DispatchStatus::DeadLetter { error } => {
-                                    if let Err(err) = q
-                                        .dead_letter(
+                                    worker_transition_from_dead_letter(
+                                        q.dead_letter_with_outcome(
                                             lease_id,
                                             Some(error.clone()),
                                         )
-                                        .await
-                                    {
-                                        tracing::error!(
-                                            "queue dead-letter error: {err}"
-                                        );
-                                    }
-                                    let correlation_id = correlation_cache
-                                        .take_persisted_or_generate(
-                                            job_id,
-                                            lease.job.correlation_id,
-                                        )
-                                        .await;
-                                    let event = JobEvent::from_job(
-                                        Some(correlation_id),
-                                        library_id,
-                                        lease.job.dedupe_key.clone(),
-                                        stable_path_key(&lease.job.payload),
-                                        JobEventPayload::DeadLettered {
-                                            job_id,
-                                            kind: job_kind,
-                                            priority: job_priority,
-                                        },
-                                    );
-                                    if let Err(err) = e.publish(event).await {
-                                        tracing::error!(
-                                            "publish dead-letter event failed: {err}"
-                                        );
-                                    }
-                                    scheduler.record_completed(library_id).await;
-                                    Some(LibraryActorCommand::JobFailed {
-                                        job_id,
-                                        dedupe_key: dedupe_key.clone(),
-                                        retryable: false,
-                                        error: Some(error),
-                                    })
+                                        .await,
+                                        error,
+                                    )
                                 }
                             };
 
-                            if let Some(command) = notify_command {
-                                let sender_opt = {
-                                    let guard = mailbox_tx.lock().await;
-                                    guard.clone()
-                                };
-                                if let Some(sender) = sender_opt
-                                    && let Err(err) = sender
-                                        .send(OrchestratorCommand::Library {
-                                            library_id,
-                                            command,
-                                            completion: None,
-                                        })
-                                        .await
-                                {
-                                    tracing::warn!(
-                                        "failed to send library actor notification: {err}"
-                                    );
-                                }
-                            }
+                            finalize_worker_transition(
+                                transition,
+                                &lease,
+                                reservation.library_id,
+                                &scheduler,
+                                e.as_ref(),
+                                &correlation_cache,
+                                &mailbox_tx,
+                            )
+                            .await;
 
                             let _ = b.release(token).await;
                         }
@@ -778,9 +1174,10 @@ impl RuntimeTaskGraph {
     pub(super) async fn spawn_housekeeper<Q>(
         &self,
         queue: Arc<Q>,
+        scheduler: WeightedFairScheduler,
         interval: std::time::Duration,
     ) where
-        Q: LeaseExpiryScanner + 'static,
+        Q: QueueService + LeaseExpiryScanner + 'static,
     {
         let shutdown = self.shutdown_token.clone();
         self.spawn_task(RuntimeTaskKind::Housekeeper, async move {
@@ -791,13 +1188,12 @@ impl RuntimeTaskGraph {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
-                        if let Err(err) = queue.scan_expired_leases().await {
-                            tracing::warn!("housekeeper scan_expired_leases error: {err}");
-                        }
+                        run_housekeeper_cycle(queue.as_ref(), &scheduler).await;
                     }
                 }
             }
-        }).await;
+        })
+        .await;
     }
 
     pub(super) async fn shutdown(
@@ -973,10 +1369,24 @@ impl LeaseRenewalTask {
         Self { cancel_tx, handle }
     }
 
-    async fn stop(self) {
+    async fn stop(mut self) {
         let _ = self.cancel_tx.try_send(());
-        if let Err(err) = self.handle.await {
-            tracing::warn!("lease renewal task failed: {err}");
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            &mut self.handle,
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                tracing::warn!("lease renewal task failed: {err}");
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "lease renewal task did not stop within one second; aborting"
+                );
+                self.handle.abort();
+            }
         }
     }
 }
@@ -1010,5 +1420,269 @@ fn workload_for(kind: JobKind) -> WorkloadType {
         JobKind::IndexUpsert => WorkloadType::Indexing,
         JobKind::ImageFetch => WorkloadType::ImageFetch,
         JobKind::TranscriptExtract => WorkloadType::TranscriptExtraction,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::scan::context::{MovieFolderScanContext, MovieRootPath};
+    use crate::domain::scan::orchestration::events::{
+        EventMeta, JobEventPublisher,
+    };
+    use crate::domain::scan::orchestration::queue::ReadyQueueCount;
+    use crate::domain::scan::orchestration::runtime::InProcJobEventBus;
+    use async_trait::async_trait;
+    use std::time::Duration;
+    use uuid::Uuid;
+
+    struct ReadyCountQueue {
+        counts: Vec<ReadyQueueCount>,
+        call_order: Option<Arc<std::sync::Mutex<Vec<&'static str>>>>,
+    }
+
+    impl ReadyCountQueue {
+        fn record_call(&self, call: &'static str) {
+            if let Some(call_order) = &self.call_order {
+                call_order.lock().expect("call order lock").push(call);
+            }
+        }
+    }
+
+    #[async_trait]
+    impl QueueService for ReadyCountQueue {
+        async fn enqueue(
+            &self,
+            _request: EnqueueRequest,
+        ) -> Result<crate::domain::scan::orchestration::job::JobHandle>
+        {
+            panic!("enqueue is not used by scheduler reconciliation tests")
+        }
+
+        async fn dequeue(
+            &self,
+            _request: DequeueRequest,
+        ) -> Result<Option<crate::domain::scan::orchestration::lease::JobLease>>
+        {
+            panic!("dequeue is not used by scheduler reconciliation tests")
+        }
+
+        async fn renew(
+            &self,
+            _renewal: LeaseRenewal,
+        ) -> Result<crate::domain::scan::orchestration::lease::JobLease>
+        {
+            panic!("renew is not used by scheduler reconciliation tests")
+        }
+
+        async fn complete(
+            &self,
+            _lease_id: crate::domain::scan::orchestration::lease::LeaseId,
+        ) -> Result<()> {
+            panic!("complete is not used by scheduler reconciliation tests")
+        }
+
+        async fn fail(
+            &self,
+            _lease_id: crate::domain::scan::orchestration::lease::LeaseId,
+            _retryable: bool,
+            _error: Option<String>,
+        ) -> Result<()> {
+            panic!("fail is not used by scheduler reconciliation tests")
+        }
+
+        async fn dead_letter(
+            &self,
+            _lease_id: crate::domain::scan::orchestration::lease::LeaseId,
+            _error: Option<String>,
+        ) -> Result<()> {
+            panic!("dead_letter is not used by reconciliation tests")
+        }
+
+        async fn cancel_job(&self, _job_id: JobId) -> Result<()> {
+            panic!("cancel_job is not used by reconciliation tests")
+        }
+
+        async fn queue_depth(&self, _kind: JobKind) -> Result<usize> {
+            panic!("queue_depth is not used by reconciliation tests")
+        }
+
+        async fn release_dependency(
+            &self,
+            _library_id: LibraryId,
+            _dependency_key: &crate::domain::scan::orchestration::job::DependencyKey,
+        ) -> Result<u64> {
+            panic!("release_dependency is not used by reconciliation tests")
+        }
+
+        async fn repair_terminal_series_dependencies(&self) -> Result<u64> {
+            self.record_call("repair_terminal_series_dependencies");
+            Ok(1)
+        }
+
+        async fn ready_counts_grouped(&self) -> Result<Vec<ReadyQueueCount>> {
+            self.record_call("ready_counts_grouped");
+            Ok(self.counts.clone())
+        }
+    }
+
+    #[async_trait]
+    impl LeaseExpiryScanner for ReadyCountQueue {
+        async fn scan_expired_leases(&self) -> Result<u64> {
+            self.record_call("scan_expired_leases");
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn folder_discovery_request_preserves_parent_correlation() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x61100000000000000000000000000001));
+        let correlation_id =
+            Uuid::from_u128(0x6110000000000000000000000000c001);
+        let context = FolderScanContext::Movie(MovieFolderScanContext {
+            library_id,
+            movie_root_path: MovieRootPath::try_new_under_library_root(
+                "/library",
+                "/library/Child Movie",
+            )
+            .unwrap(),
+        });
+
+        let request = folder_scan_request_from_discovery(
+            &context,
+            ScanReason::BulkSeed,
+            Some(correlation_id),
+            None,
+        )
+        .expect("legacy discovery requires enqueue");
+
+        assert_eq!(request.correlation_id, Some(correlation_id));
+        assert_eq!(request.priority, JobPriority::P1);
+        let JobPayload::FolderScan(job) = request.payload else {
+            panic!("expected child FolderScan request");
+        };
+        assert_eq!(job.context.library_id(), context.library_id());
+        assert_eq!(job.context.folder_path_norm(), context.folder_path_norm());
+        assert_eq!(job.scan_reason, ScanReason::BulkSeed);
+
+        assert!(
+            folder_scan_request_from_discovery(
+                &context,
+                ScanReason::BulkSeed,
+                Some(correlation_id),
+                Some(JobId::new()),
+            )
+            .is_none(),
+            "a discovery event with a durable child must remain observational"
+        );
+    }
+
+    #[tokio::test]
+    async fn event_lag_above_256_recovers_ready_counts_from_durable_queue() {
+        let library_id = LibraryId::new();
+        let queue = Arc::new(ReadyCountQueue {
+            counts: vec![ReadyQueueCount {
+                kind: JobKind::FolderScan,
+                library_id,
+                priority: JobPriority::P1,
+                ready: 1,
+                leased: 0,
+            }],
+            call_order: None,
+        });
+        let scheduler = WeightedFairScheduler::new(
+            &crate::domain::scan::orchestration::config::QueueConfig::default(),
+            crate::domain::scan::orchestration::config::PriorityWeights::default(),
+        );
+        let events = Arc::new(InProcJobEventBus::new(256));
+        let receiver = events.subscribe_jobs();
+
+        for sequence in 0..300 {
+            events
+                .publish(JobEvent {
+                    meta: EventMeta::new(
+                        None,
+                        library_id,
+                        format!("lag-regression:{sequence}"),
+                        None,
+                    ),
+                    payload: JobEventPayload::ThroughputTick {
+                        queue_depths: Vec::new(),
+                        sampled_at: chrono::Utc::now(),
+                    },
+                })
+                .await
+                .expect("event publish succeeds");
+        }
+
+        let shutdown = CancellationToken::new();
+        let observer = tokio::spawn(observe_scheduler_events(
+            queue,
+            receiver,
+            scheduler.clone(),
+            CorrelationCache::default(),
+            shutdown.clone(),
+        ));
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if scheduler
+                    .snapshot()
+                    .await
+                    .get(&library_id)
+                    .is_some_and(|(_, ready)| *ready == 1)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("lag reconciliation restores the durable ready count");
+
+        shutdown.cancel();
+        observer.await.expect("observer exits cleanly");
+    }
+
+    #[tokio::test]
+    async fn housekeeper_repairs_terminal_series_dependencies_before_ready_counts()
+     {
+        let library_id = LibraryId::new();
+        let call_order = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let queue = ReadyCountQueue {
+            counts: vec![ReadyQueueCount {
+                kind: JobKind::EpisodeMatch,
+                library_id,
+                priority: JobPriority::P1,
+                ready: 1,
+                leased: 0,
+            }],
+            call_order: Some(call_order.clone()),
+        };
+        let scheduler = WeightedFairScheduler::new(
+            &crate::domain::scan::orchestration::config::QueueConfig::default(),
+            crate::domain::scan::orchestration::config::PriorityWeights::default(),
+        );
+
+        run_housekeeper_cycle(&queue, &scheduler).await;
+
+        assert_eq!(
+            *call_order.lock().expect("call order lock"),
+            vec![
+                "scan_expired_leases",
+                "repair_terminal_series_dependencies",
+                "ready_counts_grouped",
+            ]
+        );
+        assert_eq!(
+            scheduler
+                .snapshot()
+                .await
+                .get(&library_id)
+                .map(|(_, ready)| *ready),
+            Some(1),
+            "the scheduler must observe the repaired ready row in the same cycle"
+        );
     }
 }

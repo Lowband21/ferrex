@@ -12,7 +12,7 @@ use crate::database::repository_ports::{
 };
 use crate::domain::scan::actors::image_fetch::ImageFetchActor;
 use crate::domain::scan::actors::index::{
-    IndexCommand, IndexerActor, IndexingOutcome,
+    IndexCommand, IndexerActor, IndexingChange, IndexingOutcome,
 };
 use crate::domain::scan::actors::metadata::{
     MediaReadyForIndex, MetadataActor, MetadataCommand,
@@ -34,9 +34,10 @@ use crate::domain::scan::orchestration::{
     events::{ScanEvent, ScanEventBus},
     job::{
         AnalyzeScanHierarchy, DependencyKey, EnqueueRequest, EpisodeMatchJob,
-        FolderScanJob, ImageFetchJob, IndexUpsertJob, JobPayload, JobPriority,
-        MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob, ScanReason,
-        SeriesResolveJob, TranscriptExtractJob, TranscriptExtractTrigger,
+        FolderScanJob, ImageFetchJob, IndexUpsertJob, JobHandle, JobPayload,
+        JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
+        ScanReason, SeriesResolveJob, TranscriptExtractJob,
+        TranscriptExtractTrigger,
     },
     lease::JobLease,
     queue::QueueService,
@@ -324,6 +325,7 @@ where
     E: ScanEventBus + Send + Sync + 'static,
 {
     enqueuer: PipelineEnqueuer<Q, E>,
+    queue: Arc<Q>,
 }
 
 impl<Q, E> Clone for FollowUpEnqueuer<Q, E>
@@ -334,6 +336,7 @@ where
     fn clone(&self) -> Self {
         Self {
             enqueuer: self.enqueuer.clone(),
+            queue: Arc::clone(&self.queue),
         }
     }
 }
@@ -360,12 +363,18 @@ where
         events: Arc<E>,
         correlations: CorrelationCache,
     ) -> Self {
-        let enqueuer = PipelineEnqueuer::new(queue, events, correlations);
+        let enqueuer =
+            PipelineEnqueuer::new(Arc::clone(&queue), events, correlations);
 
-        Self { enqueuer }
+        Self { enqueuer, queue }
     }
 
-    async fn enqueue(&self, request: EnqueueRequest) -> DispatchStatus {
+    async fn enqueue(
+        &self,
+        parent_correlation: Option<Uuid>,
+        mut request: EnqueueRequest,
+    ) -> DispatchStatus {
+        request.correlation_id = parent_correlation;
         match self.enqueuer.enqueue(request).await {
             Ok(_) => DispatchStatus::Success,
             Err(err) => classify_media_error(err),
@@ -374,12 +383,27 @@ where
 
     async fn enqueue_many(
         &self,
+        parent_correlation: Option<Uuid>,
         requests: Vec<EnqueueRequest>,
     ) -> DispatchStatus {
-        match self.enqueuer.enqueue_many(requests).await {
+        match self
+            .enqueue_many_with_handles(parent_correlation, requests)
+            .await
+        {
             Ok(_) => DispatchStatus::Success,
             Err(err) => classify_media_error(err),
         }
+    }
+
+    async fn enqueue_many_with_handles(
+        &self,
+        parent_correlation: Option<Uuid>,
+        mut requests: Vec<EnqueueRequest>,
+    ) -> Result<Vec<JobHandle>> {
+        for request in &mut requests {
+            request.correlation_id = parent_correlation;
+        }
+        self.enqueuer.enqueue_many(requests).await
     }
 
     async fn release_dependency(
@@ -391,6 +415,16 @@ where
             .release_dependency(library_id, dependency_key)
             .await
             .map(|_| ())
+    }
+
+    async fn release_terminal_series_dependency(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+        series_root_path: &crate::domain::scan::orchestration::context::SeriesRootPath,
+    ) -> Result<u64> {
+        self.queue
+            .release_terminal_series_dependency(library_id, series_root_path)
+            .await
     }
 }
 
@@ -460,6 +494,23 @@ impl FollowUpPlanner {
             scan_reason: media.scan_reason,
         };
         EnqueueRequest::new(analyze_priority, JobPayload::MediaAnalyze(analyze))
+    }
+
+    fn folder_scan_for_discovery(
+        &self,
+        context: &FolderScanContext,
+        reason: ScanReason,
+    ) -> EnqueueRequest {
+        let job = FolderScanJob {
+            context: context.clone(),
+            scan_reason: reason,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        };
+        EnqueueRequest::new(
+            priority_for_reason(&reason),
+            JobPayload::FolderScan(job),
+        )
     }
 
     fn metadata_after_analysis(
@@ -546,6 +597,7 @@ impl FollowUpPlanner {
                 "index:{}:{}",
                 source_library_id, ready.analyzed.path_norm
             ),
+            change: IndexingChange::Created,
         };
 
         // Bias index upserts to complete the item flow promptly.
@@ -1128,7 +1180,11 @@ where
                         folder_name,
                         job.scan_reason,
                     );
-                    match self.follow_ups.enqueue(req).await {
+                    match self
+                        .follow_ups
+                        .enqueue(lease.job.correlation_id, req)
+                        .await
+                    {
                         DispatchStatus::Success => {}
                         status => return status,
                     }
@@ -1162,7 +1218,11 @@ where
                 discovered_events.push(media.clone());
 
                 let req = self.planner.media_analyze_for_discovery(media);
-                match self.follow_ups.enqueue(req).await {
+                match self
+                    .follow_ups
+                    .enqueue(lease.job.correlation_id, req)
+                    .await
+                {
                     DispatchStatus::Success => {}
                     DispatchStatus::Retry { error } => {
                         tracing::warn!(
@@ -1206,13 +1266,37 @@ where
                 return classify_media_error(err);
             }
 
-            // Emit FolderDiscovered for each child; orchestrator enqueues from events.
-            for child in &children {
+            // Make every child durable before publishing the observational
+            // discovery events. The scan-event broadcast channel is bounded,
+            // so it cannot be the ownership boundary for executable work.
+            let child_requests = children
+                .iter()
+                .map(|child| {
+                    self.planner
+                        .folder_scan_for_discovery(child, job.scan_reason)
+                })
+                .collect();
+            let child_handles = match self
+                .follow_ups
+                .enqueue_many_with_handles(
+                    lease.job.correlation_id,
+                    child_requests,
+                )
+                .await
+            {
+                Ok(handles) => handles,
+                Err(err) => return classify_media_error(err),
+            };
+
+            for (child, handle) in children.iter().zip(child_handles) {
+                let durable_job_id = handle.merged_into.unwrap_or(handle.job_id);
                 if let Err(err) = self
                     .events
                     .publish_scan_event(ScanEvent::FolderDiscovered {
                         context: Box::new(child.clone()),
                         reason: job.scan_reason,
+                        correlation_id: lease.job.correlation_id,
+                        durable_job_id: Some(durable_job_id),
                     })
                     .await
                 {
@@ -1409,20 +1493,24 @@ where
                 error: "folder scan payload routed to media pipeline".into(),
             },
             JobPayload::SeriesResolve(job) => {
-                self.handle_series_resolve(job).await
+                self.handle_series_resolve(lease.job.correlation_id, job)
+                    .await
             }
             JobPayload::MediaAnalyze(job) => {
-                self.handle_media_analyze(job).await
+                self.handle_media_analyze(lease.job.correlation_id, job)
+                    .await
             }
             JobPayload::MetadataEnrich(job) => {
-                self.handle_metadata_enrich(job).await
+                self.handle_metadata_enrich(lease.job.correlation_id, job)
+                    .await
             }
             JobPayload::IndexUpsert(job) => {
                 self.handle_index_upsert(lease, job).await
             }
             JobPayload::ImageFetch(job) => self.handle_image_fetch(job).await,
             JobPayload::EpisodeMatch(job) => {
-                self.handle_episode_match(job).await
+                self.handle_episode_match(lease.job.correlation_id, job)
+                    .await
             }
             JobPayload::TranscriptExtract(job) => {
                 self.handle_transcript_extract(lease, job).await
@@ -1432,6 +1520,7 @@ where
 
     async fn handle_media_analyze(
         &self,
+        parent_correlation: Option<Uuid>,
         job: &MediaAnalyzeJob,
     ) -> DispatchStatus {
         // TODO: Refactor clone
@@ -1481,7 +1570,10 @@ where
                             .metadata_after_resolved_episode_analysis(
                                 job, &analyzed, hierarchy,
                             );
-                        return self.follow_ups.enqueue(req).await;
+                        return self
+                            .follow_ups
+                            .enqueue(parent_correlation, req)
+                            .await;
                     }
                     EpisodeDependencyDecision::Deferred { dependency_key } => {
                         let req = self.planner.episode_match_after_analysis(
@@ -1490,18 +1582,44 @@ where
                             episode_hierarchy,
                             dependency_key,
                         );
-                        return self.follow_ups.enqueue(req).await;
+                        let status = self
+                            .follow_ups
+                            .enqueue(parent_correlation, req)
+                            .await;
+                        if !matches!(status, DispatchStatus::Success) {
+                            return status;
+                        }
+
+                        // Resolution may have released this dependency after
+                        // the state check above but before the deferred row was
+                        // inserted. Let the queue atomically lock/check the
+                        // authoritative series root and promote the matching
+                        // deferred row. A separate state read here would race a
+                        // fresh resolver enrollment.
+                        if let Err(err) = self
+                            .follow_ups
+                            .release_terminal_series_dependency(
+                                job.library_id,
+                                &episode_hierarchy.series_root_path,
+                            )
+                            .await
+                        {
+                            return classify_media_error(err);
+                        }
+
+                        return DispatchStatus::Success;
                     }
                 }
             }
         }
 
         let req = self.planner.metadata_after_analysis(job, &analyzed);
-        self.follow_ups.enqueue(req).await
+        self.follow_ups.enqueue(parent_correlation, req).await
     }
 
     async fn handle_series_resolve(
         &self,
+        parent_correlation: Option<Uuid>,
         job: &SeriesResolveJob,
     ) -> DispatchStatus {
         let resolution = match self.series_coordinator.resolve_series(job).await
@@ -1510,26 +1628,22 @@ where
             Err(err) => {
                 let status = classify_media_error(err);
                 if let DispatchStatus::DeadLetter { error } = &status {
-                    let _ = self
-                        .series_coordinator
-                        .record_resolution_failure(job, error.clone())
-                        .await;
                     if let Err(err) = self
                         .series_coordinator
-                        .release_blocked_episode_dependencies(
-                            &self.follow_ups,
-                            job.library_id,
-                            &job.series_root_path,
-                        )
+                        .record_resolution_failure(job, error.clone())
                         .await
                     {
-                        tracing::warn!(
-                            target: "scan::dispatch",
-                            error = %err,
-                            series_root = %job.series_root_path.as_str(),
-                            "failed to release dependency after series resolve dead-letter"
-                        );
+                        // A resolver failure is not durably terminal until the
+                        // authoritative series-root state records it. Retry a
+                        // persistence failure instead of dead-lettering the job
+                        // while episode work remains blocked behind a
+                        // nonterminal root.
+                        return classify_media_error(err);
                     }
+                    // The durable queue owns failed-series dependency release
+                    // when it applies the lease's dead-letter transition. That
+                    // shared transaction can distinguish this terminal
+                    // generation from a root reopened after `mark_failed`.
                 }
                 return status;
             }
@@ -1559,11 +1673,12 @@ where
         }
 
         let req = self.planner.index_for_ready(job.library_id, &ready);
-        self.follow_ups.enqueue(req).await
+        self.follow_ups.enqueue(parent_correlation, req).await
     }
 
     async fn handle_metadata_enrich(
         &self,
+        parent_correlation: Option<Uuid>,
         job: &MetadataEnrichJob,
     ) -> DispatchStatus {
         let analyzed = MediaAnalyzed {
@@ -1609,14 +1724,18 @@ where
         if !ready.image_jobs.is_empty() {
             let image_requests = self.planner.image_fetches_for_ready(&ready);
 
-            match self.follow_ups.enqueue_many(image_requests).await {
+            match self
+                .follow_ups
+                .enqueue_many(parent_correlation, image_requests)
+                .await
+            {
                 DispatchStatus::Success => {}
                 status => return status,
             }
         }
 
         let req = self.planner.index_for_ready(job.library_id, &ready);
-        self.follow_ups.enqueue(req).await
+        self.follow_ups.enqueue(parent_correlation, req).await
     }
 
     async fn handle_index_upsert(
@@ -1743,7 +1862,9 @@ where
             TranscriptExtractTrigger::IndexUpsert,
             lease.job.correlation_id,
         );
-        self.follow_ups.enqueue(request).await
+        self.follow_ups
+            .enqueue(lease.job.correlation_id, request)
+            .await
     }
 
     fn transcript_attempt(lease: &JobLease) -> i32 {
@@ -2072,6 +2193,7 @@ where
 
     async fn handle_episode_match(
         &self,
+        parent_correlation: Option<Uuid>,
         job: &EpisodeMatchJob,
     ) -> DispatchStatus {
         let hierarchy = match self
@@ -2084,7 +2206,7 @@ where
         };
 
         let req = self.planner.metadata_after_episode_match(job, hierarchy);
-        self.follow_ups.enqueue(req).await
+        self.follow_ups.enqueue(parent_correlation, req).await
     }
 }
 
@@ -2155,7 +2277,7 @@ mod tests {
     use crate::types::ids::{LibraryId, MovieID, SeriesID};
     use crate::types::library::LibraryType;
     use ferrex_model::details::ExternalIds;
-    use ferrex_model::image::MediaImages;
+    use ferrex_model::image::{ImageSize, MediaImages};
     use ferrex_model::titles::MovieTitle;
     use ferrex_model::urls::{MovieURL, UrlLike};
     use ferrex_model::{
@@ -2163,7 +2285,7 @@ mod tests {
         MovieReference, MovieReferenceBatchSize, VideoMediaType,
     };
     use sqlx::PgPool;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use tokio::sync::Mutex;
     use tokio::time::Duration;
     use uuid::Uuid;
@@ -2409,6 +2531,86 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct FailurePersistencePause {
+        failure_persisted: Arc<tokio::sync::Barrier>,
+        resume: Arc<tokio::sync::Barrier>,
+    }
+
+    #[derive(Clone)]
+    struct FailingSeriesResolver {
+        states: Arc<Box<dyn SeriesScanStateRepository>>,
+        fail_failure_persistence: bool,
+        pause_after_failure_persistence: Option<FailurePersistencePause>,
+    }
+
+    impl FailingSeriesResolver {
+        fn new(
+            states: Arc<Box<dyn SeriesScanStateRepository>>,
+            fail_failure_persistence: bool,
+        ) -> Self {
+            Self {
+                states,
+                fail_failure_persistence,
+                pause_after_failure_persistence: None,
+            }
+        }
+
+        fn paused_after_failure_persistence(
+            states: Arc<Box<dyn SeriesScanStateRepository>>,
+            pause: FailurePersistencePause,
+        ) -> Self {
+            Self {
+                states,
+                fail_failure_persistence: false,
+                pause_after_failure_persistence: Some(pause),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SeriesResolverPort for FailingSeriesResolver {
+        async fn resolve(
+            &self,
+            _job: &SeriesResolveJob,
+        ) -> Result<SeriesResolution> {
+            Err(MediaError::InvalidMedia(
+                "series provider rejected resolver input".into(),
+            ))
+        }
+
+        async fn mark_failed(
+            &self,
+            library_id: LibraryId,
+            series_root_path: SeriesRootPath,
+            reason: String,
+        ) -> Result<()> {
+            if self.fail_failure_persistence {
+                return Err(MediaError::Internal(
+                    "series failure persistence unavailable".into(),
+                ));
+            }
+
+            let _ = self
+                .states
+                .mark_failed(library_id, series_root_path, reason)
+                .await?;
+            if let Some(pause) = &self.pause_after_failure_persistence {
+                pause.failure_persisted.wait().await;
+                pause.resume.wait().await;
+            }
+            Ok(())
+        }
+
+        async fn get_state(
+            &self,
+            library_id: LibraryId,
+            series_root_path: &SeriesRootPath,
+        ) -> Result<Option<SeriesScanState>> {
+            self.states.get(library_id, series_root_path).await
+        }
+    }
+
     struct StubIndexActor;
 
     #[async_trait]
@@ -2626,15 +2828,58 @@ mod tests {
         }
     }
 
+    struct ResolveBeforeEpisodeInsert {
+        states: Arc<Box<dyn SeriesScanStateRepository>>,
+        library_id: LibraryId,
+        series_root_path: SeriesRootPath,
+        series_ref: SeriesRef,
+    }
+
+    #[derive(Clone)]
+    struct TerminalReleasePause {
+        terminal_observed: Arc<tokio::sync::Barrier>,
+        resume: Arc<tokio::sync::Barrier>,
+    }
+
     #[derive(Default)]
     struct RecordingQueue {
         enqueued: Mutex<Vec<EnqueueRequest>>,
         released_dependencies: Mutex<Vec<(LibraryId, DependencyKey)>>,
+        resolve_before_episode_insert:
+            Mutex<Option<ResolveBeforeEpisodeInsert>>,
+        series_states: Mutex<Option<Arc<Box<dyn SeriesScanStateRepository>>>>,
+        terminal_release_pause: Mutex<Option<TerminalReleasePause>>,
+        dependency_operation_order: Mutex<Vec<&'static str>>,
     }
 
     impl RecordingQueue {
         async fn enqueued(&self) -> Vec<EnqueueRequest> {
             self.enqueued.lock().await.clone()
+        }
+
+        async fn observe_series_states(
+            &self,
+            states: Arc<Box<dyn SeriesScanStateRepository>>,
+        ) {
+            *self.series_states.lock().await = Some(states);
+        }
+
+        async fn resolve_before_episode_insert(
+            &self,
+            resolution: ResolveBeforeEpisodeInsert,
+        ) {
+            self.observe_series_states(Arc::clone(&resolution.states))
+                .await;
+            *self.resolve_before_episode_insert.lock().await = Some(resolution);
+        }
+
+        async fn pause_terminal_release_after_observation(
+            &self,
+            states: Arc<Box<dyn SeriesScanStateRepository>>,
+            pause: TerminalReleasePause,
+        ) {
+            self.observe_series_states(states).await;
+            *self.terminal_release_pause.lock().await = Some(pause);
         }
     }
 
@@ -2642,12 +2887,41 @@ mod tests {
     impl QueueService for RecordingQueue {
         async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
             request.validate()?;
+            let resolution =
+                if matches!(request.payload, JobPayload::EpisodeMatch(_)) {
+                    self.resolve_before_episode_insert.lock().await.take()
+                } else {
+                    None
+                };
+            let resolver_won = resolution.is_some();
+            if let Some(resolution) = resolution {
+                resolution
+                    .states
+                    .mark_resolved(
+                        resolution.library_id,
+                        resolution.series_root_path,
+                        resolution.series_ref,
+                    )
+                    .await?;
+                // Model the resolver's dependency release winning immediately
+                // before this deferred row becomes durable.
+                self.dependency_operation_order
+                    .lock()
+                    .await
+                    .push("resolver_release_before_insert");
+            }
             let handle = JobHandle::accepted(
                 JobId::new(),
                 &request.payload,
                 request.priority,
             );
             self.enqueued.lock().await.push(request);
+            if resolver_won {
+                self.dependency_operation_order
+                    .lock()
+                    .await
+                    .push("deferred_episode_insert");
+            }
             Ok(handle)
         }
 
@@ -2721,11 +2995,78 @@ mod tests {
             library_id: LibraryId,
             dependency_key: &DependencyKey,
         ) -> Result<u64> {
+            self.dependency_operation_order
+                .lock()
+                .await
+                .push("post_enqueue_release");
             self.released_dependencies
                 .lock()
                 .await
                 .push((library_id, dependency_key.clone()));
             Ok(0)
+        }
+
+        async fn release_terminal_series_dependency(
+            &self,
+            library_id: LibraryId,
+            series_root_path: &SeriesRootPath,
+        ) -> Result<u64> {
+            let Some(states) = self.series_states.lock().await.clone() else {
+                return Ok(0);
+            };
+            let observed_terminal = states
+                .get(library_id, series_root_path)
+                .await?
+                .is_some_and(|state| {
+                    matches!(
+                        state.status,
+                        SeriesScanStatus::Resolved | SeriesScanStatus::Failed
+                    )
+                });
+
+            if observed_terminal {
+                if let Some(pause) =
+                    self.terminal_release_pause.lock().await.take()
+                {
+                    self.dependency_operation_order
+                        .lock()
+                        .await
+                        .push("stale_terminal_observed");
+                    pause.terminal_observed.wait().await;
+                    pause.resume.wait().await;
+                }
+            }
+
+            // Model the PostgreSQL operation's state-row lock/recheck after a
+            // concurrent enrollment wins. The production implementation does
+            // both this validation and promotion in one statement.
+            let terminal = states
+                .get(library_id, series_root_path)
+                .await?
+                .is_some_and(|state| {
+                    matches!(
+                        state.status,
+                        SeriesScanStatus::Resolved | SeriesScanStatus::Failed
+                    )
+                });
+            if !terminal {
+                self.dependency_operation_order
+                    .lock()
+                    .await
+                    .push("atomic_release_rejected");
+                return Ok(0);
+            }
+
+            let dependency_key = DependencyKey::series_root(series_root_path);
+            self.dependency_operation_order
+                .lock()
+                .await
+                .push("atomic_post_enqueue_release");
+            self.released_dependencies
+                .lock()
+                .await
+                .push((library_id, dependency_key));
+            Ok(1)
         }
     }
 
@@ -3031,6 +3372,31 @@ mod tests {
         )
     }
 
+    fn lease_for_payload_with_correlation(
+        payload: JobPayload,
+        correlation_id: Uuid,
+    ) -> JobLease {
+        let mut record = JobRecord::new(payload, JobPriority::P1);
+        record.correlation_id = Some(correlation_id);
+        JobLease::new(
+            record,
+            "test-worker".into(),
+            chrono::Duration::seconds(30),
+        )
+    }
+
+    fn lease_for_enqueue_request(request: &EnqueueRequest) -> JobLease {
+        let mut record =
+            JobRecord::new(request.payload.clone(), request.priority);
+        record.correlation_id = request.correlation_id;
+        record.dependency_key = request.dependency_key.clone();
+        JobLease::new(
+            record,
+            "test-worker".into(),
+            chrono::Duration::seconds(30),
+        )
+    }
+
     fn series_hint(title: &str) -> SeriesHint {
         SeriesHint {
             title: title.to_string(),
@@ -3317,9 +3683,11 @@ mod tests {
             std::fs::set_permissions(&ffprobe_path, perms).unwrap();
         }
 
-        let mut timed_text_config = TimedTextExtractionConfig::default();
-        timed_text_config.ffprobe_path = ffprobe_path;
-        timed_text_config.ffmpeg_path = library_root.join("missing-ffmpeg");
+        let timed_text_config = TimedTextExtractionConfig {
+            ffprobe_path,
+            ffmpeg_path: library_root.join("missing-ffmpeg"),
+            ..TimedTextExtractionConfig::default()
+        };
 
         let dispatcher = DefaultJobDispatcher::new(
             Arc::clone(&queue),
@@ -3353,11 +3721,13 @@ mod tests {
             node: ScanNodeKind::MovieFolder,
             path_norm: media_path.to_string_lossy().to_string(),
             idempotency_key: "timed-text-runtime-test".to_string(),
+            change: IndexingChange::Created,
         };
-        let lease = JobLease::new(
-            JobRecord::new(JobPayload::IndexUpsert(job), JobPriority::P1),
-            "timed-text-test".to_string(),
-            chrono::Duration::seconds(30),
+        let parent_correlation =
+            Uuid::from_u128(0x6290000000000000000000000000c001);
+        let lease = lease_for_payload_with_correlation(
+            JobPayload::IndexUpsert(job),
+            parent_correlation,
         );
 
         let status = dispatcher.dispatch(&lease).await;
@@ -3366,6 +3736,7 @@ mod tests {
         assert!(transcripts.recorded().await.is_empty());
         let enqueued = queue.enqueued().await;
         assert_eq!(enqueued.len(), 1);
+        assert_eq!(enqueued[0].correlation_id, Some(parent_correlation));
         let JobPayload::TranscriptExtract(transcript_job) =
             enqueued[0].payload.clone()
         else {
@@ -3379,14 +3750,7 @@ mod tests {
             TranscriptExtractTrigger::IndexUpsert
         );
 
-        let transcript_lease = JobLease::new(
-            JobRecord::new(
-                JobPayload::TranscriptExtract(transcript_job),
-                JobPriority::P2,
-            ),
-            "timed-text-test".to_string(),
-            chrono::Duration::seconds(30),
-        );
+        let transcript_lease = lease_for_enqueue_request(&enqueued[0]);
         let status = dispatcher.dispatch(&transcript_lease).await;
 
         assert_eq!(status, DispatchStatus::Success);
@@ -3587,7 +3951,144 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn child_burst_is_durable_before_bounded_discovery_events_lag() {
+        const CHILD_COUNT: usize = 300;
+
+        let parent_correlation =
+            Uuid::from_u128(0x5760000000000000000000000000c022);
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000022));
+        let parent_context = FolderScanContext::Movie(MovieFolderScanContext {
+            library_id,
+            movie_root_path: MovieRootPath::try_new_under_library_root(
+                "/library",
+                "/library/Burst Parent",
+            )
+            .unwrap(),
+        });
+        let children: Vec<_> = (0..CHILD_COUNT)
+            .map(|index| {
+                FolderScanContext::Movie(MovieFolderScanContext {
+                    library_id,
+                    movie_root_path: MovieRootPath::try_new_under_library_root(
+                        "/library",
+                        format!("/library/Child {index:03}"),
+                    )
+                    .unwrap(),
+                })
+            })
+            .collect();
+        let expected_paths: HashSet<_> = children
+            .iter()
+            .map(|child| child.folder_path_norm().to_string())
+            .collect();
+
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(256));
+        let mut scan_rx = events.subscribe_scan();
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&series_states)));
+        let folder_actor = Arc::new(StubFolderActor {
+            plan: FolderListingPlan {
+                directories: children
+                    .iter()
+                    .map(|child| PathBuf::from(child.folder_path_norm()))
+                    .collect(),
+                media_files: vec![],
+                ancillary_files: vec![],
+                generated_listing_hash: "child-burst-listing".into(),
+                total_entries: CHILD_COUNT,
+                folder_missing: false,
+            },
+            discovered: vec![],
+            children: children.clone(),
+            summary: FolderScanSummary {
+                context: parent_context.clone(),
+                discovered_files: 0,
+                enqueued_subfolders: CHILD_COUNT,
+                listing_hash: "child-burst-listing".into(),
+                outcome: FolderScanOutcome::Changed,
+                completed_at: Utc::now(),
+            },
+        }) as Arc<dyn FolderScanActor>;
+        let actors = DispatcherActors::new(
+            folder_actor,
+            Arc::new(StubAnalyzeActor),
+            Arc::new(StubMetadataActor),
+            Arc::new(StubIndexActor),
+            Arc::new(StubImageActor),
+        );
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            cursors,
+            Arc::clone(&series_states),
+            series_resolver,
+            actors,
+            CorrelationCache::default(),
+        );
+        let lease = lease_for_payload_with_correlation(
+            JobPayload::FolderScan(FolderScanJob {
+                context: parent_context,
+                scan_reason: ScanReason::BulkSeed,
+                enqueue_time: Utc::now(),
+                device_id: None,
+            }),
+            parent_correlation,
+        );
+
+        assert_eq!(dispatcher.dispatch(&lease).await, DispatchStatus::Success);
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), CHILD_COUNT);
+        assert!(enqueued.iter().all(|request| {
+            matches!(request.payload, JobPayload::FolderScan(_))
+                && request.correlation_id == Some(parent_correlation)
+        }));
+        let durable_paths: HashSet<_> = enqueued
+            .iter()
+            .filter_map(|request| match &request.payload {
+                JobPayload::FolderScan(job) => {
+                    Some(job.context.folder_path_norm().to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(durable_paths, expected_paths);
+
+        let skipped = match scan_rx.recv().await {
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                skipped
+            }
+            other => {
+                panic!("expected >256 discovery burst to lag, got {other:?}")
+            }
+        };
+        assert!(skipped >= 45);
+
+        let mut observed_marked_discoveries = 0;
+        while let Ok(event) = scan_rx.try_recv() {
+            if let ScanEvent::FolderDiscovered {
+                durable_job_id,
+                correlation_id,
+                ..
+            } = event
+            {
+                assert!(durable_job_id.is_some());
+                assert_eq!(correlation_id, Some(parent_correlation));
+                observed_marked_discoveries += 1;
+            }
+        }
+        assert!(observed_marked_discoveries > 0);
+    }
+
+    #[tokio::test]
     async fn series_root_scan_enqueues_resolve_and_season_discovery() {
+        let parent_correlation =
+            Uuid::from_u128(0x5760000000000000000000000000c020);
         let library_id =
             LibraryId(Uuid::from_u128(0x57600000000000000000000000000001));
         let library_root = "/library";
@@ -3666,12 +4167,15 @@ mod tests {
             correlations.clone(),
         );
 
-        let lease = lease_for_payload(JobPayload::FolderScan(FolderScanJob {
-            context: series_context.clone(),
-            scan_reason: ScanReason::BulkSeed,
-            enqueue_time: Utc::now(),
-            device_id: None,
-        }));
+        let lease = lease_for_payload_with_correlation(
+            JobPayload::FolderScan(FolderScanJob {
+                context: series_context.clone(),
+                scan_reason: ScanReason::BulkSeed,
+                enqueue_time: Utc::now(),
+                device_id: None,
+            }),
+            parent_correlation,
+        );
 
         let status = dispatcher.dispatch(&lease).await;
         assert!(matches!(status, DispatchStatus::Success));
@@ -3684,7 +4188,11 @@ mod tests {
         assert!(matches!(state.status, SeriesScanStatus::Discovered));
 
         let enqueued = queue.enqueued().await;
-        assert_eq!(enqueued.len(), 1, "series root scan enqueues one job");
+        assert_eq!(
+            enqueued.len(),
+            2,
+            "series root scan durably enqueues resolve and season scan"
+        );
         let JobPayload::SeriesResolve(series_job) = &enqueued[0].payload else {
             panic!("expected SeriesResolve follow-up");
         };
@@ -3692,7 +4200,9 @@ mod tests {
         assert_eq!(series_job.series_root_path, series_root_path);
         assert_eq!(series_job.folder_name, "Deterministic Show");
         assert!(matches!(series_job.scan_reason, ScanReason::BulkSeed));
-        assert!(enqueued[0].correlation_id.is_none());
+        assert_eq!(enqueued[0].correlation_id, Some(parent_correlation));
+        assert!(matches!(enqueued[1].payload, JobPayload::FolderScan(_)));
+        assert_eq!(enqueued[1].correlation_id, Some(parent_correlation));
 
         let mut saw_series_resolve_enqueue = false;
         while let Ok(event) = job_rx.try_recv() {
@@ -3719,8 +4229,15 @@ mod tests {
         let mut saw_completion = false;
         while let Ok(event) = scan_rx.try_recv() {
             match event {
-                ScanEvent::FolderDiscovered { context, reason } => {
+                ScanEvent::FolderDiscovered {
+                    context,
+                    reason,
+                    correlation_id,
+                    durable_job_id,
+                } => {
                     assert!(matches!(reason, ScanReason::BulkSeed));
+                    assert_eq!(correlation_id, Some(parent_correlation));
+                    assert!(durable_job_id.is_some());
                     let FolderScanContext::Season(ctx) = *context else {
                         panic!("expected season FolderDiscovered context");
                     };
@@ -3747,6 +4264,203 @@ mod tests {
         assert!(
             saw_season_discovered,
             "season folder discovery should be emitted deterministically"
+        );
+
+        let episode_path = "/library/Deterministic Show/Season 1/S01E01.mkv";
+        let analyze_lease = lease_for_payload_with_correlation(
+            JobPayload::MediaAnalyze(media_analyze_episode_job(
+                library_id,
+                series_root_path.clone(),
+                "Deterministic Show",
+                episode_path,
+                1,
+            )),
+            parent_correlation,
+        );
+        assert_eq!(
+            dispatcher.dispatch(&analyze_lease).await,
+            DispatchStatus::Success
+        );
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 3);
+        assert!(matches!(enqueued[2].payload, JobPayload::EpisodeMatch(_)));
+        assert!(enqueued[2].dependency_key.is_some());
+        assert_eq!(enqueued[2].correlation_id, Some(parent_correlation));
+
+        let resolve_lease = lease_for_enqueue_request(&enqueued[0]);
+        assert_eq!(
+            dispatcher.dispatch(&resolve_lease).await,
+            DispatchStatus::Success
+        );
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 4);
+        assert!(matches!(enqueued[3].payload, JobPayload::IndexUpsert(_)));
+        assert_eq!(enqueued[3].correlation_id, Some(parent_correlation));
+
+        let episode_lease = lease_for_enqueue_request(&enqueued[2]);
+        assert_eq!(
+            dispatcher.dispatch(&episode_lease).await,
+            DispatchStatus::Success
+        );
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 5);
+        assert!(matches!(enqueued[4].payload, JobPayload::MetadataEnrich(_)));
+        assert_eq!(enqueued[4].correlation_id, Some(parent_correlation));
+    }
+
+    #[tokio::test]
+    async fn movie_pipeline_followups_inherit_parent_correlation() {
+        struct MetadataWithImageActor;
+
+        #[async_trait]
+        impl MetadataActor for MetadataWithImageActor {
+            async fn enrich(
+                &self,
+                command: MetadataCommand,
+            ) -> Result<MediaReadyForIndex> {
+                Ok(MediaReadyForIndex {
+                    library_id: command.job.library_id,
+                    media_id: command.job.media_id,
+                    variant: command.job.variant,
+                    hierarchy: command.job.hierarchy.clone(),
+                    node: command.job.node.clone(),
+                    normalized_title: None,
+                    analyzed: command.analyzed,
+                    prepared_at: Utc::now(),
+                    image_jobs: vec![ImageFetchJob {
+                        library_id: command.job.library_id,
+                        iid: Uuid::from_u128(
+                            0x5760000000000000000000000000a021,
+                        ),
+                        imz: ImageSize::poster(),
+                        priority_hint: ImageFetchPriority::Poster,
+                    }],
+                })
+            }
+        }
+
+        let parent_correlation =
+            Uuid::from_u128(0x5760000000000000000000000000c021);
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000021));
+        let library_root = "/library";
+        let movie_root_path = MovieRootPath::try_new_under_library_root(
+            library_root,
+            "/library/Correlated Movie",
+        )
+        .unwrap();
+        let context = FolderScanContext::Movie(MovieFolderScanContext {
+            library_id,
+            movie_root_path: movie_root_path.clone(),
+        });
+        let media_path = "/library/Correlated Movie/movie.mkv";
+        let media_id = MediaID::new(VideoMediaType::Movie);
+        let hierarchy = AnalyzeScanHierarchy::Movie(MovieScanHierarchy {
+            movie_root_path,
+            movie_id: None,
+            extra_tag: None,
+        });
+
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(32));
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&series_states)));
+        let folder_actor = Arc::new(StubFolderActor {
+            plan: FolderListingPlan {
+                directories: vec![],
+                media_files: vec![PathBuf::from(media_path)],
+                ancillary_files: vec![],
+                generated_listing_hash: "correlated-movie-listing".into(),
+                total_entries: 1,
+                folder_missing: false,
+            },
+            discovered: vec![MediaFileDiscovered {
+                library_id,
+                path_norm: media_path.into(),
+                fingerprint: MediaFingerprint::default(),
+                classified_as: MediaKindHint::Movie,
+                media_id,
+                variant: VideoMediaType::Movie,
+                node: ScanNodeKind::MovieFolder,
+                hierarchy,
+                context: context.clone(),
+                scan_reason: ScanReason::BulkSeed,
+            }],
+            children: vec![],
+            summary: FolderScanSummary {
+                context: context.clone(),
+                discovered_files: 1,
+                enqueued_subfolders: 0,
+                listing_hash: "correlated-movie-listing".into(),
+                outcome: FolderScanOutcome::Changed,
+                completed_at: Utc::now(),
+            },
+        }) as Arc<dyn FolderScanActor>;
+        let actors = DispatcherActors::new(
+            folder_actor,
+            Arc::new(StubAnalyzeActor),
+            Arc::new(MetadataWithImageActor),
+            Arc::new(StubIndexActor),
+            Arc::new(StubImageActor),
+        );
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            events,
+            cursors,
+            series_states,
+            series_resolver,
+            actors,
+            CorrelationCache::default(),
+        );
+
+        let folder_lease = lease_for_payload_with_correlation(
+            JobPayload::FolderScan(FolderScanJob {
+                context,
+                scan_reason: ScanReason::BulkSeed,
+                enqueue_time: Utc::now(),
+                device_id: None,
+            }),
+            parent_correlation,
+        );
+        assert_eq!(
+            dispatcher.dispatch(&folder_lease).await,
+            DispatchStatus::Success
+        );
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 1);
+        assert!(matches!(enqueued[0].payload, JobPayload::MediaAnalyze(_)));
+        assert_eq!(enqueued[0].correlation_id, Some(parent_correlation));
+
+        let analyze_lease = lease_for_enqueue_request(&enqueued[0]);
+        assert_eq!(
+            dispatcher.dispatch(&analyze_lease).await,
+            DispatchStatus::Success
+        );
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 2);
+        assert!(matches!(enqueued[1].payload, JobPayload::MetadataEnrich(_)));
+        assert_eq!(enqueued[1].correlation_id, Some(parent_correlation));
+
+        let metadata_lease = lease_for_enqueue_request(&enqueued[1]);
+        assert_eq!(
+            dispatcher.dispatch(&metadata_lease).await,
+            DispatchStatus::Success
+        );
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 4);
+        assert!(matches!(enqueued[2].payload, JobPayload::ImageFetch(_)));
+        assert!(matches!(enqueued[3].payload, JobPayload::IndexUpsert(_)));
+        assert!(
+            enqueued[2..]
+                .iter()
+                .all(|request| request.correlation_id
+                    == Some(parent_correlation))
         );
     }
 
@@ -3856,6 +4570,404 @@ mod tests {
             correlations.take_or_generate(generated_handle.job_id).await;
         assert_eq!(generated_completion, generated_enqueue.meta.correlation_id);
         assert!(correlations.fetch(&generated_handle.job_id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn post_enqueue_recheck_repairs_episode_dependency_lost_wakeup() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000023));
+        let correlation_id =
+            Uuid::from_u128(0x5760000000000000000000000000c023);
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Lost Wakeup Show",
+        )
+        .unwrap();
+        let dependency_key = DependencyKey::series_root(&series_root_path);
+        let series_ref = SeriesRef {
+            id: SeriesID(Uuid::from_u128(0x5760000000000000000000000000a023)),
+            slug: Some("lost-wakeup-show".into()),
+            title: Some("Lost Wakeup Show".into()),
+        };
+
+        let states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        let queue = Arc::new(RecordingQueue::default());
+        queue
+            .resolve_before_episode_insert(ResolveBeforeEpisodeInsert {
+                states: Arc::clone(&states),
+                library_id,
+                series_root_path: series_root_path.clone(),
+                series_ref,
+            })
+            .await;
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&states)));
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            events,
+            cursors,
+            Arc::clone(&states),
+            series_resolver,
+            DispatcherActors::new(
+                noop_folder_actor(library_id),
+                Arc::new(StubAnalyzeActor),
+                Arc::new(StubMetadataActor),
+                Arc::new(StubIndexActor),
+                Arc::new(StubImageActor),
+            ),
+            CorrelationCache::default(),
+        );
+
+        let status = dispatcher
+            .dispatch(&lease_for_payload_with_correlation(
+                JobPayload::MediaAnalyze(media_analyze_episode_job(
+                    library_id,
+                    series_root_path.clone(),
+                    "Lost Wakeup Show",
+                    "/library/Lost Wakeup Show/Season 1/S01E01.mkv",
+                    1,
+                )),
+                correlation_id,
+            ))
+            .await;
+        assert_eq!(status, DispatchStatus::Success);
+
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 1);
+        assert!(matches!(enqueued[0].payload, JobPayload::EpisodeMatch(_)));
+        assert_eq!(enqueued[0].correlation_id, Some(correlation_id));
+        assert_eq!(enqueued[0].dependency_key, Some(dependency_key.clone()));
+        assert_eq!(
+            queue.released_dependencies.lock().await.as_slice(),
+            &[(library_id, dependency_key)],
+            "the atomic post-enqueue repair must repeat the dependency release"
+        );
+        assert_eq!(
+            queue.dependency_operation_order.lock().await.as_slice(),
+            &[
+                "resolver_release_before_insert",
+                "deferred_episode_insert",
+                "atomic_post_enqueue_release",
+            ],
+            "the repair release must happen after the losing deferred insert"
+        );
+        assert!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .unwrap()
+                .is_some_and(|state| state.is_resolved())
+        );
+    }
+
+    #[tokio::test]
+    async fn atomic_post_enqueue_repair_rejects_stale_failed_generation() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000024));
+        let correlation_id =
+            Uuid::from_u128(0x5760000000000000000000000000c024);
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Retry Enrollment Show",
+        )
+        .unwrap();
+        let states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        states
+            .mark_failed(
+                library_id,
+                series_root_path.clone(),
+                "historical failure".into(),
+            )
+            .await
+            .expect("seed historical terminal state");
+
+        let terminal_observed = Arc::new(tokio::sync::Barrier::new(2));
+        let resume = Arc::new(tokio::sync::Barrier::new(2));
+        let queue = Arc::new(RecordingQueue::default());
+        queue
+            .pause_terminal_release_after_observation(
+                Arc::clone(&states),
+                TerminalReleasePause {
+                    terminal_observed: Arc::clone(&terminal_observed),
+                    resume: Arc::clone(&resume),
+                },
+            )
+            .await;
+
+        let events = Arc::new(InProcJobEventBus::new(64));
+        let cursors = Arc::new(MemoryCursorRepository::default());
+        let series_resolver =
+            Arc::new(StubSeriesResolver::new(Arc::clone(&states)));
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            events,
+            cursors,
+            Arc::clone(&states),
+            series_resolver,
+            DispatcherActors::new(
+                noop_folder_actor(library_id),
+                Arc::new(StubAnalyzeActor),
+                Arc::new(StubMetadataActor),
+                Arc::new(StubIndexActor),
+                Arc::new(StubImageActor),
+            ),
+            CorrelationCache::default(),
+        );
+        let dispatch_root = series_root_path.clone();
+        let dispatch = tokio::spawn(async move {
+            dispatcher
+                .dispatch(&lease_for_payload_with_correlation(
+                    JobPayload::MediaAnalyze(media_analyze_episode_job(
+                        library_id,
+                        dispatch_root,
+                        "Retry Enrollment Show",
+                        "/library/Retry Enrollment Show/Season 1/S01E01.mkv",
+                        1,
+                    )),
+                    correlation_id,
+                ))
+                .await
+        });
+
+        // The queue authority has observed the old terminal state but has not
+        // committed a release. Enroll the retry before allowing its locked
+        // validation/promotion operation to continue.
+        terminal_observed.wait().await;
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                Some(SeriesHint {
+                    title: "Retry Enrollment Show".into(),
+                    slug: Some("retry-enrollment-show".into()),
+                    year: None,
+                    region: None,
+                }),
+            )
+            .await
+            .expect("enroll fresh resolver generation");
+        resume.wait().await;
+
+        assert_eq!(dispatch.await.unwrap(), DispatchStatus::Success);
+        assert!(
+            queue.released_dependencies.lock().await.is_empty(),
+            "stale failure must not release the freshly enrolled generation"
+        );
+        assert_eq!(
+            queue.dependency_operation_order.lock().await.as_slice(),
+            &["stale_terminal_observed", "atomic_release_rejected"]
+        );
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("retry enrollment exists")
+                .status,
+            SeriesScanStatus::Discovered
+        );
+    }
+
+    #[tokio::test]
+    async fn series_resolve_dead_letter_defers_release_to_queue_transition() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000025));
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Dead Letter Retry Show",
+        )
+        .unwrap();
+        let dependency_key = DependencyKey::series_root(&series_root_path);
+        let states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                Some(series_hint("Dead Letter Retry Show")),
+            )
+            .await
+            .expect("enroll initial resolver generation");
+
+        let queue = Arc::new(RecordingQueue::default());
+        queue.observe_series_states(Arc::clone(&states)).await;
+        queue
+            .enqueue(
+                EnqueueRequest::new(
+                    JobPriority::P0,
+                    JobPayload::EpisodeMatch(episode_match_job(
+                        library_id,
+                        series_root_path.clone(),
+                        "Dead Letter Retry Show",
+                        "/library/Dead Letter Retry Show/Season 1/S01E01.mkv",
+                        1,
+                    )),
+                )
+                .with_dependency(dependency_key.clone()),
+            )
+            .await
+            .expect("enqueue deferred episode match");
+
+        let failure_persisted = Arc::new(tokio::sync::Barrier::new(2));
+        let resume = Arc::new(tokio::sync::Barrier::new(2));
+        let series_resolver =
+            Arc::new(FailingSeriesResolver::paused_after_failure_persistence(
+                Arc::clone(&states),
+                FailurePersistencePause {
+                    failure_persisted: Arc::clone(&failure_persisted),
+                    resume: Arc::clone(&resume),
+                },
+            ));
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::new(InProcJobEventBus::new(64)),
+            Arc::new(MemoryCursorRepository::default()),
+            Arc::clone(&states),
+            series_resolver,
+            DispatcherActors::new(
+                noop_folder_actor(library_id),
+                Arc::new(StubAnalyzeActor),
+                Arc::new(StubMetadataActor),
+                Arc::new(StubIndexActor),
+                Arc::new(StubImageActor),
+            ),
+            CorrelationCache::default(),
+        );
+        let dispatch_root = series_root_path.clone();
+        let dispatch = tokio::spawn(async move {
+            dispatcher
+                .dispatch(&lease_for_payload(JobPayload::SeriesResolve(
+                    SeriesResolveJob {
+                        library_id,
+                        series_root_path: dispatch_root,
+                        hint: Some(series_hint("Dead Letter Retry Show")),
+                        folder_name: "Dead Letter Retry Show".into(),
+                        scan_reason: ScanReason::BulkSeed,
+                    },
+                )))
+                .await
+        });
+
+        // The old resolver has durably marked its generation Failed, but has
+        // not started dependency release. Enroll the retry in that window.
+        failure_persisted.wait().await;
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("failed state exists")
+                .status,
+            SeriesScanStatus::Failed
+        );
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                Some(series_hint("Dead Letter Retry Show")),
+            )
+            .await
+            .expect("enroll retry generation");
+        resume.wait().await;
+
+        assert_eq!(
+            dispatch.await.expect("dispatcher task"),
+            DispatchStatus::DeadLetter {
+                error: "series provider rejected resolver input".into(),
+            }
+        );
+        assert!(
+            queue.released_dependencies.lock().await.is_empty(),
+            "the failed generation must not release dependencies for its retry"
+        );
+        assert!(queue.dependency_operation_order.lock().await.is_empty());
+        let enqueued = queue.enqueued().await;
+        assert_eq!(enqueued.len(), 1);
+        assert_eq!(enqueued[0].dependency_key, Some(dependency_key));
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("retry state exists")
+                .status,
+            SeriesScanStatus::Discovered
+        );
+    }
+
+    #[tokio::test]
+    async fn series_resolve_failure_persistence_error_retries_without_release()
+    {
+        let library_id =
+            LibraryId(Uuid::from_u128(0x57600000000000000000000000000026));
+        let series_root_path = SeriesRootPath::try_new_under_library_root(
+            "/library",
+            "/library/Persistence Failure Show",
+        )
+        .unwrap();
+        let states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(InMemorySeriesScanStateRepository::default()));
+        states
+            .enroll_resolution_generation(
+                library_id,
+                series_root_path.clone(),
+                Some(series_hint("Persistence Failure Show")),
+            )
+            .await
+            .expect("enroll resolver generation");
+
+        let queue = Arc::new(RecordingQueue::default());
+        queue.observe_series_states(Arc::clone(&states)).await;
+        let dispatcher = DefaultJobDispatcher::new(
+            Arc::clone(&queue),
+            Arc::new(InProcJobEventBus::new(64)),
+            Arc::new(MemoryCursorRepository::default()),
+            Arc::clone(&states),
+            Arc::new(FailingSeriesResolver::new(Arc::clone(&states), true)),
+            DispatcherActors::new(
+                noop_folder_actor(library_id),
+                Arc::new(StubAnalyzeActor),
+                Arc::new(StubMetadataActor),
+                Arc::new(StubIndexActor),
+                Arc::new(StubImageActor),
+            ),
+            CorrelationCache::default(),
+        );
+
+        let status = dispatcher
+            .dispatch(&lease_for_payload(JobPayload::SeriesResolve(
+                SeriesResolveJob {
+                    library_id,
+                    series_root_path: series_root_path.clone(),
+                    hint: Some(series_hint("Persistence Failure Show")),
+                    folder_name: "Persistence Failure Show".into(),
+                    scan_reason: ScanReason::BulkSeed,
+                },
+            )))
+            .await;
+
+        assert_eq!(
+            status,
+            DispatchStatus::Retry {
+                error: "series failure persistence unavailable".into(),
+            },
+            "the durable-state error must supersede the resolver dead-letter"
+        );
+        assert!(queue.released_dependencies.lock().await.is_empty());
+        assert!(queue.dependency_operation_order.lock().await.is_empty());
+        assert_eq!(
+            states
+                .get(library_id, &series_root_path)
+                .await
+                .expect("state lookup")
+                .expect("nonterminal state remains")
+                .status,
+            SeriesScanStatus::Discovered
+        );
     }
 
     #[tokio::test]

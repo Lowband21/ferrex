@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 use ferrex_core::domain::scan::orchestration::context::{
     ScanHierarchy, ScanNodeKind,
 };
+use ferrex_core::domain::scan::actors::index::IndexingChange;
 use ferrex_core::domain::scan::orchestration::job::{
     EnqueueRequest, FolderScanJob, IndexUpsertJob, JobKind, JobPayload,
     JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
@@ -466,6 +467,7 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
                 "index:{}:/e2e/mixed/index_{i}.json",
                 lib_id
             ),
+            change: IndexingChange::Created,
         };
         enqueues.push(EnqueueRequest::new(
             JobPriority::P3,

@@ -114,7 +114,7 @@ just start --mode tailscale
 
 ## Scanner / Incremental Scans
 
-Scanner settings can be supplied in `scanner.toml`, `scanner.json`, `config/scanner.toml`, `config/scanner.json`, `SCANNER_CONFIG_PATH`, or inline JSON via `SCANNER_CONFIG_JSON`. Existing installs that do not provide a scanner config keep safe defaults: libraries auto-scan every 60 minutes, filesystem watching is enabled per library, and the watcher uses `auto` strategy with native notifications falling back to polling.
+Scanner settings can be supplied in `scanner.toml`, `scanner.json`, `config/scanner.toml`, `config/scanner.json`, `SCANNER_CONFIG_PATH`, or inline JSON via `SCANNER_CONFIG_JSON`. New libraries default to bounded automatic maintenance every 15 minutes, filesystem watching is enabled per library, and the watcher uses `auto` strategy. Watch events remain the primary low-latency path; the shorter maintenance interval is the fallback for missed notifications and newly added top-level media folders. Existing libraries keep their persisted interval until an operator updates them. On Linux, `auto` selects polling immediately for CIFS/SMB3 and NFS mounts; other filesystems use native notifications with polling fallback.
 
 Library create/update API payloads can override per-library policy:
 
@@ -123,7 +123,7 @@ Library create/update API payloads can override per-library policy:
   "name": "Movies",
   "library_type": "Movies",
   "paths": ["/media/movies"],
-  "scan_interval_minutes": 60,
+  "scan_interval_minutes": 15,
   "auto_scan": true,
   "watch_for_changes": true
 }
@@ -146,9 +146,18 @@ enabled = true
 tick_interval_ms = 60000
 max_jobs_per_library = 128
 max_root_entries_per_library = 512
+
+[orchestrator.lease]
+dispatch_timeout_ms = 1800000 # 30 minutes per job execution attempt
 ```
 
+When a root has more eligible folders than a maintenance pass can enqueue, Ferrex rotates deterministic partitions on successive scan intervals. This rotation does not depend on the prior partition completing successfully, so folders beyond the configured bound are still revisited.
+
+Job execution attempts are bounded to 30 minutes by default. When an actor or external dependency never returns, Ferrex stops renewing that attempt, releases its lease and workload capacity, and routes the job through the normal retry policy. Operators can lower `orchestrator.lease.dispatch_timeout_ms` for faster recovery, but it should remain above the longest expected scan, analysis, metadata, indexing, or image operation.
+
 Network/container mount example (prefer bounded polling over unreliable native events):
+
+Explicit `poll` remains useful for container mounts whose host filesystem type is hidden from the container. If `native` is forced on a detected CIFS/NFS mount, startup logs an operator warning because notifications may be unreliable.
 
 ```toml
 video_extensions = ["mkv", "mp4", "mpeg", "ts"]
@@ -212,7 +221,7 @@ DATABASE_URL=postgres://... cargo test -p ferrex-core --test transcript_reposito
 DATABASE_URL=postgres://... cargo test -p ferrex-server --test intelligence_routes transcript_purge_and_rebuild_routes_remove_searchable_segments
 ```
 
-Invalid scanner config fails during startup with the field path in the error (for example, `scanner.orchestrator.watch.poll_interval_ms must be greater than 0`). Operators can inspect the effective policy and health counters via the scan config/metrics/status endpoints; these report watch strategy, poll/debounce/batch settings, transcript indexing controls, maintenance sweep policy, media/ignore filters, watcher registrations, replay lag, stale cursor counts, and overflow events.
+Invalid scanner config fails during startup with the field path in the error (for example, `scanner.orchestrator.watch.poll_interval_ms must be greater than 0`). Operators can inspect the effective policy and health counters via the scan config/metrics/status endpoints; these report watch strategy, poll/debounce/batch settings, the job dispatch deadline, transcript indexing controls, maintenance sweep policy, media/ignore filters, watcher registrations, replay lag, stale cursor counts, overflow events, and root-discovery truncation/deferred-entry counters.
 
 ## Logging
 

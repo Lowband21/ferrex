@@ -1,5 +1,8 @@
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use tracing::warn;
 use uuid::Uuid;
@@ -9,6 +12,11 @@ use crate::{
     error::{MediaError, Result},
     types::LibraryId,
 };
+
+use super::job::JobId;
+
+const TRACKED_JOB_IDS_METADATA_KEY: &str = "tracked_job_ids";
+const SEED_COMPLETED_METADATA_KEY: &str = "seed_completed";
 
 /// Active durable scan statuses for partial-index conflict handling.
 const ACTIVE_STATUS_SQL: &str = "'pending','running','paused'";
@@ -28,6 +36,10 @@ pub struct LibraryScanRun {
     pub dead_lettered_items: u64,
     pub current_path: Option<String>,
     pub last_error: Option<String>,
+    /// Queue jobs enrolled by this run, including jobs shared by dedupe merge.
+    pub tracked_job_ids: Vec<JobId>,
+    /// Whether the library actor has durably completed the initial seed command.
+    pub seed_completed: bool,
     pub sequence: u64,
     pub started_at: DateTime<Utc>,
     pub terminal_at: Option<DateTime<Utc>>,
@@ -95,6 +107,10 @@ pub struct LibraryScanRunProgressUpdate {
     pub retrying_items: u64,
     pub dead_lettered_items: u64,
     pub current_path: Option<String>,
+    /// Complete set of queue jobs enrolled by this run.
+    pub tracked_job_ids: Vec<JobId>,
+    /// Monotonic durable marker for completion of the initial seed command.
+    pub seed_completed: bool,
     pub sequence: u64,
 }
 
@@ -113,6 +129,12 @@ pub trait ScanRunRepository: Send + Sync {
     ) -> Result<Option<LibraryScanRun>>;
 
     async fn list_active(&self) -> Result<Vec<LibraryScanRun>>;
+
+    /// Load a run regardless of lifecycle status for idempotent finalization.
+    async fn load_by_scan_id(
+        &self,
+        scan_id: Uuid,
+    ) -> Result<Option<LibraryScanRun>>;
 
     async fn update_progress(
         &self,
@@ -150,6 +172,74 @@ impl PostgresScanRunRepository {
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
+
+    async fn load_metadata(&self, scan_id: Uuid) -> Result<Value> {
+        let metadata = sqlx::query_scalar!(
+            r#"SELECT metadata as "metadata!" FROM library_scan_runs WHERE scan_id = $1"#,
+            scan_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!(
+                "load library scan run metadata failed: {err}"
+            ))
+        })?
+        .unwrap_or_else(|| json!({}));
+
+        Ok(metadata)
+    }
+
+    async fn hydrate_metadata(
+        &self,
+        mut run: LibraryScanRun,
+    ) -> Result<LibraryScanRun> {
+        let metadata = self.load_metadata(run.scan_id).await?;
+        run.tracked_job_ids = tracked_job_ids_from_metadata(&metadata)?;
+        run.seed_completed = seed_completed_from_metadata(&metadata)?;
+        Ok(run)
+    }
+}
+
+fn tracked_job_ids_from_metadata(metadata: &Value) -> Result<Vec<JobId>> {
+    let Some(raw_ids) = metadata.get(TRACKED_JOB_IDS_METADATA_KEY) else {
+        return Ok(Vec::new());
+    };
+    let values = raw_ids.as_array().ok_or_else(|| {
+        MediaError::Internal(format!(
+            "library_scan_runs.metadata.{TRACKED_JOB_IDS_METADATA_KEY} was not an array"
+        ))
+    })?;
+
+    let mut ids = HashSet::with_capacity(values.len());
+    for value in values {
+        let raw = value.as_str().ok_or_else(|| {
+            MediaError::Internal(format!(
+                "library_scan_runs.metadata.{TRACKED_JOB_IDS_METADATA_KEY} contained a non-string value"
+            ))
+        })?;
+        let id = Uuid::parse_str(raw).map_err(|err| {
+            MediaError::Internal(format!(
+                "library_scan_runs.metadata.{TRACKED_JOB_IDS_METADATA_KEY} contained invalid job ID '{raw}': {err}"
+            ))
+        })?;
+        ids.insert(JobId(id));
+    }
+
+    let mut ids: Vec<_> = ids.into_iter().collect();
+    ids.sort_unstable_by_key(|job_id| job_id.0);
+    Ok(ids)
+}
+
+fn seed_completed_from_metadata(metadata: &Value) -> Result<bool> {
+    let Some(value) = metadata.get(SEED_COMPLETED_METADATA_KEY) else {
+        return Ok(false);
+    };
+    value.as_bool().ok_or_else(|| {
+        MediaError::Internal(format!(
+            "library_scan_runs.metadata.{SEED_COMPLETED_METADATA_KEY} was not a boolean"
+        ))
+    })
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -210,6 +300,8 @@ impl TryFrom<LibraryScanRunRow> for LibraryScanRun {
             )?,
             current_path: row.current_path,
             last_error: row.last_error,
+            tracked_job_ids: Vec::new(),
+            seed_completed: false,
             sequence: i64_to_u64("sequence", row.sequence)?,
             started_at: row.started_at,
             terminal_at: row.terminal_at,
@@ -309,7 +401,7 @@ impl ScanRunRepository for PostgresScanRunRepository {
                     ))
                 })?;
                 return Ok(LibraryScanRunGetOrCreate {
-                    run: row_to_run(row)?,
+                    run: self.hydrate_metadata(row_to_run(row)?).await?,
                     disposition: ScanStartDisposition::Created,
                 });
             }
@@ -361,7 +453,7 @@ impl ScanRunRepository for PostgresScanRunRepository {
                     ))
                 })?;
                 return Ok(LibraryScanRunGetOrCreate {
-                    run: row_to_run(row)?,
+                    run: self.hydrate_metadata(row_to_run(row)?).await?,
                     disposition: ScanStartDisposition::Reused,
                 });
             }
@@ -430,7 +522,10 @@ impl ScanRunRepository for PostgresScanRunRepository {
             ))
         })?;
 
-        row.map(row_to_run).transpose()
+        match row.map(row_to_run).transpose()? {
+            Some(run) => Ok(Some(self.hydrate_metadata(run).await?)),
+            None => Ok(None),
+        }
     }
 
     async fn list_active(&self) -> Result<Vec<LibraryScanRun>> {
@@ -468,7 +563,55 @@ impl ScanRunRepository for PostgresScanRunRepository {
             ))
         })?;
 
-        rows.into_iter().map(row_to_run).collect()
+        let mut runs = Vec::with_capacity(rows.len());
+        for row in rows {
+            runs.push(self.hydrate_metadata(row_to_run(row)?).await?);
+        }
+        Ok(runs)
+    }
+
+    async fn load_by_scan_id(
+        &self,
+        scan_id: Uuid,
+    ) -> Result<Option<LibraryScanRun>> {
+        let row = sqlx::query_as!(
+            LibraryScanRunRow,
+            r#"
+            SELECT
+                scan_id as "scan_id!",
+                library_id as "library_id!",
+                mode as "mode!",
+                run_key as "run_key!",
+                correlation_id,
+                status as "status!",
+                completed_items as "completed_items!",
+                total_items as "total_items!",
+                retrying_items as "retrying_items!",
+                dead_lettered_items as "dead_lettered_items!",
+                current_path,
+                last_error,
+                sequence as "sequence!",
+                started_at,
+                terminal_at,
+                created_at,
+                updated_at
+            FROM library_scan_runs
+            WHERE scan_id = $1
+            "#,
+            scan_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!(
+                "load library scan run by scan ID failed: {err}"
+            ))
+        })?;
+
+        match row.map(row_to_run).transpose()? {
+            Some(run) => Ok(Some(self.hydrate_metadata(run).await?)),
+            None => Ok(None),
+        }
     }
 
     async fn update_progress(
@@ -493,6 +636,14 @@ impl ScanRunRepository for PostgresScanRunRepository {
         let dead_lettered_items =
             u64_to_i64("dead_lettered_items", update.dead_lettered_items)?;
         let sequence = u64_to_i64("sequence", update.sequence)?;
+        let seed_completed = update.seed_completed;
+        let tracked_job_ids = json!(
+            update
+                .tracked_job_ids
+                .iter()
+                .map(|job_id| job_id.0)
+                .collect::<Vec<_>>()
+        );
 
         let row = sqlx::query_as!(
             LibraryScanRunRow,
@@ -505,12 +656,45 @@ impl ScanRunRepository for PostgresScanRunRepository {
                 dead_lettered_items = $6,
                 current_path = $7,
                 sequence = GREATEST(sequence, $8),
+                metadata = jsonb_set(
+                    jsonb_set(
+                        metadata,
+                        '{tracked_job_ids}',
+                        (
+                            SELECT COALESCE(
+                                jsonb_agg(value ORDER BY value),
+                                '[]'::jsonb
+                            )
+                            FROM (
+                                SELECT DISTINCT value
+                                FROM jsonb_array_elements(
+                                    COALESCE(
+                                        metadata -> 'tracked_job_ids',
+                                        '[]'::jsonb
+                                    ) || $9::jsonb
+                                ) AS ids(value)
+                            ) AS unique_ids
+                        ),
+                        true
+                    ),
+                    '{seed_completed}',
+                    to_jsonb(
+                        (
+                            CASE
+                                WHEN jsonb_typeof(metadata -> 'seed_completed') = 'boolean'
+                                THEN (metadata ->> 'seed_completed')::boolean
+                                ELSE false
+                            END
+                        ) OR $10::boolean
+                    ),
+                    true
+                ),
                 updated_at = NOW()
             WHERE scan_id = $1
               AND status::text IN ('pending','running','paused')
             RETURNING
-                scan_id,
-                library_id,
+                scan_id as "scan_id!",
+                library_id as "library_id!",
                 mode as "mode!",
                 run_key as "run_key!",
                 correlation_id,
@@ -534,7 +718,9 @@ impl ScanRunRepository for PostgresScanRunRepository {
             retrying_items,
             dead_lettered_items,
             update.current_path,
-            sequence
+            sequence,
+            tracked_job_ids,
+            seed_completed,
         )
         .fetch_optional(&self.pool)
         .await
@@ -544,7 +730,10 @@ impl ScanRunRepository for PostgresScanRunRepository {
             ))
         })?;
 
-        row.map(row_to_run).transpose()
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(self.hydrate_metadata(row_to_run(row)?).await?))
     }
 
     async fn mark_terminal(
@@ -603,7 +792,10 @@ impl ScanRunRepository for PostgresScanRunRepository {
             ))
         })?;
 
-        row.map(row_to_run).transpose()
+        match row.map(row_to_run).transpose()? {
+            Some(run) => Ok(Some(self.hydrate_metadata(run).await?)),
+            None => Ok(None),
+        }
     }
 }
 
@@ -655,6 +847,8 @@ mod tests {
                 dead_lettered_items: 0,
                 current_path: None,
                 last_error: None,
+                tracked_job_ids: Vec::new(),
+                seed_completed: false,
                 sequence: 0,
                 started_at: now,
                 terminal_at: None,
@@ -693,6 +887,13 @@ mod tests {
                 .collect())
         }
 
+        async fn load_by_scan_id(
+            &self,
+            scan_id: Uuid,
+        ) -> Result<Option<LibraryScanRun>> {
+            Ok(self.runs.lock().await.get(&scan_id).cloned())
+        }
+
         async fn update_progress(
             &self,
             update: LibraryScanRunProgressUpdate,
@@ -721,6 +922,10 @@ mod tests {
             run.retrying_items = update.retrying_items;
             run.dead_lettered_items = update.dead_lettered_items;
             run.current_path = update.current_path;
+            run.tracked_job_ids.extend(update.tracked_job_ids);
+            run.tracked_job_ids.sort_unstable_by_key(|job_id| job_id.0);
+            run.tracked_job_ids.dedup();
+            run.seed_completed |= update.seed_completed;
             run.sequence = run.sequence.max(update.sequence);
             run.updated_at = Utc::now();
             Ok(Some(run.clone()))
@@ -1035,6 +1240,163 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn postgres_progress_metadata_unions_merged_job_ids_for_restart() {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping: DATABASE_URL not set");
+                return;
+            }
+        };
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping: failed to connect to DATABASE_URL ({err})"
+                );
+                return;
+            }
+        };
+        if let Err(err) = crate::MIGRATOR.run(&pool).await {
+            eprintln!("skipping: migrations failed ({err})");
+            return;
+        }
+
+        let repo = PostgresScanRunRepository::new(pool.clone());
+        let library_id = LibraryId(Uuid::now_v7());
+        seed_library_for_postgres_test(&pool, library_id)
+            .await
+            .expect("library seeded");
+        let active = repo
+            .get_or_create_active(
+                NewLibraryScanRun::new(library_id, ScanRunMode::Manual)
+                    .running(),
+            )
+            .await
+            .expect("active run created")
+            .run;
+        let original_job_id = JobId::new();
+        let merged_job_id = JobId::new();
+
+        for (sequence, tracked_job_ids) in [
+            (1, vec![original_job_id]),
+            // Deliberately omit the first ID to model an interleaved stale
+            // frame. PostgreSQL must union rather than overwrite metadata.
+            (2, vec![merged_job_id]),
+            // A later stale frame must not clear the monotonic seed marker.
+            (3, Vec::new()),
+        ] {
+            repo.update_progress(LibraryScanRunProgressUpdate {
+                scan_id: active.scan_id,
+                status: Some(ScanLifecycleStatus::Running),
+                completed_items: 0,
+                total_items: 1,
+                retrying_items: 0,
+                dead_lettered_items: 0,
+                current_path: Some("/library/shared".into()),
+                tracked_job_ids,
+                seed_completed: sequence == 2,
+                sequence,
+            })
+            .await
+            .expect("tracked job metadata persists");
+        }
+
+        let restored = repo
+            .load_active(library_id, ScanRunMode::Manual)
+            .await
+            .expect("active run reload succeeds")
+            .expect("active run remains present");
+        assert_eq!(restored.tracked_job_ids, {
+            let mut ids = vec![original_job_id, merged_job_id];
+            ids.sort_unstable_by_key(|job_id| job_id.0);
+            ids
+        });
+        assert!(restored.seed_completed);
+
+        sqlx::query("DELETE FROM libraries WHERE id = $1")
+            .bind(library_id.to_uuid())
+            .execute(&pool)
+            .await
+            .expect("cleanup library succeeds");
+    }
+
+    #[test]
+    fn tracked_job_metadata_rejects_malformed_values() {
+        let err = tracked_job_ids_from_metadata(&json!({
+            (TRACKED_JOB_IDS_METADATA_KEY): ["not-a-uuid"]
+        }))
+        .expect_err("malformed durable tracking metadata is rejected");
+
+        assert!(err.to_string().contains("invalid job ID"));
+    }
+
+    #[test]
+    fn seed_completion_metadata_defaults_false_and_rejects_non_boolean() {
+        assert!(
+            !seed_completed_from_metadata(&json!({}))
+                .expect("missing seed marker defaults to false")
+        );
+        assert!(
+            seed_completed_from_metadata(&json!({
+                (SEED_COMPLETED_METADATA_KEY): true
+            }))
+            .expect("boolean seed marker parses")
+        );
+
+        let err = seed_completed_from_metadata(&json!({
+            (SEED_COMPLETED_METADATA_KEY): "true"
+        }))
+        .expect_err("non-boolean seed marker is rejected");
+        assert!(err.to_string().contains("was not a boolean"));
+    }
+
+    #[tokio::test]
+    async fn progress_metadata_is_monotonic() {
+        let repo = InMemoryScanRunRepository::default();
+        let library_id = LibraryId::new();
+        let run = repo
+            .get_or_create_active(
+                NewLibraryScanRun::new(library_id, ScanRunMode::Manual)
+                    .running(),
+            )
+            .await
+            .expect("run created")
+            .run;
+        let first_job = JobId::new();
+        let second_job = JobId::new();
+
+        for (sequence, tracked_job_ids, seed_completed) in
+            [(1, vec![first_job], true), (2, vec![second_job], false)]
+        {
+            repo.update_progress(LibraryScanRunProgressUpdate {
+                scan_id: run.scan_id,
+                status: Some(ScanLifecycleStatus::Running),
+                completed_items: 0,
+                total_items: 2,
+                retrying_items: 0,
+                dead_lettered_items: 0,
+                current_path: None,
+                tracked_job_ids,
+                seed_completed,
+                sequence,
+            })
+            .await
+            .expect("progress update succeeds");
+        }
+
+        let restored = repo
+            .load_by_scan_id(run.scan_id)
+            .await
+            .expect("run lookup succeeds")
+            .expect("run remains present");
+        assert!(restored.seed_completed);
+        assert_eq!(restored.tracked_job_ids.len(), 2);
+        assert!(restored.tracked_job_ids.contains(&first_job));
+        assert!(restored.tracked_job_ids.contains(&second_job));
+    }
+
+    #[tokio::test]
     async fn progress_update_rejects_terminal_status() {
         let repo = InMemoryScanRunRepository::default();
         let library_id = LibraryId(Uuid::now_v7());
@@ -1055,6 +1417,8 @@ mod tests {
                 retrying_items: 0,
                 dead_lettered_items: 0,
                 current_path: None,
+                tracked_job_ids: Vec::new(),
+                seed_completed: false,
                 sequence: 1,
             })
             .await
@@ -1138,6 +1502,14 @@ mod tests {
 
         assert_eq!(active_runs.len(), 1);
         assert_eq!(active_runs[0].scan_id, active.run.scan_id);
+        assert_eq!(
+            repo.load_by_scan_id(terminal.run.scan_id)
+                .await
+                .expect("terminal lookup succeeds")
+                .expect("terminal row remains durable")
+                .status,
+            ScanLifecycleStatus::Completed
+        );
     }
 
     #[tokio::test]

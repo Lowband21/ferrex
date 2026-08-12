@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH terminal_series AS MATERIALIZED (\n                SELECT series.library_id, series.series_root_path\n                FROM series_scan_state AS series\n                WHERE series.status IN ('resolved', 'failed')\n                  AND EXISTS (\n                      SELECT 1\n                      FROM orchestrator_jobs AS blocked\n                      WHERE blocked.kind = $1\n                        AND blocked.state = 'deferred'\n                        AND blocked.library_id = series.library_id\n                        AND blocked.dependency_key =\n                            'series_root:' || series.series_root_path\n                  )\n                FOR UPDATE\n            )\n            UPDATE orchestrator_jobs AS job\n            SET state = 'ready',\n                dependency_key = NULL,\n                available_at = NOW(),\n                updated_at = NOW()\n            FROM terminal_series AS series\n            WHERE job.kind = $1\n              AND job.state = 'deferred'\n              AND job.library_id = series.library_id\n              AND job.dependency_key =\n                  'series_root:' || series.series_root_path\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ad60e15410f77140ce3d10be9422d1b9df185d287387330da2da6b6e8ceea9c3"
+}

@@ -4,6 +4,9 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
+use ferrex_core::api::types::admin::{
+    ResetDatabaseRequest, ResetDatabaseResult,
+};
 use ferrex_core::api::types::collections::*;
 use ferrex_core::domain::users::auth::{
     device::AuthDeviceStatus, domain::value_objects::SessionScope,
@@ -14,13 +17,13 @@ use ferrex_core::player_prelude::{
     ImageManifestResponse, LatestProgressResponse, Library, LibraryId,
     LibraryType, Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
     MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
-    MovieBatchSyncResponse, Platform, Role, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanConfig, ScanLifecycleStatus, ScanMetrics,
-    ScanRunMode, ScanStartDisposition, SeriesBundleFetchRequest,
-    SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
-    StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
-    UpdateProgressRequest, User, UserPermissions, UserPreferences,
-    UserWatchState,
+    MovieBatchSyncResponse, Platform, ResetLibraryRequest, ResetLibraryResult,
+    Role, ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
+    ScanLifecycleStatus, ScanMetrics, ScanRunMode, ScanStartDisposition,
+    SeriesBundleFetchRequest, SeriesBundleSyncRequest,
+    SeriesBundleSyncResponse, SeriesID, StartClaimResponse, StartScanRequest,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
+    UserPreferences, UserWatchState,
 };
 use ferrex_model::image::ImageQuery;
 use ferrex_model::{MediaID, MovieID, MovieReferenceBatchSize};
@@ -57,6 +60,7 @@ struct InnerApiState {
     current_user: Option<User>,
     current_permissions: Option<UserPermissions>,
     playback_ticket_result: Option<Result<String, String>>,
+    reset_database_requests: Vec<ResetDatabaseRequest>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +107,7 @@ impl TestApiService {
                 current_user: Some(sample_user),
                 current_permissions: Some(sample_permissions),
                 playback_ticket_result: None,
+                reset_database_requests: Vec::new(),
             })),
             base_url: Arc::from(base_url_string),
         }
@@ -148,6 +153,14 @@ impl TestApiService {
         if let Ok(mut guard) = self.inner.write() {
             guard.playback_ticket_result = Some(Err(message.into()));
         }
+    }
+
+    /// Return the most recent administrative reset request observed by the stub.
+    pub fn last_reset_database_request(&self) -> Option<ResetDatabaseRequest> {
+        self.inner
+            .read()
+            .ok()
+            .and_then(|guard| guard.reset_database_requests.last().cloned())
     }
 
     /// Seed or replace a collection detail in the in-memory API stub.
@@ -591,6 +604,8 @@ impl ApiService for TestApiService {
             enabled,
             auto_scan,
             watch_for_changes,
+            analyze_on_scan,
+            max_retry_attempts,
             movie_ref_batch_size,
             start_scan: _,
         } = request;
@@ -606,8 +621,8 @@ impl ApiService for TestApiService {
             enabled,
             auto_scan,
             watch_for_changes,
-            analyze_on_scan: false,
-            max_retry_attempts: 3,
+            analyze_on_scan,
+            max_retry_attempts,
             movie_ref_batch_size: ferrex_model::MovieReferenceBatchSize::new(
                 movie_ref_batch_size,
             )
@@ -648,6 +663,12 @@ impl ApiService for TestApiService {
             if let Some(watch_for_changes) = request.watch_for_changes {
                 library.watch_for_changes = watch_for_changes;
             }
+            if let Some(analyze_on_scan) = request.analyze_on_scan {
+                library.analyze_on_scan = analyze_on_scan;
+            }
+            if let Some(max_retry_attempts) = request.max_retry_attempts {
+                library.max_retry_attempts = max_retry_attempts;
+            }
             if let Some(size) = request.movie_ref_batch_size {
                 library.movie_ref_batch_size =
                     ferrex_model::MovieReferenceBatchSize::new(size)
@@ -667,6 +688,67 @@ impl ApiService for TestApiService {
         let mut guard = self.inner.write().expect("lock poisoned");
         guard.libraries.retain(|library| library.id != id);
         Ok(())
+    }
+
+    async fn reset_library(
+        &self,
+        id: LibraryId,
+        request: ResetLibraryRequest,
+    ) -> RepositoryResult<ResetLibraryResult> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        let enabled = guard
+            .libraries
+            .iter()
+            .find(|library| library.id == id)
+            .map(|library| library.enabled)
+            .ok_or_else(|| RepositoryError::NotFound {
+                entity_type: "Library".into(),
+                id: id.to_string(),
+            })?;
+        guard.library_media.remove(id.as_uuid());
+
+        let scan = enabled.then(|| {
+            let mode = ScanRunMode::Manual;
+            let run_key = mode.run_key(id);
+            ScanCommandAcceptedResponse {
+                scan_id: request.operation_id,
+                correlation_id: request.operation_id,
+                status: ScanLifecycleStatus::Running,
+                mode,
+                idempotency_key: run_key.clone(),
+                run_key,
+                disposition: ScanStartDisposition::Created,
+            }
+        });
+        Ok(ResetLibraryResult {
+            library_id: id,
+            scan,
+        })
+    }
+
+    async fn reset_database(
+        &self,
+        request: ResetDatabaseRequest,
+    ) -> RepositoryResult<ResetDatabaseResult> {
+        let mut guard = self.inner.write().expect("lock poisoned");
+        let mut result = ResetDatabaseResult::default();
+
+        if request.reset_libraries {
+            result.libraries_deleted = guard.libraries.len();
+            guard.libraries.clear();
+            guard.library_media.clear();
+        }
+        if request.reset_users {
+            result.users_deleted = usize::from(guard.current_user.is_some());
+            result.sessions_deleted = usize::from(guard.auth_token.is_some());
+            result.roles_reset = 3;
+            guard.current_user = None;
+            guard.current_permissions = None;
+            guard.auth_token = None;
+        }
+
+        guard.reset_database_requests.push(request);
+        Ok(result)
     }
 
     async fn start_library_scan(
@@ -2076,6 +2158,63 @@ mod tests {
             title_override: Some(title.into()),
             position: Some(position),
         }
+    }
+
+    #[tokio::test]
+    async fn reset_library_preserves_identity_and_returns_deterministic_scan() {
+        let service = TestApiService::default();
+        let original = service
+            .fetch_libraries()
+            .await
+            .expect("list libraries")
+            .into_iter()
+            .next()
+            .expect("sample library");
+        let operation_id = Uuid::now_v7();
+
+        let result = service
+            .reset_library(original.id, ResetLibraryRequest { operation_id })
+            .await
+            .expect("reset library");
+
+        assert_eq!(result.library_id, original.id);
+        assert_eq!(
+            result.scan.as_ref().map(|scan| scan.scan_id),
+            Some(operation_id)
+        );
+        let preserved = service
+            .fetch_libraries()
+            .await
+            .expect("list reset libraries")
+            .into_iter()
+            .next()
+            .expect("preserved library");
+        assert_eq!(preserved.id, original.id);
+        assert_eq!(preserved.analyze_on_scan, original.analyze_on_scan);
+        assert_eq!(preserved.max_retry_attempts, original.max_retry_attempts);
+    }
+
+    #[tokio::test]
+    async fn clear_all_data_reset_records_contract_and_clears_state() {
+        let service = TestApiService::default();
+        let request = ResetDatabaseRequest::clear_all_data();
+
+        let result = service
+            .reset_database(request.clone())
+            .await
+            .expect("clear all data should succeed");
+
+        assert_eq!(service.last_reset_database_request(), Some(request));
+        assert_eq!(result.libraries_deleted, 1);
+        assert_eq!(result.users_deleted, 1);
+        assert!(
+            service
+                .fetch_libraries()
+                .await
+                .expect("list libraries")
+                .is_empty()
+        );
+        assert!(service.fetch_current_user().await.is_err());
     }
 
     #[tokio::test]

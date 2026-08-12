@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT id, priority, state, attempts, correlation_id\n                FROM orchestrator_jobs\n                WHERE dedupe_key = $1\n                  AND state IN ('ready','deferred','leased')\n                ORDER BY created_at ASC\n                LIMIT 1\n                ",
+  "query": "\n                SELECT id, priority, state, attempts, correlation_id\n                FROM orchestrator_jobs\n                WHERE dedupe_key = $1\n                  AND state IN ('ready','deferred','leased')\n                ORDER BY created_at ASC\n                LIMIT 1\n                FOR UPDATE\n                ",
   "describe": {
     "columns": [
       {
@@ -42,5 +42,5 @@
       true
     ]
   },
-  "hash": "5cf4c625c65c1e46ea1a46fd1843f6316120cad4c4507b206f24a028b7a9efde"
+  "hash": "bdacab6d82b49ddaa6ff1e5a512896ce3440471cf5f0cab26e82eab263781e33"
 }

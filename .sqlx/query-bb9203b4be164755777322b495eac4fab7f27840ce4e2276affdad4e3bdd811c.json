@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH terminal_series AS MATERIALIZED (\n                SELECT library_id, series_root_path\n                FROM series_scan_state\n                WHERE library_id = $2\n                  AND series_root_path = $3\n                  AND status IN ('resolved', 'failed')\n                FOR UPDATE\n            )\n            UPDATE orchestrator_jobs AS job\n            SET state = 'ready',\n                dependency_key = NULL,\n                available_at = NOW(),\n                updated_at = NOW()\n            FROM terminal_series AS series\n            WHERE job.kind = $1\n              AND job.state = 'deferred'\n              AND job.library_id = series.library_id\n              AND job.dependency_key =\n                  'series_root:' || series.series_root_path\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bb9203b4be164755777322b495eac4fab7f27840ce4e2276affdad4e3bdd811c"
+}

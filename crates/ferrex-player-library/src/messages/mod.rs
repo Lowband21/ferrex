@@ -15,11 +15,14 @@ use crate::types::LibrariesBootstrapPayload;
 use ferrex_core::player_prelude::Library as CoreLibrary;
 use ferrex_core::player_prelude::{
     LibraryId, LibraryMediaResponse, MediaFile, MovieBatchId,
-    ScanCommandAcceptedResponse, ScanConfig, ScanMetrics, ScanProgressEvent,
-    ScanSnapshotDto, SeriesID,
+    ResetLibraryResult, ScanCommandAcceptedResponse, ScanConfig, ScanMetrics,
+    ScanProgressEvent, ScanSnapshotDto, SeriesID,
 };
 use ferrex_player_api::api_types::{Library as ApiLibrary, Media, MediaID};
 use uuid::Uuid;
+
+/// Server-side reset result; library identity is preserved.
+pub type LibraryResetResult = ResetLibraryResult;
 
 #[derive(Clone)]
 pub enum LibraryMessage {
@@ -95,9 +98,9 @@ pub enum LibraryMessage {
     FetchScanConfig,
     ScanConfigLoaded(Result<ScanConfig, String>),
 
-    // Destructive: delete and recreate library with start_scan=true
+    // Destructive: atomically clear owned data and start a fresh scan
     ResetLibrary(LibraryId),
-    ResetLibraryDone(Result<(), String>),
+    ResetLibraryDone(Result<LibraryResetResult, String>),
 
     // Media references
     LibraryMediasLoaded(Result<LibraryMediaResponse, String>),
@@ -545,7 +548,11 @@ impl std::fmt::Debug for LibraryMessage {
                 write!(f, "Library::ResetLibrary({})", id)
             }
             Self::ResetLibraryDone(result) => match result {
-                Ok(()) => write!(f, "Library::ResetLibraryDone(Ok)"),
+                Ok(result) => write!(
+                    f,
+                    "Library::ResetLibraryDone(Ok: {})",
+                    result.library_id
+                ),
                 Err(e) => write!(f, "Library::ResetLibraryDone(Err: {})", e),
             },
         }

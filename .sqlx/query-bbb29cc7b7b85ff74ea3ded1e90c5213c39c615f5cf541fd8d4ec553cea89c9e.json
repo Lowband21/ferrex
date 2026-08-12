@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO orchestrator_job_enrollments (correlation_id, job_id)\n        VALUES ($1, $2)\n        ON CONFLICT (correlation_id, job_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bbb29cc7b7b85ff74ea3ded1e90c5213c39c615f5cf541fd8d4ec553cea89c9e"
+}

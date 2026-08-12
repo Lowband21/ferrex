@@ -1,0 +1,127 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE library_scan_runs\n            SET status = COALESCE($2::varchar, status),\n                completed_items = $3,\n                total_items = $4,\n                retrying_items = $5,\n                dead_lettered_items = $6,\n                current_path = $7,\n                sequence = GREATEST(sequence, $8),\n                metadata = jsonb_set(\n                    jsonb_set(\n                        metadata,\n                        '{tracked_job_ids}',\n                        (\n                            SELECT COALESCE(\n                                jsonb_agg(value ORDER BY value),\n                                '[]'::jsonb\n                            )\n                            FROM (\n                                SELECT DISTINCT value\n                                FROM jsonb_array_elements(\n                                    COALESCE(\n                                        metadata -> 'tracked_job_ids',\n                                        '[]'::jsonb\n                                    ) || $9::jsonb\n                                ) AS ids(value)\n                            ) AS unique_ids\n                        ),\n                        true\n                    ),\n                    '{seed_completed}',\n                    to_jsonb(\n                        (\n                            CASE\n                                WHEN jsonb_typeof(metadata -> 'seed_completed') = 'boolean'\n                                THEN (metadata ->> 'seed_completed')::boolean\n                                ELSE false\n                            END\n                        ) OR $10::boolean\n                    ),\n                    true\n                ),\n                updated_at = NOW()\n            WHERE scan_id = $1\n              AND status::text IN ('pending','running','paused')\n            RETURNING\n                scan_id as \"scan_id!\",\n                library_id as \"library_id!\",\n                mode as \"mode!\",\n                run_key as \"run_key!\",\n                correlation_id,\n                status as \"status!\",\n                completed_items as \"completed_items!\",\n                total_items as \"total_items!\",\n                retrying_items as \"retrying_items!\",\n                dead_lettered_items as \"dead_lettered_items!\",\n                current_path,\n                last_error,\n                sequence as \"sequence!\",\n                started_at,\n                terminal_at,\n                created_at,\n                updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scan_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "mode!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "run_key!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "correlation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "status!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "completed_items!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "total_items!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "retrying_items!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "dead_lettered_items!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "current_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "sequence!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "terminal_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8",
+        "Jsonb",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "8736f06a0ebb67d924cbb9315940c1886d15cb8bbfa36efcfc4b1959a1462d2e"
+}

@@ -2,6 +2,7 @@ use ferrex_model::{ImageSize, MediaID, VideoMediaType};
 use tracing::error;
 
 use crate::{
+    domain::scan::actors::index::IndexingChange,
     error::{MediaError, Result},
     types::LibraryId,
 };
@@ -272,6 +273,7 @@ pub struct JobRecord {
     pub priority: JobPriority,
     pub state: JobState,
     pub attempts: u16,
+    /// Eligibility time while Ready; stable lease-start marker while Leased.
     pub available_at: DateTime<Utc>,
     pub lease_owner: Option<String>,
     pub lease_expires_at: Option<DateTime<Utc>>,
@@ -538,6 +540,11 @@ pub struct IndexUpsertJob {
     pub node: ScanNodeKind,
     pub path_norm: String,
     pub idempotency_key: String,
+    /// Catalog mutation semantics persisted with the durable job so a lost
+    /// live indexing outcome can be projected without changing Added into
+    /// Updated (or vice versa).
+    #[serde(default)]
+    pub change: IndexingChange,
 }
 
 /// Source that requested transcript extraction for a playable media file.
@@ -736,6 +743,41 @@ impl EnqueueRequest {
 mod tests {
     use super::*;
     use crate::domain::scan::orchestration::context::MovieRootPath;
+
+    #[test]
+    fn index_upsert_payload_persists_change_and_defaults_legacy_rows() {
+        let library_id = LibraryId::new();
+        let movie_id = ferrex_model::MovieID::new();
+        let job = IndexUpsertJob {
+            library_id,
+            media_id: MediaID::Movie(movie_id),
+            variant: VideoMediaType::Movie,
+            hierarchy: AnalyzeScanHierarchy::Movie(MovieScanHierarchy {
+                movie_root_path: MovieRootPath::try_new("/library/Movie")
+                    .expect("valid movie root"),
+                movie_id: Some(movie_id),
+                extra_tag: None,
+            }),
+            node: ScanNodeKind::MovieFolder,
+            path_norm: "/library/Movie/Movie.mkv".into(),
+            idempotency_key: "index:movie".into(),
+            change: IndexingChange::Updated,
+        };
+
+        let encoded = serde_json::to_value(&job).expect("serialize index job");
+        let round_trip: IndexUpsertJob =
+            serde_json::from_value(encoded.clone()).expect("decode index job");
+        assert_eq!(round_trip.change, IndexingChange::Updated);
+
+        let mut legacy = encoded;
+        legacy
+            .as_object_mut()
+            .expect("index job serializes as an object")
+            .remove("change");
+        let legacy: IndexUpsertJob =
+            serde_json::from_value(legacy).expect("decode legacy index job");
+        assert_eq!(legacy.change, IndexingChange::Created);
+    }
 
     #[test]
     fn transcript_extract_dedupe_key_is_media_file_scoped() {

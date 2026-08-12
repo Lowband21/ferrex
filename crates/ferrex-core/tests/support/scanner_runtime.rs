@@ -576,6 +576,7 @@ pub fn index_upsert_job_from_ready(
         node: ready.node.clone(),
         idempotency_key: format!("index:{}:{path_norm}", ready.library_id),
         path_norm,
+        change: IndexingChange::Created,
     }
 }
 
@@ -601,6 +602,8 @@ pub fn scan_event_folder_discovered(
     ScanEvent::FolderDiscovered {
         context: Box::new(context),
         reason,
+        correlation_id: None,
+        durable_job_id: None,
     }
 }
 
@@ -624,6 +627,7 @@ pub fn scan_event_seed_completed(
         correlation_id: None,
         mode,
         queued_folders,
+        enrolled_job_ids: Vec::new(),
         completed_at: Utc::now(),
     })
 }

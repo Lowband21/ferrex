@@ -14,6 +14,14 @@ use tracing::{info, warn};
 use super::catalog_event_projection::CatalogEventProjection;
 
 const MOVIE_BATCH_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const MOVIE_BATCH_FINAL_DRAIN_RETRY: Duration = Duration::from_millis(25);
+const MOVIE_BATCH_FINAL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MovieBatchDrainStatus {
+    Complete,
+    Pending,
+}
 
 #[derive(Debug)]
 struct LibraryNotifier {
@@ -85,7 +93,23 @@ impl MovieBatchFinalizationNotifiers {
         }
 
         let _ = notifier.stop_tx.send(true);
-        notifier.task.abort();
+        drop(guard);
+        if let Err(err) = notifier.task.await {
+            warn!(
+                library = %library_id,
+                error = %err,
+                "movie batch finalization task failed during final drain"
+            );
+        }
+    }
+
+    /// Stop notifier work immediately when its library has been deleted.
+    pub async fn forget_library(&self, library_id: LibraryId) {
+        let notifier = self.libraries.lock().await.remove(&library_id);
+        if let Some(notifier) = notifier {
+            let _ = notifier.stop_tx.send(true);
+            notifier.task.abort();
+        }
     }
 }
 
@@ -120,64 +144,144 @@ async fn movie_batch_notifier_loop(
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
-        tokio::select! {
-            _ = stop_rx.changed() => {
-                if *stop_rx.borrow() {
-                    break;
-                }
+        let stopping = tokio::select! {
+            result = stop_rx.changed() => {
+                result.is_err() || *stop_rx.borrow()
             }
-            _ = ticker.tick() => {}
-        }
-
-        let finalized = match unit_of_work
-            .media_refs
-            .list_finalized_movie_reference_batches(&library_id)
-            .await
-        {
-            Ok(batch_ids) => batch_ids,
-            Err(err) => {
-                warn!(
-                    "failed to list finalized movie batches for library {}: {}",
-                    library_id, err
-                );
-                continue;
-            }
+            _ = ticker.tick() => false,
         };
 
-        if finalized.is_empty() {
+        let status = drain_ready_movie_batches(
+            library_id,
+            &unit_of_work,
+            &catalog_events,
+            &mut last_notified,
+        )
+        .await;
+
+        if !stopping {
             continue;
         }
 
-        for batch_id in finalized {
-            if let Some(last) = last_notified
-                && batch_id <= last
-            {
-                continue;
-            }
-
-            let receivers = catalog_events.receiver_count();
-            let frame = match catalog_events
-                .publish_movie_batch_finalized(library_id, batch_id)
-                .await
-            {
-                Ok(frame) => frame,
-                Err(err) => {
-                    warn!(
-                        "movie batch finalization projection failed (library {}, batch {}): {}",
-                        library_id, batch_id, err
-                    );
-                    break;
-                }
-            };
-            info!(
-                library = %library_id,
-                batch_id = %batch_id,
-                receivers = receivers,
-                sequence = frame.sequence,
-                "published movie batch finalization"
-            );
-
-            last_notified = Some(batch_id);
+        let deadline = time::Instant::now() + MOVIE_BATCH_FINAL_DRAIN_TIMEOUT;
+        let mut status = status;
+        while status == MovieBatchDrainStatus::Pending
+            && time::Instant::now() < deadline
+        {
+            time::sleep(MOVIE_BATCH_FINAL_DRAIN_RETRY).await;
+            status = drain_ready_movie_batches(
+                library_id,
+                &unit_of_work,
+                &catalog_events,
+                &mut last_notified,
+            )
+            .await;
         }
+        if status == MovieBatchDrainStatus::Pending {
+            warn!(
+                library = %library_id,
+                "movie batch finalization remained pending after final drain"
+            );
+        }
+        break;
+    }
+}
+
+async fn drain_ready_movie_batches(
+    library_id: LibraryId,
+    unit_of_work: &AppUnitOfWork,
+    catalog_events: &CatalogEventProjection,
+    last_notified: &mut Option<MovieBatchId>,
+) -> MovieBatchDrainStatus {
+    let finalized = match unit_of_work
+        .media_refs
+        .list_finalized_movie_reference_batches(&library_id)
+        .await
+    {
+        Ok(batch_ids) => batch_ids,
+        Err(err) => {
+            warn!(
+                "failed to list finalized movie batches for library {}: {}",
+                library_id, err
+            );
+            return MovieBatchDrainStatus::Pending;
+        }
+    };
+
+    for batch_id in finalized {
+        if let Some(last) = *last_notified
+            && batch_id <= last
+        {
+            continue;
+        }
+
+        let receivers = catalog_events.receiver_count();
+        let frame = match catalog_events
+            .publish_movie_batch_finalized(library_id, batch_id)
+            .await
+        {
+            Ok(Some(frame)) => frame,
+            Ok(None) => {
+                tracing::debug!(
+                    library = %library_id,
+                    batch_id = %batch_id,
+                    "deferring movie batch finalization until per-item projections catch up"
+                );
+                return MovieBatchDrainStatus::Pending;
+            }
+            Err(err) => {
+                warn!(
+                    "movie batch finalization projection failed (library {}, batch {}): {}",
+                    library_id, batch_id, err
+                );
+                return MovieBatchDrainStatus::Pending;
+            }
+        };
+        info!(
+            library = %library_id,
+            batch_id = %batch_id,
+            receivers = receivers,
+            sequence = frame.sequence,
+            "published movie batch finalization"
+        );
+
+        *last_notified = Some(batch_id);
+    }
+
+    MovieBatchDrainStatus::Complete
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn run_finish_waits_for_notifier_final_drain() {
+        let library_id = LibraryId::new();
+        let notifiers = MovieBatchFinalizationNotifiers::new();
+        let drained = Arc::new(AtomicBool::new(false));
+        let drained_by_task = Arc::clone(&drained);
+        let (stop_tx, mut stop_rx) = watch::channel(false);
+        let task = tokio::spawn(async move {
+            stop_rx.changed().await.expect("stop sender remains alive");
+            assert!(*stop_rx.borrow());
+            tokio::task::yield_now().await;
+            drained_by_task.store(true, Ordering::SeqCst);
+        });
+
+        notifiers.libraries.lock().await.insert(
+            library_id,
+            LibraryNotifier {
+                active_runs: 1,
+                stop_tx,
+                task,
+            },
+        );
+
+        notifiers.on_run_finished(library_id).await;
+
+        assert!(drained.load(Ordering::SeqCst));
+        assert!(!notifiers.libraries.lock().await.contains_key(&library_id));
     }
 }

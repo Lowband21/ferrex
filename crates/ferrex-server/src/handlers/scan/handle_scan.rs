@@ -25,6 +25,8 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tracing::warn;
 use uuid::Uuid;
 
+use ferrex_model::DEFAULT_SCAN_INTERVAL_MINUTES;
+
 use crate::infra::app_state::AppState;
 use crate::infra::demo_mode;
 use crate::infra::scan::scan_manager::{
@@ -667,6 +669,7 @@ pub async fn scan_config_handler(
         },
         lease: LeaseConfigView {
             lease_ttl_secs: cfg.lease.lease_ttl_secs,
+            dispatch_timeout_ms: cfg.lease.dispatch_timeout_ms,
         },
         watch: WatchConfigView {
             debounce_window_ms: cfg.watch.debounce_window_ms,
@@ -687,7 +690,7 @@ pub async fn scan_config_handler(
     let incremental_policy = IncrementalScanPolicyView {
         default_auto_scan: true,
         default_watch_for_changes: true,
-        default_scan_interval_minutes: 60,
+        default_scan_interval_minutes: DEFAULT_SCAN_INTERVAL_MINUTES,
         watch_strategy: watch_strategy_label(cfg.watch.strategy),
         poll_interval_ms: cfg.watch.poll_interval_ms,
         debounce_window_ms: cfg.watch.debounce_window_ms,

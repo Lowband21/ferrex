@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT (\n            (SELECT COUNT(*) FROM movie_references WHERE library_id = ANY($1))\n            + (SELECT COUNT(*) FROM series WHERE library_id = ANY($1))\n            + (SELECT COUNT(*) FROM season_references WHERE library_id = ANY($1))\n            + (\n                SELECT COUNT(*)\n                FROM episode_references er\n                JOIN series s ON s.id = er.series_id\n                WHERE s.library_id = ANY($1)\n            )\n        )::bigint AS \"count!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "596550aa56d20e18f0a03d89b942b5a80df83664af7c2e7fa42e0ca1935f9909"
+}

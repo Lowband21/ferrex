@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM auth_security_settings",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "9b38caf4bf0f6ee00d5a0426dd393b1ad4fff0b64ff642afa48ce5f080aa89ec"
+}

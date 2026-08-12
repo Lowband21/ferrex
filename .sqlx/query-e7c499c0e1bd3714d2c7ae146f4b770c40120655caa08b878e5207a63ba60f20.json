@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM security_audit_log",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e7c499c0e1bd3714d2c7ae146f4b770c40120655caa08b878e5207a63ba60f20"
+}

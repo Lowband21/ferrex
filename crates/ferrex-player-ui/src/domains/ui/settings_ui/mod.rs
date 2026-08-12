@@ -16,7 +16,7 @@ use crate::{
             },
             state::SettingsSection,
         },
-        ui::messages::UiMessage,
+        ui::{LibraryMaintenanceAction, messages::UiMessage},
     },
     infra::units::ByteSize,
 };
@@ -112,8 +112,8 @@ pub enum SettingsUiMessage {
     DemoRefreshStatus,
 
     // Database maintenance UI
-    ShowClearDatabaseConfirm,
-    HideClearDatabaseConfirm,
+    ShowLibraryMaintenanceConfirm(LibraryMaintenanceAction),
+    HideLibraryMaintenanceConfirm,
     ClearDatabase,
     DatabaseCleared(Result<(), String>),
 
@@ -219,6 +219,21 @@ impl From<SettingsUiMessage> for UiMessage {
     }
 }
 
+impl LibraryMaintenanceAction {
+    /// Message dispatched only after the destructive confirmation is accepted.
+    pub fn confirmation_message(self) -> SettingsUiMessage {
+        match self {
+            Self::Delete(library_id) => {
+                SettingsUiMessage::DeleteLibrary(library_id)
+            }
+            Self::Reset(library_id) => {
+                SettingsUiMessage::ResetLibrary(library_id)
+            }
+            Self::ClearAllData => SettingsUiMessage::ClearDatabase,
+        }
+    }
+}
+
 impl SettingsUiMessage {
     pub fn name(&self) -> &'static str {
         match self {
@@ -244,8 +259,12 @@ impl SettingsUiMessage {
             Self::DemoRefreshStatus => "UI::DemoRefreshStatus",
 
             // Database maintenance UI
-            Self::ShowClearDatabaseConfirm => "UI::ShowClearDatabaseConfirm",
-            Self::HideClearDatabaseConfirm => "UI::HideClearDatabaseConfirm",
+            Self::ShowLibraryMaintenanceConfirm(_) => {
+                "UI::ShowLibraryMaintenanceConfirm"
+            }
+            Self::HideLibraryMaintenanceConfirm => {
+                "UI::HideLibraryMaintenanceConfirm"
+            }
             Self::ClearDatabase => "UI::ClearDatabase",
             Self::DatabaseCleared(_) => "UI::DatabaseCleared",
 
@@ -395,11 +414,11 @@ impl std::fmt::Debug for SettingsUiMessage {
             SettingsUiMessage::DemoRefreshStatus => {
                 write!(f, "UI::DemoRefreshStatus")
             }
-            SettingsUiMessage::ShowClearDatabaseConfirm => {
-                write!(f, "UI::ShowClearDatabaseConfirm")
+            SettingsUiMessage::ShowLibraryMaintenanceConfirm(action) => {
+                write!(f, "UI::ShowLibraryMaintenanceConfirm({action:?})")
             }
-            SettingsUiMessage::HideClearDatabaseConfirm => {
-                write!(f, "UI::HideClearDatabaseConfirm")
+            SettingsUiMessage::HideLibraryMaintenanceConfirm => {
+                write!(f, "UI::HideLibraryMaintenanceConfirm")
             }
             SettingsUiMessage::ClearDatabase => write!(f, "UI::ClearDatabase"),
             SettingsUiMessage::DatabaseCleared(_) => {

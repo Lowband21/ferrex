@@ -16,8 +16,11 @@ pub struct IndexCommand {
     pub ready: MediaReadyForIndex,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq,
+)]
 pub enum IndexingChange {
+    #[default]
     Created,
     Updated,
 }
@@ -32,14 +35,8 @@ pub struct IndexingOutcome {
     pub indexed_at: DateTime<Utc>,
     pub upserted: bool,
     pub media: Option<Media>,
-    #[serde(default = "IndexingOutcome::default_change")]
+    #[serde(default)]
     pub change: IndexingChange,
-}
-
-impl IndexingOutcome {
-    fn default_change() -> IndexingChange {
-        IndexingChange::Created
-    }
 }
 
 #[async_trait]
@@ -88,7 +85,7 @@ impl IndexerActor for DefaultIndexerActor {
             indexed_at: Utc::now(),
             upserted: true,
             media: Some(media),
-            change: IndexingOutcome::default_change(),
+            change: job.change,
         })
     }
 }

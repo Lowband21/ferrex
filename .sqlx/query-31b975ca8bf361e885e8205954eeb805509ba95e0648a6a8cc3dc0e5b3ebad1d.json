@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT status::text AS \"status!\"\n                FROM series_scan_state\n                WHERE library_id = $1\n                  AND series_root_path = $2\n                FOR UPDATE\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "31b975ca8bf361e885e8205954eeb805509ba95e0648a6a8cc3dc0e5b3ebad1d"
+}

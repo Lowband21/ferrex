@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM library_maintenance_operations",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "03a14b4d4fc4606a098cc7f547dce79ddacee672c0c54fa981814a1f426da45c"
+}

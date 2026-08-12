@@ -5,7 +5,8 @@ use crate::{
     domains::{
         auth::permissions::{self, StatePermissionExt},
         ui::{
-            messages::UiMessage, settings_ui::SettingsUiMessage, theme,
+            LibraryMaintenanceAction, messages::UiMessage,
+            settings_ui::SettingsUiMessage, theme,
             views::admin::view_library_form,
         },
     },
@@ -36,6 +37,18 @@ use uuid::Uuid;
 )]
 pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
     let permissions = state.permission_checker();
+    let destructive_action_pending = state
+        .domains
+        .ui
+        .state
+        .library_maintenance_confirmation
+        .is_some()
+        || state
+            .domains
+            .ui
+            .state
+            .library_maintenance_in_flight
+            .is_some();
 
     // If form is open, show the form instead
     if let Some(form_data) = &state.domains.library.state.library_form_data {
@@ -50,21 +63,40 @@ pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
 
     // Add Create Library button only if user has permission
     if permissions.has_permission("libraries:create") {
-        header_row = header_row.push(
-            button("Create Library")
+        let create_button =
+            button("Create Library").style(theme::Button::Primary.style());
+        let create_button = if destructive_action_pending {
+            create_button
+        } else {
+            create_button
                 .on_press(SettingsUiMessage::ShowLibraryForm(None).into())
-                .style(theme::Button::Primary.style()),
-        );
+        };
+        header_row = header_row.push(create_button);
         header_row = header_row.push(Space::new().width(10));
     }
 
     // Add Clear All Data button only if user can reset database
     if permissions.can_reset_database() {
-        header_row = header_row.push(
-            button("🗑 Clear All Data")
-                .on_press(SettingsUiMessage::ShowClearDatabaseConfirm.into())
-                .style(theme::Button::Destructive.style()),
-        );
+        let label = if state.domains.ui.state.library_maintenance_in_flight
+            == Some(LibraryMaintenanceAction::ClearAllData)
+        {
+            "Clearing…"
+        } else {
+            "🗑 Clear All Data"
+        };
+        let clear_button =
+            button(label).style(theme::Button::Destructive.style());
+        let clear_button = if destructive_action_pending {
+            clear_button
+        } else {
+            clear_button.on_press(
+                SettingsUiMessage::ShowLibraryMaintenanceConfirm(
+                    LibraryMaintenanceAction::ClearAllData,
+                )
+                .into(),
+            )
+        };
+        header_row = header_row.push(clear_button);
     }
 
     content = content.push(header_row);
@@ -86,6 +118,27 @@ pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
             .style(theme::Container::SuccessBox.style());
 
         content = content.push(success_card);
+    }
+
+    if !state.domains.library.state.library_form_errors.is_empty() {
+        let errors = state
+            .domains
+            .library
+            .state
+            .library_form_errors
+            .iter()
+            .map(|message| {
+                text(message)
+                    .size(14)
+                    .color(theme::MediaServerTheme::ERROR_COLOR)
+                    .into()
+            })
+            .collect::<Vec<Element<'_, UiMessage>>>();
+        content = content.push(
+            container(column(errors).spacing(6))
+                .padding([12, 16])
+                .style(theme::Container::ErrorBox.style()),
+        );
     }
 
     content = content.push(scan_status_panel(state));
@@ -159,6 +212,18 @@ fn create_library_card<'a>(
 
     if let Some(library_yoke) = library_opt {
         let library = *library_yoke.get();
+        let action_pending = state
+            .domains
+            .ui
+            .state
+            .library_maintenance_confirmation
+            .is_some()
+            || state
+                .domains
+                .ui
+                .state
+                .library_maintenance_in_flight
+                .is_some();
 
         let library_type_icon = match library.library_type {
             ArchivedLibraryType::Movies => "🎬",
@@ -205,6 +270,7 @@ fn create_library_card<'a>(
                 .style(theme::Button::Secondary.style());
             let scan_button = if active_manual_scan.is_some()
                 || scan_start_pending
+                || action_pending
             {
                 scan_button
             } else {
@@ -213,46 +279,78 @@ fn create_library_card<'a>(
                 )
             };
             action_buttons = action_buttons.push(scan_button);
-            // Reset: delete and recreate library with start_scan=true
-            action_buttons = action_buttons.push(
-                button("Reset Library")
-                    .on_press(
-                        SettingsUiMessage::ResetLibrary(LibraryId(
-                            library.id.as_uuid(),
-                        ))
-                        .into(),
+        }
+
+        // Reset crosses the same destructive and creation authority boundary as
+        // its atomic server-side delete/reinsert operation.
+        if permissions.can_scan_libraries()
+            && permissions.has_permission("libraries:delete")
+            && permissions.has_permission("libraries:create")
+        {
+            let library_id = LibraryId(library.id.as_uuid());
+            let label = if state.domains.ui.state.library_maintenance_in_flight
+                == Some(LibraryMaintenanceAction::Reset(library_id))
+            {
+                "Resetting…"
+            } else {
+                "Reset Library"
+            };
+            let reset_button =
+                button(label).style(theme::Button::Secondary.style());
+            let reset_button = if action_pending {
+                reset_button
+            } else {
+                reset_button.on_press(
+                    SettingsUiMessage::ShowLibraryMaintenanceConfirm(
+                        LibraryMaintenanceAction::Reset(library_id),
                     )
-                    .style(theme::Button::Secondary.style()),
-            );
+                    .into(),
+                )
+            };
+            action_buttons = action_buttons.push(reset_button);
         }
 
         // Edit button (only if user has update permission)
         if permissions.has_permission("libraries:update") {
-            action_buttons = action_buttons.push(
-                button("Edit")
-                    .on_press(
-                        SettingsUiMessage::ShowLibraryForm(Some(
-                            deserialize::<Library, Error>(library)
-                                .expect("Failed to deserialize library"),
-                        ))
-                        .into(),
-                    )
-                    .style(theme::Button::Secondary.style()),
-            );
+            let edit_button =
+                button("Edit").style(theme::Button::Secondary.style());
+            let edit_button = if action_pending {
+                edit_button
+            } else {
+                edit_button.on_press(
+                    SettingsUiMessage::ShowLibraryForm(Some(
+                        deserialize::<Library, Error>(library)
+                            .expect("Failed to deserialize library"),
+                    ))
+                    .into(),
+                )
+            };
+            action_buttons = action_buttons.push(edit_button);
         }
 
         // Delete button (only if user has delete permission)
         if permissions.has_permission("libraries:delete") {
-            action_buttons = action_buttons.push(
-                button("Delete")
-                    .on_press(
-                        SettingsUiMessage::DeleteLibrary(LibraryId(
-                            library.id.as_uuid(),
-                        ))
-                        .into(),
+            let library_id = LibraryId(library.id.as_uuid());
+            let label = if state.domains.ui.state.library_maintenance_in_flight
+                == Some(LibraryMaintenanceAction::Delete(library_id))
+            {
+                "Deleting…"
+            } else {
+                "Delete"
+            };
+            let delete_button =
+                button(label).style(theme::Button::Destructive.style());
+            let delete_button = if action_pending {
+                delete_button
+            } else {
+                delete_button.on_press(
+                    SettingsUiMessage::ShowLibraryMaintenanceConfirm(
+                        LibraryMaintenanceAction::Delete(library_id),
                     )
-                    .style(theme::Button::Destructive.style()),
-            );
+                    .into(),
+                )
+            };
+            action_buttons = action_buttons.push(delete_button);
         }
 
         container(
@@ -482,6 +580,10 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
             let status_label = scan_status_label(
                 &snapshot,
                 reason_details,
+                completed_items,
+                total_items,
+                validated_items,
+                known_unchanged_items,
                 skipped_items,
                 needs_attention_items,
                 retrying_items,
@@ -660,6 +762,10 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
             if let Some(copy) = scan_recovery_copy(
                 &snapshot,
                 reason_details,
+                completed_items,
+                total_items,
+                validated_items,
+                known_unchanged_items,
                 skipped_items,
                 needs_attention_items,
             ) {
@@ -735,6 +841,10 @@ fn scan_panel_count_label(scans: &[ScanSnapshotDto]) -> String {
 fn scan_status_label(
     snapshot: &ScanSnapshotDto,
     reason_details: &[ScanPathReasonDetail],
+    completed_items: u64,
+    total_items: u64,
+    validated_items: u64,
+    known_unchanged_items: u64,
     skipped_items: u64,
     needs_attention_items: u64,
     retrying_items: u64,
@@ -744,11 +854,26 @@ fn scan_status_label(
     {
         return ("Needs attention", theme::MediaServerTheme::ERROR);
     }
-    if scan_has_no_media_found(reason_details) {
+    if matches!(snapshot.status, ScanLifecycleStatus::Completed)
+        && scan_is_whole_library_no_media(
+            reason_details,
+            completed_items,
+            total_items,
+            validated_items,
+            known_unchanged_items,
+            skipped_items,
+        )
+    {
         return ("No media found", theme::MediaServerTheme::WARNING);
     }
     if matches!(snapshot.status, ScanLifecycleStatus::Failed)
-        && skipped_items > 0
+        && scan_is_whole_library_skipped(
+            completed_items,
+            total_items,
+            validated_items,
+            known_unchanged_items,
+            skipped_items,
+        )
     {
         return ("Skipped", theme::MediaServerTheme::WARNING);
     }
@@ -797,6 +922,10 @@ fn scan_has_rescan_recovery(
 fn scan_recovery_copy(
     snapshot: &ScanSnapshotDto,
     reason_details: &[ScanPathReasonDetail],
+    completed_items: u64,
+    total_items: u64,
+    validated_items: u64,
+    known_unchanged_items: u64,
     skipped_items: u64,
     needs_attention_items: u64,
 ) -> Option<&'static str> {
@@ -813,7 +942,22 @@ fn scan_recovery_copy(
         Some(
             "Review the paths below, then rescan this library. Per-path retry is not available yet.",
         )
-    } else if scan_has_no_media_found(reason_details) {
+    } else if matches!(snapshot.status, ScanLifecycleStatus::Failed)
+        && completed_items != total_items
+    {
+        Some(
+            "The scan stopped before all paths finished. Rescan this library to try again.",
+        )
+    } else if matches!(snapshot.status, ScanLifecycleStatus::Completed)
+        && scan_is_whole_library_no_media(
+            reason_details,
+            completed_items,
+            total_items,
+            validated_items,
+            known_unchanged_items,
+            skipped_items,
+        )
+    {
         Some(
             "Add supported media or update the folder, then rescan this library.",
         )
@@ -931,6 +1075,41 @@ fn scan_has_no_media_found(reason_details: &[ScanPathReasonDetail]) -> bool {
     reason_details
         .iter()
         .any(|detail| detail.reason_code == "no_supported_media_found")
+}
+
+fn scan_is_whole_library_no_media(
+    reason_details: &[ScanPathReasonDetail],
+    completed_items: u64,
+    total_items: u64,
+    validated_items: u64,
+    known_unchanged_items: u64,
+    skipped_items: u64,
+) -> bool {
+    scan_is_whole_library_skipped(
+        completed_items,
+        total_items,
+        validated_items,
+        known_unchanged_items,
+        skipped_items,
+    ) && !reason_details.is_empty()
+        && reason_details.iter().all(|detail| {
+            detail.category == ScanPathReasonCategory::Skipped
+                && detail.reason_code == "no_supported_media_found"
+        })
+}
+
+fn scan_is_whole_library_skipped(
+    completed_items: u64,
+    total_items: u64,
+    validated_items: u64,
+    known_unchanged_items: u64,
+    skipped_items: u64,
+) -> bool {
+    total_items > 0
+        && completed_items == total_items
+        && skipped_items == total_items
+        && validated_items == 0
+        && known_unchanged_items == 0
 }
 
 fn truncate_path(path: &str) -> String {
@@ -1056,6 +1235,8 @@ mod tests {
     #[test]
     fn no_media_found_reason_gets_label_and_rescan_copy() {
         let mut scan = snapshot(ScanLifecycleStatus::Completed);
+        scan.completed_items = 1;
+        scan.total_items = 1;
         scan.skipped_items = 1;
         let details = vec![reason_detail(
             ScanPathReasonCategory::Skipped,
@@ -1065,16 +1246,153 @@ mod tests {
 
         assert_eq!(reason_detail_label(&details[0]), "No media found");
         assert_eq!(
-            scan_status_label(&scan, &details, 1, 0, 0).0,
+            scan_status_label(&scan, &details, 1, 1, 0, 0, 1, 0, 0).0,
             "No media found"
         );
         assert!(scan_has_rescan_recovery(&scan, &details, 1, 0));
         assert_eq!(
-            scan_recovery_copy(&scan, &details, 1, 0),
+            scan_recovery_copy(&scan, &details, 1, 1, 0, 0, 1, 0),
             Some(
                 "Add supported media or update the folder, then rescan this library."
             )
         );
+    }
+
+    #[test]
+    fn mixed_success_no_media_reason_preserves_terminal_status() {
+        let details = vec![reason_detail(
+            ScanPathReasonCategory::Skipped,
+            "no_supported_media_found",
+            None,
+        )];
+
+        for (validated_items, known_unchanged_items) in [(1, 0), (0, 1)] {
+            for (status, expected_label) in [
+                (ScanLifecycleStatus::Completed, "Completed"),
+                (ScanLifecycleStatus::Failed, "Failed"),
+            ] {
+                let mut scan = snapshot(status);
+                scan.completed_items =
+                    validated_items + known_unchanged_items + 1;
+                scan.total_items = scan.completed_items;
+                scan.validated_items = validated_items;
+                scan.known_unchanged_items = known_unchanged_items;
+                scan.skipped_items = 1;
+
+                assert_eq!(
+                    scan_status_label(
+                        &scan,
+                        &details,
+                        scan.completed_items,
+                        scan.total_items,
+                        validated_items,
+                        known_unchanged_items,
+                        1,
+                        0,
+                        0,
+                    )
+                    .0,
+                    expected_label
+                );
+                assert!(scan_has_rescan_recovery(&scan, &details, 1, 0));
+                assert_eq!(
+                    scan_recovery_copy(
+                        &scan,
+                        &details,
+                        scan.completed_items,
+                        scan.total_items,
+                        validated_items,
+                        known_unchanged_items,
+                        1,
+                        0,
+                    ),
+                    Some(
+                        "Skipped paths can be checked again with a library rescan."
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn incomplete_failed_scan_with_empty_path_preserves_failure() {
+        let mut scan = snapshot(ScanLifecycleStatus::Failed);
+        scan.completed_items = 1;
+        scan.total_items = 3_131;
+        scan.skipped_items = 1;
+        let details = vec![reason_detail(
+            ScanPathReasonCategory::Skipped,
+            "no_supported_media_found",
+            None,
+        )];
+
+        assert_eq!(
+            scan_status_label(&scan, &details, 1, 3_131, 0, 0, 1, 0, 0).0,
+            "Failed"
+        );
+        assert_eq!(
+            scan_recovery_copy(&scan, &details, 1, 3_131, 0, 0, 1, 0),
+            Some(
+                "The scan stopped before all paths finished. Rescan this library to try again."
+            )
+        );
+    }
+
+    #[test]
+    fn mixed_skip_reasons_are_not_whole_library_no_media() {
+        let mut scan = snapshot(ScanLifecycleStatus::Completed);
+        scan.completed_items = 2;
+        scan.total_items = 2;
+        scan.skipped_items = 2;
+        let details = vec![
+            reason_detail(
+                ScanPathReasonCategory::Skipped,
+                "no_supported_media_found",
+                None,
+            ),
+            reason_detail(
+                ScanPathReasonCategory::Skipped,
+                "path_missing",
+                None,
+            ),
+        ];
+
+        assert_eq!(
+            scan_status_label(&scan, &details, 2, 2, 0, 0, 2, 0, 0).0,
+            "Completed"
+        );
+        assert_eq!(
+            scan_recovery_copy(&scan, &details, 2, 2, 0, 0, 2, 0),
+            Some("Skipped paths can be checked again with a library rescan.")
+        );
+    }
+
+    #[test]
+    fn active_scan_with_early_empty_folder_preserves_active_status() {
+        let details = vec![reason_detail(
+            ScanPathReasonCategory::Skipped,
+            "no_supported_media_found",
+            None,
+        )];
+
+        for (status, expected_label) in [
+            (ScanLifecycleStatus::Pending, "Pending"),
+            (ScanLifecycleStatus::Running, "Running"),
+        ] {
+            let mut scan = snapshot(status);
+            scan.completed_items = 1;
+            scan.total_items = 3_131;
+            scan.skipped_items = 1;
+
+            assert_eq!(
+                scan_status_label(&scan, &details, 1, 3_131, 0, 0, 1, 0, 0,).0,
+                expected_label
+            );
+            assert_eq!(
+                scan_recovery_copy(&scan, &details, 1, 3_131, 0, 0, 1, 0,),
+                None
+            );
+        }
     }
 
     #[test]
@@ -1091,7 +1409,18 @@ mod tests {
 
         running.retrying_items = 1;
         assert_eq!(
-            scan_status_label(&running, &[], 0, 0, running.retrying_items).0,
+            scan_status_label(
+                &running,
+                &[],
+                running.completed_items,
+                running.total_items,
+                running.validated_items,
+                running.known_unchanged_items,
+                running.skipped_items,
+                running.needs_attention_items,
+                running.retrying_items,
+            )
+            .0,
             "Retrying"
         );
     }

@@ -94,7 +94,10 @@ pub use image::{
 pub use image_events::ImageReadyEvent;
 #[cfg(feature = "rkyv")]
 pub use library::{ArchivedLibrary, ArchivedLibraryExt, ArchivedLibraryType};
-pub use library::{Library, LibraryLike, LibraryLikeMut, LibraryType};
+pub use library::{
+    DEFAULT_SCAN_INTERVAL_MINUTES, Library, LibraryLike, LibraryLikeMut,
+    LibraryType,
+};
 #[cfg(feature = "rkyv")]
 pub use media::{
     ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference,

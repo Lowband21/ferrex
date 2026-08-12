@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM intelligence_search_documents",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "56d7eb86c33b7edaef567d014e792150c47f69949e44359f5e91d3ae1ca6cdfe"
+}

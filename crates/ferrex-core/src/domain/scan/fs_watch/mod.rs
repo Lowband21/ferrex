@@ -18,7 +18,7 @@ use crate::{
     types::ids::LibraryId,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
@@ -35,7 +35,7 @@ use notify::{
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::{JoinHandle, spawn_blocking};
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, MissedTickBehavior, interval};
 use tracing::{error, info, trace, warn};
 use uuid::Uuid;
 
@@ -258,25 +258,6 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
         );
         drop(guard);
 
-        if let Err(err) = replay_unacknowledged_events(
-            library_id,
-            &resolved_roots,
-            Arc::clone(&self.observer),
-            Arc::clone(&self.command_executor),
-            self.event_bus.clone(),
-            &self.consumer_group,
-            self.config.max_batch_events,
-        )
-        .await
-        {
-            if let Some(watch) =
-                self.libraries.write().await.remove(&library_id)
-            {
-                watch.shutdown();
-            }
-            return Err(err);
-        }
-
         let libraries = Arc::clone(&self.libraries);
         let observer = Arc::clone(&self.observer);
         let watcher_roots = resolved_roots.clone();
@@ -381,25 +362,6 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
             },
         );
         drop(guard);
-
-        if let Err(err) = replay_unacknowledged_events(
-            library_id,
-            &resolved_roots,
-            Arc::clone(&self.observer),
-            Arc::clone(&self.command_executor),
-            self.event_bus.clone(),
-            &self.consumer_group,
-            self.config.max_batch_events,
-        )
-        .await
-        {
-            if let Some(watch) =
-                self.libraries.write().await.remove(&library_id)
-            {
-                watch.shutdown();
-            }
-            return Err(err);
-        }
 
         drop(tx);
 
@@ -602,34 +564,49 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
     tokio::spawn(async move {
         let mut pending: HashMap<LibraryRootsId, Vec<PendingWatchEvent>> =
             HashMap::new();
+        let replay_cadence = config
+            .poll_interval
+            .min(Duration::from_secs(30))
+            .max(config.debounce_window);
+        let mut replay_tick = interval(replay_cadence);
+        replay_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
-            let msg = if pending.is_empty() {
-                rx.recv().await
-            } else {
-                match timeout(config.debounce_window, rx.recv()).await {
-                    Ok(msg) => msg,
-                    Err(_) => {
-                        if let Err(err) = flush_pending(
-                            Arc::clone(&observer),
-                            library_id,
-                            &mut pending,
-                            &command_executor,
-                            event_bus.clone(),
-                            &consumer_group,
-                        )
-                        .await
-                        {
-                            observer.on_error(library_id, &err.to_string());
-                        }
-                        continue;
+            let debounce = tokio::time::sleep(config.debounce_window);
+            tokio::pin!(debounce);
+
+            let msg = tokio::select! {
+                msg = rx.recv() => msg,
+                _ = &mut debounce, if !pending.is_empty() => {
+                    if let Err(err) = flush_pending(
+                        library_id,
+                        &mut pending,
+                        &command_executor,
+                        event_bus.clone(),
+                        &consumer_group,
+                    ).await {
+                        observer.on_error(library_id, &err.to_string());
                     }
+                    continue;
+                }
+                _ = replay_tick.tick(), if event_bus.is_some() => {
+                    if let Err(err) = replay_unacknowledged_events(
+                        library_id,
+                        &roots,
+                        &mut pending,
+                        &command_executor,
+                        event_bus.clone(),
+                        &consumer_group,
+                        config.max_batch_events,
+                    ).await {
+                        observer.on_error(library_id, &err.to_string());
+                    }
+                    continue;
                 }
             };
 
             let Some(msg) = msg else {
                 if let Err(err) = flush_pending(
-                    Arc::clone(&observer),
                     library_id,
                     &mut pending,
                     &command_executor,
@@ -660,50 +637,20 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                                     event_id,
                                     event: normalized.event,
                                 };
-
-                                if matches!(
-                                    pending_event.event.kind,
-                                    FileSystemEventKind::Overflow
-                                ) {
-                                    if let Err(err) = dispatch_events(
-                                        Arc::clone(&observer),
-                                        library_id,
-                                        &command_executor,
-                                        event_bus.clone(),
-                                        &consumer_group,
-                                        root_id,
-                                        vec![pending_event],
-                                    )
-                                    .await
-                                    {
-                                        observer.on_error(
-                                            library_id,
-                                            &err.to_string(),
-                                        );
-                                    }
-                                    continue;
-                                }
-
                                 let entry = pending.entry(root_id).or_default();
                                 entry.push(pending_event);
-                                if entry.len() >= config.max_batch_events {
-                                    let events = std::mem::take(entry);
-                                    if let Err(err) = dispatch_events(
-                                        Arc::clone(&observer),
+                                if entry.len() >= config.max_batch_events
+                                    && let Err(err) = flush_pending(
                                         library_id,
+                                        &mut pending,
                                         &command_executor,
                                         event_bus.clone(),
                                         &consumer_group,
-                                        root_id,
-                                        events,
                                     )
                                     .await
-                                    {
-                                        observer.on_error(
-                                            library_id,
-                                            &err.to_string(),
-                                        );
-                                    }
+                                {
+                                    observer
+                                        .on_error(library_id, &err.to_string());
                                 }
                             }
                             Ok(PersistedWatchEvent::Duplicate) => {
@@ -735,26 +682,12 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                                 Ok(PersistedWatchEvent::Dispatch {
                                     event_id,
                                 }) => {
-                                    let pending_event = PendingWatchEvent {
-                                        event_id,
-                                        event: normalized.event,
-                                    };
-                                    if let Err(err) = dispatch_events(
-                                        Arc::clone(&observer),
-                                        library_id,
-                                        &command_executor,
-                                        event_bus.clone(),
-                                        &consumer_group,
-                                        root_id,
-                                        vec![pending_event],
-                                    )
-                                    .await
-                                    {
-                                        observer.on_error(
-                                            library_id,
-                                            &err.to_string(),
-                                        );
-                                    }
+                                    pending.entry(root_id).or_default().push(
+                                        PendingWatchEvent {
+                                            event_id,
+                                            event: normalized.event,
+                                        },
+                                    );
                                 }
                                 Ok(PersistedWatchEvent::Duplicate) => {
                                     trace!(
@@ -769,6 +702,17 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                                 }
                             }
                         }
+                        if let Err(err) = flush_pending(
+                            library_id,
+                            &mut pending,
+                            &command_executor,
+                            event_bus.clone(),
+                            &consumer_group,
+                        )
+                        .await
+                        {
+                            observer.on_error(library_id, &err.to_string());
+                        }
                     };
                 }
             }
@@ -776,57 +720,56 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
     })
 }
 
-async fn flush_pending<O: FsWatchObserver + 'static>(
-    observer: Arc<O>,
+async fn flush_pending(
     library_id: LibraryId,
     pending: &mut HashMap<LibraryRootsId, Vec<PendingWatchEvent>>,
     command_executor: &Arc<dyn LibraryCommandExecutor>,
     event_bus: Option<Arc<dyn FileChangeEventBus>>,
     consumer_group: &str,
 ) -> Result<()> {
-    let mut batches = Vec::new();
-    for (root_id, events) in pending.iter_mut() {
-        if events.is_empty() {
-            continue;
-        }
-        let drained = std::mem::take(events);
-        batches.push((*root_id, drained));
-    }
+    let root_ids: Vec<_> = pending.keys().copied().collect();
+    let mut first_error = None;
 
-    for (root_id, events) in batches {
-        dispatch_events(
-            Arc::clone(&observer),
-            library_id,
-            command_executor,
-            event_bus.clone(),
-            consumer_group,
-            root_id,
-            events,
-        )
-        .await?;
+    for root_id in root_ids {
+        let result = match pending.get_mut(&root_id) {
+            Some(events) if !events.is_empty() => {
+                dispatch_events(
+                    library_id,
+                    command_executor,
+                    event_bus.clone(),
+                    consumer_group,
+                    root_id,
+                    events,
+                )
+                .await
+            }
+            _ => Ok(()),
+        };
+        if let Err(err) = result
+            && first_error.is_none()
+        {
+            first_error = Some(err);
+        }
     }
-    pending.clear();
-    Ok(())
+    pending.retain(|_, events| !events.is_empty());
+
+    first_error.map_or(Ok(()), Err)
 }
 
-async fn dispatch_events<O: FsWatchObserver + 'static>(
-    observer: Arc<O>,
+async fn dispatch_events(
     library_id: LibraryId,
     command_executor: &Arc<dyn LibraryCommandExecutor>,
     event_bus: Option<Arc<dyn FileChangeEventBus>>,
     consumer_group: &str,
     root_id: LibraryRootsId,
-    events: Vec<PendingWatchEvent>,
+    events: &mut Vec<PendingWatchEvent>,
 ) -> Result<()> {
     if events.is_empty() {
         return Ok(());
     }
 
-    let mut pending_events = events;
-    let mut actor_events: Vec<FileSystemEvent> = pending_events
-        .iter()
-        .map(|pending| pending.event.clone())
-        .collect();
+    let mut actor_events: Vec<FileSystemEvent> =
+        events.iter().map(|pending| pending.event.clone()).collect();
 
     let correlation_hint = actor_events
         .iter()
@@ -847,21 +790,24 @@ async fn dispatch_events<O: FsWatchObserver + 'static>(
         correlation_id: correlation_hint,
     };
 
-    if let Err(err) = command_executor
+    command_executor
         .execute_library_command(library_id, command)
-        .await
-    {
-        observer.on_error(library_id, &err.to_string());
-        return Err(err);
-    }
+        .await?;
 
     if let Some(event_bus) = event_bus {
-        for event_id in pending_events
-            .drain(..)
-            .filter_map(|pending| pending.event_id)
-        {
-            event_bus.ack(consumer_group, event_id).await?;
+        let mut acknowledged = 0usize;
+        for pending in events.iter() {
+            if let Some(event_id) = pending.event_id
+                && let Err(err) = event_bus.ack(consumer_group, event_id).await
+            {
+                events.drain(..acknowledged);
+                return Err(err);
+            }
+            acknowledged += 1;
         }
+        events.drain(..acknowledged);
+    } else {
+        events.clear();
     }
 
     Ok(())
@@ -937,11 +883,11 @@ fn file_system_event_kind(kind: &FileWatchEventType) -> FileSystemEventKind {
     }
 }
 
-async fn replay_unacknowledged_events<O: FsWatchObserver + 'static>(
+async fn replay_unacknowledged_events(
     library_id: LibraryId,
     roots: &[(LibraryRootsId, PathBuf)],
-    observer: Arc<O>,
-    command_executor: Arc<dyn LibraryCommandExecutor>,
+    pending: &mut HashMap<LibraryRootsId, Vec<PendingWatchEvent>>,
+    command_executor: &Arc<dyn LibraryCommandExecutor>,
     event_bus: Option<Arc<dyn FileChangeEventBus>>,
     consumer_group: &str,
     batch_limit: usize,
@@ -952,48 +898,37 @@ async fn replay_unacknowledged_events<O: FsWatchObserver + 'static>(
 
     let limit = batch_limit.clamp(1, i32::MAX as usize) as i32;
     loop {
-        let events =
+        let records =
             event_bus.get_unprocessed_events(library_id, limit).await?;
-        if events.is_empty() {
+        if records.is_empty() {
             return Ok(());
         }
+        let page_is_full = records.len() == limit as usize;
+        let mut known_event_ids: HashSet<_> = pending
+            .values()
+            .flat_map(|events| events.iter().filter_map(|event| event.event_id))
+            .collect();
 
-        let mut current_root: Option<LibraryRootsId> = None;
-        let mut batch = Vec::new();
-
-        for record in events {
-            let pending = replay_record_to_pending(&record, roots)?;
-            let root_id = LibraryRootsId(record.library_root_id as u16);
-            if let Some(active_root) = current_root {
-                if active_root != root_id {
-                    dispatch_events(
-                        Arc::clone(&observer),
-                        library_id,
-                        &command_executor,
-                        Some(Arc::clone(&event_bus)),
-                        consumer_group,
-                        active_root,
-                        std::mem::take(&mut batch),
-                    )
-                    .await?;
-                }
+        for record in records {
+            if !known_event_ids.insert(record.id) {
+                continue;
             }
-
-            current_root = Some(root_id);
-            batch.push(pending);
+            let pending_event = replay_record_to_pending(&record, roots)?;
+            let root_id = LibraryRootsId(record.library_root_id as u16);
+            pending.entry(root_id).or_default().push(pending_event);
         }
 
-        if let Some(root_id) = current_root {
-            dispatch_events(
-                Arc::clone(&observer),
-                library_id,
-                &command_executor,
-                Some(Arc::clone(&event_bus)),
-                consumer_group,
-                root_id,
-                batch,
-            )
-            .await?;
+        flush_pending(
+            library_id,
+            pending,
+            command_executor,
+            Some(Arc::clone(&event_bus)),
+            consumer_group,
+        )
+        .await?;
+
+        if !page_is_full {
+            return Ok(());
         }
     }
 }
@@ -1028,7 +963,7 @@ fn replay_record_to_pending(
             path_key: record.path_key.clone(),
             fingerprint: record.fingerprint.clone(),
             path: PathBuf::from(&record.file_path),
-            old_path: record.old_path.as_ref().map(|path| PathBuf::from(path)),
+            old_path: record.old_path.as_ref().map(PathBuf::from),
             kind: file_system_event_kind(&record.event_type),
             occurred_at: record.detected_at,
         },
@@ -1266,6 +1201,99 @@ fn resolve_roots(
         .collect()
 }
 
+fn is_network_filesystem_type(filesystem_type: &str) -> bool {
+    matches!(filesystem_type, "cifs" | "smb3" | "nfs" | "nfs4")
+}
+
+fn effective_watch_strategy(
+    configured: WatchStrategy,
+    network_filesystem_type: Option<&str>,
+) -> WatchStrategy {
+    if configured == WatchStrategy::Auto
+        && network_filesystem_type.is_some_and(is_network_filesystem_type)
+    {
+        WatchStrategy::Poll
+    } else {
+        configured
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn decode_mountinfo_path(encoded: &str) -> PathBuf {
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if bytes[index] == b'\\' && index + 3 < bytes.len() {
+            let digits = &bytes[index + 1..index + 4];
+            if digits.iter().all(|digit| matches!(digit, b'0'..=b'7')) {
+                let value = (digits[0] - b'0') * 64
+                    + (digits[1] - b'0') * 8
+                    + (digits[2] - b'0');
+                decoded.push(value);
+                index += 4;
+                continue;
+            }
+        }
+
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+
+    PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn network_filesystem_type_from_mountinfo(
+    mountinfo: &str,
+    path: &Path,
+) -> Option<String> {
+    let mut best_match: Option<(usize, String)> = None;
+
+    for line in mountinfo.lines() {
+        let Some((mount_fields, filesystem_fields)) = line.split_once(" - ")
+        else {
+            continue;
+        };
+        let Some(mount_point) = mount_fields.split_whitespace().nth(4) else {
+            continue;
+        };
+        let Some(filesystem_type) = filesystem_fields.split_whitespace().next()
+        else {
+            continue;
+        };
+        let mount_path = decode_mountinfo_path(mount_point);
+        if !path.starts_with(&mount_path) {
+            continue;
+        }
+
+        let specificity = mount_path.components().count();
+        if best_match
+            .as_ref()
+            .is_none_or(|(best_specificity, _)| specificity > *best_specificity)
+        {
+            best_match = Some((specificity, filesystem_type.to_owned()));
+        }
+    }
+
+    best_match
+        .map(|(_, filesystem_type)| filesystem_type)
+        .filter(|filesystem_type| is_network_filesystem_type(filesystem_type))
+}
+
+#[cfg(target_os = "linux")]
+fn network_filesystem_type(path: &Path) -> Option<String> {
+    let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.into());
+    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    network_filesystem_type_from_mountinfo(&mountinfo, &resolved)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn network_filesystem_type(_path: &Path) -> Option<String> {
+    None
+}
+
 fn init_watchers(
     config: FsWatchConfig,
     watcher_roots: Vec<(LibraryRootsId, PathBuf)>,
@@ -1273,7 +1301,28 @@ fn init_watchers(
 ) -> Result<Vec<ActiveWatcher>> {
     let mut watchers = Vec::with_capacity(watcher_roots.len());
     for (_root_id, root_path) in &watcher_roots {
-        match config.strategy {
+        let network_filesystem = network_filesystem_type(root_path);
+        let strategy = effective_watch_strategy(
+            config.strategy,
+            network_filesystem.as_deref(),
+        );
+        if let Some(filesystem_type) = network_filesystem.as_deref() {
+            match config.strategy {
+                WatchStrategy::Auto => warn!(
+                    path = %root_path.display(),
+                    filesystem_type,
+                    "network filesystem detected; auto watch strategy selected polling"
+                ),
+                WatchStrategy::Native => warn!(
+                    path = %root_path.display(),
+                    filesystem_type,
+                    "network filesystem detected with forced native watch strategy; notifications may be unreliable; configure polling for reliable change detection"
+                ),
+                WatchStrategy::Poll => {}
+            }
+        }
+
+        match strategy {
             WatchStrategy::Native => {
                 let watcher =
                     build_native_watcher(root_path, watcher_tx.clone())?;
@@ -1442,6 +1491,7 @@ mod tests {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
 
     use async_trait::async_trait;
@@ -1453,24 +1503,28 @@ mod tests {
     use tokio::time;
     use uuid::Uuid;
 
+    #[cfg(target_os = "linux")]
+    use super::network_filesystem_type_from_mountinfo;
     use super::{
         EVENT_VERSION, FsWatchConfig, FsWatchService, NoopFsWatchObserver,
-        WatchConfig, WatchMessage, WatchStrategy, encode_hash,
+        WatchConfig, WatchMessage, WatchStrategy, effective_watch_strategy,
+        encode_hash,
     };
     use crate::database::traits::{FileWatchEvent, FileWatchEventType};
+    use crate::domain::scan::MediaCandidate;
     use crate::domain::scan::fs_watch::event_bus::FileChangeEventBus;
     use crate::domain::scan::orchestration::lease::DequeueRequest;
     use crate::domain::scan::orchestration::scan_cursor::normalize_path;
     use crate::domain::scan::orchestration::{
-        CorrelationCache, DefaultLibraryActor, DependencyKey, DispatchStatus,
-        EnqueueRequest, FileSystemEvent, FileSystemEventKind, FolderScanJob,
-        InMemoryBudget, InProcJobEventBus, JobDispatcher, JobEvent,
-        JobEventPayload, JobHandle, JobId, JobKind, JobLease, JobPayload,
-        JobPriority, LeaseExpiryScanner, LeaseId, LeaseRenewal,
+        CorrelationCache, DedupeKey, DefaultLibraryActor, DependencyKey,
+        DispatchStatus, EnqueueRequest, FileSystemEvent, FileSystemEventKind,
+        FolderScanJob, InMemoryBudget, InProcJobEventBus, JobDispatcher,
+        JobEvent, JobEventPayload, JobHandle, JobId, JobKind, JobLease,
+        JobPayload, JobPriority, LeaseExpiryScanner, LeaseId, LeaseRenewal,
         LibraryActorCommand, LibraryActorConfig, LibraryActorHandle,
         LibraryCommandExecutor, LibraryRootsId, NoopActorObserver,
         OrchestratorConfig, OrchestratorRuntime, OrchestratorRuntimeBuilder,
-        QueueService, ScanReason,
+        QueueService, ScanReason, StartMode,
     };
     use crate::error::{MediaError, Result};
     use crate::types::{
@@ -1482,16 +1536,67 @@ mod tests {
 
     #[test]
     fn fs_watch_config_preserves_forced_poll_strategy() {
-        let mut watch = WatchConfig::default();
-        watch.strategy = WatchStrategy::Poll;
-        watch.poll_interval_ms = 2_500;
-        watch.poll_backoff_max_ms = 42_000;
+        let watch = WatchConfig {
+            strategy: WatchStrategy::Poll,
+            poll_interval_ms: 2_500,
+            poll_backoff_max_ms: 42_000,
+            ..WatchConfig::default()
+        };
 
         let config = FsWatchConfig::from(watch);
 
         assert_eq!(config.strategy, WatchStrategy::Poll);
         assert_eq!(config.poll_interval, Duration::from_millis(2_500));
         assert_eq!(config.poll_backoff_max, Duration::from_millis(42_000));
+    }
+
+    #[test]
+    fn auto_watch_strategy_prefers_polling_for_cifs_and_nfs() {
+        for filesystem_type in ["cifs", "smb3", "nfs", "nfs4"] {
+            assert_eq!(
+                effective_watch_strategy(
+                    WatchStrategy::Auto,
+                    Some(filesystem_type),
+                ),
+                WatchStrategy::Poll
+            );
+        }
+
+        assert_eq!(
+            effective_watch_strategy(WatchStrategy::Auto, Some("ext4")),
+            WatchStrategy::Auto
+        );
+        assert_eq!(
+            effective_watch_strategy(WatchStrategy::Native, Some("nfs4")),
+            WatchStrategy::Native
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mountinfo_detection_uses_longest_mount_and_decodes_paths() {
+        let mountinfo = concat!(
+            "20 1 0:1 / / rw - ext4 /dev/root rw\n",
+            "21 20 0:2 / /mnt/TV\\040Shows rw - nfs4 host:/shows rw\n",
+            "22 21 0:3 / /mnt/TV\\040Shows/local rw - ext4 /dev/loop0 rw\n",
+        );
+
+        assert_eq!(
+            network_filesystem_type_from_mountinfo(
+                mountinfo,
+                Path::new("/mnt/TV Shows/Series/Example"),
+            )
+            .as_deref(),
+            Some("nfs4")
+        );
+        assert_eq!(
+            network_filesystem_type_from_mountinfo(
+                mountinfo,
+                Path::new("/mnt/TV Shows/local/Movie"),
+            ),
+            None,
+            "a nested local mount must override its network parent"
+        );
     }
 
     #[derive(Clone, Debug)]
@@ -1505,6 +1610,8 @@ mod tests {
     struct RecordingQueue {
         records: Arc<Mutex<Vec<RecordedRequest>>>,
         accepted_by_dedupe: Arc<Mutex<HashMap<String, JobId>>>,
+        fail_next_enqueue: Arc<AtomicBool>,
+        enqueue_attempts: Arc<AtomicUsize>,
     }
 
     impl std::fmt::Debug for RecordingQueue {
@@ -1524,11 +1631,25 @@ mod tests {
         async fn records(&self) -> Vec<RecordedRequest> {
             self.records.lock().await.clone()
         }
+
+        fn fail_next_enqueue(&self) {
+            self.fail_next_enqueue.store(true, Ordering::SeqCst);
+        }
+
+        fn enqueue_attempts(&self) -> usize {
+            self.enqueue_attempts.load(Ordering::SeqCst)
+        }
     }
 
     #[async_trait]
     impl QueueService for RecordingQueue {
         async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
+            self.enqueue_attempts.fetch_add(1, Ordering::SeqCst);
+            if self.fail_next_enqueue.swap(false, Ordering::SeqCst) {
+                return Err(MediaError::Internal(
+                    "transient in-memory enqueue failure".into(),
+                ));
+            }
             let payload = request.payload.clone();
             let dedupe_key = request.dedupe_key().to_string();
 
@@ -1649,6 +1770,8 @@ mod tests {
     struct MemoryFileChangeEventBus {
         events: Arc<Mutex<Vec<FileWatchEvent>>>,
         acked: Arc<Mutex<Vec<Uuid>>>,
+        fail_next_ack: Arc<AtomicBool>,
+        fail_next_replay: Arc<AtomicBool>,
     }
 
     impl MemoryFileChangeEventBus {
@@ -1663,6 +1786,14 @@ mod tests {
         async fn clear(&self) {
             self.events.lock().await.clear();
             self.acked.lock().await.clear();
+        }
+
+        fn fail_next_ack(&self) {
+            self.fail_next_ack.store(true, Ordering::SeqCst);
+        }
+
+        fn fail_next_replay(&self) {
+            self.fail_next_replay.store(true, Ordering::SeqCst);
         }
     }
 
@@ -1680,6 +1811,11 @@ mod tests {
         }
 
         async fn ack(&self, _group: &str, event_id: Uuid) -> Result<()> {
+            if self.fail_next_ack.swap(false, Ordering::SeqCst) {
+                return Err(MediaError::Internal(
+                    "transient in-memory fs watch ack failure".into(),
+                ));
+            }
             let mut events = self.events.lock().await;
             let event = events
                 .iter_mut()
@@ -1701,6 +1837,11 @@ mod tests {
             library_id: LibraryId,
             limit: i32,
         ) -> Result<Vec<FileWatchEvent>> {
+            if self.fail_next_replay.swap(false, Ordering::SeqCst) {
+                return Err(MediaError::Internal(
+                    "transient in-memory fs watch replay failure".into(),
+                ));
+            }
             let mut events: Vec<_> = self
                 .events
                 .lock()
@@ -2117,6 +2258,218 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fs_watch_service_does_not_ack_active_path_until_retry_succeeds()
+    -> Result<()> {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Active Movie");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let media_path = movie_dir.join("feature.mkv");
+        std::fs::write(&media_path, b"movie").unwrap();
+
+        let harness = runtime_harness(root.clone()).await?;
+        harness
+            .runtime
+            .submit_library_command_and_wait(
+                harness.library_id,
+                LibraryActorCommand::Start {
+                    mode: StartMode::Bulk,
+                    correlation_id: Some(Uuid::now_v7()),
+                },
+            )
+            .await?;
+        assert_eq!(wait_for_records(&harness.queue, 1).await.len(), 1);
+
+        let bus = Arc::new(MemoryFileChangeEventBus::default());
+        let event_bus: Arc<dyn FileChangeEventBus> = bus.clone();
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            harness.runtime.clone();
+        let service: FsWatchService = FsWatchService::with_event_bus(
+            FsWatchConfig {
+                debounce_window: Duration::from_millis(15),
+                max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
+                poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5),
+            },
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+            event_bus,
+        );
+        service
+            .register_library_for_test(
+                harness.library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
+            .await?;
+        service
+            .send_watch_message_for_test(
+                harness.library_id,
+                WatchMessage::Event(
+                    Event::new(EventKind::Modify(ModifyKind::Data(
+                        DataChange::Content,
+                    )))
+                    .add_path(media_path),
+                ),
+            )
+            .await?;
+
+        let durable = wait_for_published_events(&bus, 1).await;
+        time::sleep(Duration::from_millis(75)).await;
+        assert!(!bus.events().await[0].processed);
+        assert!(bus.acked().await.is_empty());
+
+        harness
+            .runtime
+            .submit_library_command_and_wait(
+                harness.library_id,
+                LibraryActorCommand::JobCompleted {
+                    job_id: JobId::new(),
+                    dedupe_key: DedupeKey::FolderScan {
+                        candidate: MediaCandidate::new(
+                            harness.library_id,
+                            normalize_path(&movie_dir)?,
+                        ),
+                    },
+                },
+            )
+            .await?;
+
+        let acked = wait_for_acked_events(&bus, 1).await;
+        assert_eq!(acked[0].id, durable[0].id);
+        service.unregister_library(harness.library_id).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fs_watch_service_does_not_ack_paused_actor_until_resume()
+    -> Result<()> {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Paused Movie");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let media_path = movie_dir.join("feature.mkv");
+        std::fs::write(&media_path, b"movie").unwrap();
+
+        let harness = runtime_harness(root.clone()).await?;
+        harness
+            .runtime
+            .submit_library_command_and_wait(
+                harness.library_id,
+                LibraryActorCommand::Pause,
+            )
+            .await?;
+
+        let bus = Arc::new(MemoryFileChangeEventBus::default());
+        let event_bus: Arc<dyn FileChangeEventBus> = bus.clone();
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            harness.runtime.clone();
+        let service: FsWatchService = FsWatchService::with_event_bus(
+            FsWatchConfig {
+                debounce_window: Duration::from_millis(15),
+                max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
+                poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5),
+            },
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+            event_bus,
+        );
+        service
+            .register_library_for_test(
+                harness.library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
+            .await?;
+        service
+            .send_watch_message_for_test(
+                harness.library_id,
+                WatchMessage::Event(
+                    Event::new(EventKind::Create(CreateKind::File))
+                        .add_path(media_path),
+                ),
+            )
+            .await?;
+
+        let durable = wait_for_published_events(&bus, 1).await;
+        time::sleep(Duration::from_millis(75)).await;
+        assert!(!bus.events().await[0].processed);
+        assert!(bus.acked().await.is_empty());
+
+        harness
+            .runtime
+            .submit_library_command_and_wait(
+                harness.library_id,
+                LibraryActorCommand::Resume,
+            )
+            .await?;
+        let acked = wait_for_acked_events(&bus, 1).await;
+        assert_eq!(acked[0].id, durable[0].id);
+
+        service.unregister_library(harness.library_id).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fs_watch_service_retries_after_enqueue_failure_and_acks_once()
+    -> Result<()> {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Retry Enqueue Movie");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let media_path = movie_dir.join("feature.mkv");
+        std::fs::write(&media_path, b"movie").unwrap();
+
+        let harness = runtime_harness(root.clone()).await?;
+        harness.queue.fail_next_enqueue();
+        let bus = Arc::new(MemoryFileChangeEventBus::default());
+        let event_bus: Arc<dyn FileChangeEventBus> = bus.clone();
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            harness.runtime.clone();
+        let service: FsWatchService = FsWatchService::with_event_bus(
+            FsWatchConfig {
+                debounce_window: Duration::from_millis(15),
+                max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
+                poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5),
+            },
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+            event_bus,
+        );
+        service
+            .register_library_for_test(
+                harness.library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
+            .await?;
+        service
+            .send_watch_message_for_test(
+                harness.library_id,
+                WatchMessage::Event(
+                    Event::new(EventKind::Create(CreateKind::File))
+                        .add_path(media_path),
+                ),
+            )
+            .await?;
+
+        let durable = wait_for_published_events(&bus, 1).await;
+        let records = wait_for_records(&harness.queue, 1).await;
+        let acked = wait_for_acked_events(&bus, 1).await;
+        assert_eq!(records.len(), 1);
+        assert_eq!(harness.queue.enqueue_attempts(), 2);
+        assert_eq!(acked[0].id, durable[0].id);
+        time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(harness.queue.records().await.len(), 1);
+        assert_eq!(bus.acked().await, vec![durable[0].id]);
+
+        service.unregister_library(harness.library_id).await;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn fs_watch_service_replays_unacked_events_on_register() -> Result<()>
     {
         let tmp = tempdir().unwrap();
@@ -2157,6 +2510,114 @@ mod tests {
         assert!(matches!(commands[0], LibraryActorCommand::FsEvents { .. }));
         assert_eq!(bus.acked().await, vec![stored.id]);
         assert!(bus.events().await[0].processed);
+        service.unregister_library(library_id).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fs_watch_service_recovers_from_transient_initial_replay_failure()
+    -> Result<()> {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Durable Replay");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let media_path = movie_dir.join("feature.mkv");
+        std::fs::write(&media_path, b"movie").unwrap();
+
+        let library_id = LibraryId::new();
+        let bus = Arc::new(MemoryFileChangeEventBus::default());
+        let stored = durable_event(
+            library_id,
+            &root,
+            &media_path,
+            FileWatchEventType::Created,
+        )?;
+        assert!(bus.publish(stored.clone()).await?);
+        bus.fail_next_replay();
+
+        let event_bus: Arc<dyn FileChangeEventBus> = bus.clone();
+        let executor = RecordingCommandExecutor::default();
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            Arc::new(executor.clone());
+        let service: FsWatchService = FsWatchService::with_event_bus(
+            FsWatchConfig {
+                debounce_window: Duration::from_millis(10),
+                max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
+                poll_interval: Duration::from_millis(40),
+                poll_backoff_max: Duration::from_secs(1),
+            },
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+            event_bus,
+        );
+
+        service
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
+            .await?;
+        assert_eq!(service.runtime_snapshot().await.registered_libraries, 1);
+
+        let events = wait_for_acked_events(&bus, 1).await;
+        assert_eq!(events[0].id, stored.id);
+        assert_eq!(executor.commands().await.len(), 1);
+        service.unregister_library(library_id).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fs_watch_service_retries_retained_batch_after_ack_failure()
+    -> Result<()> {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Durable Ack");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let media_path = movie_dir.join("feature.mkv");
+        std::fs::write(&media_path, b"movie").unwrap();
+
+        let library_id = LibraryId::new();
+        let bus = Arc::new(MemoryFileChangeEventBus::default());
+        bus.fail_next_ack();
+        let event_bus: Arc<dyn FileChangeEventBus> = bus.clone();
+        let executor = RecordingCommandExecutor::default();
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            Arc::new(executor.clone());
+        let service: FsWatchService = FsWatchService::with_event_bus(
+            FsWatchConfig {
+                debounce_window: Duration::from_millis(15),
+                max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
+                poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5),
+            },
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+            event_bus,
+        );
+
+        service
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
+            .await?;
+        service
+            .send_watch_message_for_test(
+                library_id,
+                WatchMessage::Event(
+                    Event::new(EventKind::Modify(ModifyKind::Data(
+                        DataChange::Content,
+                    )))
+                    .add_path(media_path),
+                ),
+            )
+            .await?;
+
+        let commands = wait_for_commands(&executor, 2).await;
+        assert_eq!(commands.len(), 2, "the retained batch should be retried");
+        assert_eq!(wait_for_acked_events(&bus, 1).await.len(), 1);
         service.unregister_library(library_id).await;
         Ok(())
     }
